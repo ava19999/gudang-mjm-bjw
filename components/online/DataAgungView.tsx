@@ -391,6 +391,20 @@ export const DataAgungView: React.FC<DataAgungViewProps> = ({ items, onRefresh, 
 
   return (
     <div className="p-4 space-y-6">
+      {/* Mobile Warning - Desktop Only Feature */}
+      <div className="md:hidden bg-yellow-900/30 border border-yellow-700 rounded-xl p-6 text-center">
+        <Package size={48} className="mx-auto text-yellow-400 mb-4" />
+        <h2 className="text-xl font-bold text-yellow-300 mb-2">Akses Desktop Diperlukan</h2>
+        <p className="text-gray-300 mb-4">
+          Fitur Data Agung hanya dapat diakses melalui desktop untuk pengalaman terbaik dan navigasi keyboard yang optimal.
+        </p>
+        <p className="text-sm text-gray-400">
+          Silakan buka aplikasi ini di komputer atau laptop untuk menggunakan fitur ini.
+        </p>
+      </div>
+
+      {/* Desktop Content */}
+      <div className="hidden md:block space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-100">Data Agung - Manajemen Online</h1>
@@ -531,7 +545,7 @@ export const DataAgungView: React.FC<DataAgungViewProps> = ({ items, onRefresh, 
               />
             </div>
           </div>
-          <div className="p-4 max-h-96 overflow-y-auto">
+          <div className="p-4 max-h-[600px] overflow-y-auto">
             {filteredBaseWarehouse.length === 0 ? (
               <p className="text-gray-500 text-sm text-center py-8">Tidak ada barang kosong</p>
             ) : (
@@ -596,7 +610,7 @@ export const DataAgungView: React.FC<DataAgungViewProps> = ({ items, onRefresh, 
               />
             </div>
           </div>
-          <div className="p-4 max-h-96 overflow-y-auto">
+          <div className="p-4 max-h-[600px] overflow-y-auto">
             {filteredOnlineProducts.length === 0 ? (
               <p className="text-gray-500 text-sm text-center py-8">Belum ada produk online</p>
             ) : (
@@ -669,7 +683,7 @@ export const DataAgungView: React.FC<DataAgungViewProps> = ({ items, onRefresh, 
               />
             </div>
           </div>
-          <div className="p-4 max-h-96 overflow-y-auto">
+          <div className="p-4 max-h-[600px] overflow-y-auto">
             {filteredProdukKosong.length === 0 ? (
               <p className="text-gray-500 text-sm text-center py-8">Tidak ada produk kosong</p>
             ) : (
@@ -742,7 +756,7 @@ export const DataAgungView: React.FC<DataAgungViewProps> = ({ items, onRefresh, 
               />
             </div>
           </div>
-          <div className="p-4 max-h-96 overflow-y-auto">
+          <div className="p-4 max-h-[600px] overflow-y-auto">
             {filteredTableMasuk.length === 0 ? (
               <p className="text-gray-500 text-sm text-center py-8">Tidak ada produk masuk</p>
             ) : (
@@ -809,7 +823,7 @@ export const DataAgungView: React.FC<DataAgungViewProps> = ({ items, onRefresh, 
             <div className="p-6 space-y-4">
               <div>
                 <label className="block text-sm font-semibold text-gray-300 mb-2">
-                  Pilih Produk dari Inventory
+                  Pilih Produk dari Data Pusat (Base Warehouse)
                 </label>
                 <select
                   value={selectedPartNumber}
@@ -817,12 +831,15 @@ export const DataAgungView: React.FC<DataAgungViewProps> = ({ items, onRefresh, 
                   className="w-full bg-gray-900 text-gray-100 px-4 py-2 rounded-lg border border-gray-700 focus:outline-none focus:ring-2 focus:ring-green-500"
                 >
                   <option value="">-- Pilih Produk --</option>
-                  {items.map(item => (
+                  {baseWarehouseItems.map(item => (
                     <option key={item.id} value={item.partNumber}>
                       {item.partNumber} - {item.name} (Qty: {item.quantity})
                     </option>
                   ))}
                 </select>
+                <p className="text-xs text-gray-500 mt-2">
+                  * Hanya menampilkan produk dari Base Warehouse (Qty = 0)
+                </p>
               </div>
               <div className="flex gap-3">
                 <button
@@ -845,6 +862,7 @@ export const DataAgungView: React.FC<DataAgungViewProps> = ({ items, onRefresh, 
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 };
