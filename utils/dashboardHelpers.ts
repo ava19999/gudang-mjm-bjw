@@ -3,16 +3,18 @@ import { StockHistory } from '../types';
 import { Store } from 'lucide-react';
 
 export const formatRupiah = (num: number) => {
-  const displayValue = num < 1000 && num > 0 ? num * 1000 : num;
+  const absNum = Math.abs(num);
+  const displayValue = absNum < 1000 && absNum > 0 ? num * 1000 : num;
   return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(displayValue || 0);
 };
 
 export const formatCompactNumber = (num: number, isCurrency = true) => { 
   const n = num || 0;
-  // Adjust value if less than 1000
-  const displayValue = n < 1000 && n > 0 ? n * 1000 : n;
-  if (displayValue >= 1000000000) return (displayValue / 1000000000).toFixed(1) + 'M'; 
-  if (displayValue >= 1000000) return (displayValue / 1000000).toFixed(1) + 'jt'; 
+  const absN = Math.abs(n);
+  // Adjust value if absolute value is less than 1000
+  const displayValue = absN < 1000 && absN > 0 ? n * 1000 : n;
+  if (Math.abs(displayValue) >= 1000000000) return (displayValue / 1000000000).toFixed(1) + 'M'; 
+  if (Math.abs(displayValue) >= 1000000) return (displayValue / 1000000).toFixed(1) + 'jt'; 
   return isCurrency ? formatRupiah(n) : new Intl.NumberFormat('id-ID', { maximumFractionDigits: 0 }).format(displayValue); 
 };
 
