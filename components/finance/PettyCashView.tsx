@@ -276,12 +276,12 @@ export const PettyCashView: React.FC = () => {
         </div>
 
         {/* Balance Card with Action Buttons */}
-        <div className="bg-gradient-to-br from-green-600 to-green-800 rounded-2xl p-6 mb-6 shadow-xl">
+        <div className="bg-gradient-to-br from-green-600 to-green-800 rounded-2xl p-4 pl-8 sm:p-6 mb-6 shadow-xl">
           <div className="flex justify-between items-start flex-wrap gap-4">
-            <div className="flex-1">
-              <p className="text-green-100 text-sm font-medium mb-3">Saldo Saat Ini</p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-2">
-                <div className="bg-white/10 rounded-xl p-4 backdrop-blur-sm">
+            <div className="flex-1 min-w-0">
+              <p className="text-green-100 text-sm font-medium mb-3 ml-2 sm:ml-0">Saldo Saat Ini</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-2">
+                <div className="bg-white/10 rounded-xl p-4 pl-6 sm:pl-4 backdrop-blur-sm">
                   <div className="flex items-center gap-2 mb-2">
                     <Wallet size={20} className="text-green-100" />
                     <p className="text-green-100 text-xs font-medium">Kas</p>
@@ -290,7 +290,7 @@ export const PettyCashView: React.FC = () => {
                     Rp {currentCashBalance.toLocaleString('id-ID')}
                   </p>
                 </div>
-                <div className="bg-white/10 rounded-xl p-4 backdrop-blur-sm">
+                <div className="bg-white/10 rounded-xl p-4 pl-6 sm:pl-4 backdrop-blur-sm">
                   <div className="flex items-center gap-2 mb-2">
                     <CreditCard size={20} className="text-green-100" />
                     <p className="text-green-100 text-xs font-medium">Rekening</p>
@@ -300,7 +300,7 @@ export const PettyCashView: React.FC = () => {
                   </p>
                 </div>
               </div>
-              <div className="bg-white/10 rounded-xl p-3 backdrop-blur-sm">
+              <div className="bg-white/10 rounded-xl p-3 pl-6 sm:pl-3 backdrop-blur-sm">
                 <p className="text-green-100 text-xs font-medium mb-1">Total Saldo</p>
                 <p className="text-3xl font-bold text-white">
                   Rp {currentBalance.toLocaleString('id-ID')}
