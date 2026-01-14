@@ -1,12 +1,13 @@
 // FILE: src/utils.ts
 
 export const formatRupiah = (amount: number): string => {
+  const displayValue = amount < 1000 && amount > 0 ? amount * 1000 : amount;
   return new Intl.NumberFormat('id-ID', {
     style: 'currency',
     currency: 'IDR',
     minimumFractionDigits: 0,
     maximumFractionDigits: 0
-  }).format(amount);
+  }).format(displayValue);
 };
 
 export const generateId = (): string => {

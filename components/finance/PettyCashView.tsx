@@ -36,8 +36,10 @@ const FREQUENT_DESCRIPTIONS = [
 ];
 
 // Format currency with thousands separators and trailing zeros
+// If the value is less than 1000, multiply by 1000 to show proper thousands
 const formatCurrency = (amount: number): string => {
-  return amount.toLocaleString('id-ID', {
+  const displayValue = amount < 1000 && amount > 0 ? amount * 1000 : amount;
+  return displayValue.toLocaleString('id-ID', {
     minimumFractionDigits: 0,
     maximumFractionDigits: 0
   });

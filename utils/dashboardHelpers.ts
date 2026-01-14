@@ -2,14 +2,18 @@
 import { StockHistory } from '../types';
 import { Store } from 'lucide-react';
 
-export const formatRupiah = (num: number) => 
-  new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(num || 0);
+export const formatRupiah = (num: number) => {
+  const displayValue = num < 1000 && num > 0 ? num * 1000 : num;
+  return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(displayValue || 0);
+};
 
 export const formatCompactNumber = (num: number, isCurrency = true) => { 
-  const n = num || 0; 
-  if (n >= 1000000000) return (n / 1000000000).toFixed(1) + 'M'; 
-  if (n >= 1000000) return (n / 1000000).toFixed(1) + 'jt'; 
-  return isCurrency ? formatRupiah(n) : new Intl.NumberFormat('id-ID', { maximumFractionDigits: 0 }).format(n); 
+  const n = num || 0;
+  // Adjust value if less than 1000
+  const displayValue = n < 1000 && n > 0 ? n * 1000 : n;
+  if (displayValue >= 1000000000) return (displayValue / 1000000000).toFixed(1) + 'M'; 
+  if (displayValue >= 1000000) return (displayValue / 1000000).toFixed(1) + 'jt'; 
+  return isCurrency ? formatRupiah(n) : new Intl.NumberFormat('id-ID', { maximumFractionDigits: 0 }).format(displayValue); 
 };
 
 export const getItemCardStyle = (qty: number) => {
