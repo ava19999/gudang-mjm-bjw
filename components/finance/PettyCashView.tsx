@@ -56,6 +56,9 @@ export const PettyCashView: React.FC = () => {
   const [filterDateFrom, setFilterDateFrom] = useState('');
   const [filterDateTo, setFilterDateTo] = useState('');
   
+  // Mobile toggle state
+  const [mobileActiveView, setMobileActiveView] = useState<'cash' | 'bank'>('cash');
+  
   // Refs for keyboard navigation
   const dateInputRef = useRef<HTMLInputElement>(null);
   const descriptionInputRef = useRef<HTMLInputElement>(null);
@@ -108,11 +111,23 @@ export const PettyCashView: React.FC = () => {
     }
   }, [formDescription, showSuggestions]);
   
-  const currentBalance = entries.length > 0 
-    ? entries.reduce((max, entry) => 
-        entry.createdAt > max.createdAt ? entry : max, entries[0]
+  // Calculate separate balances for cash and bank
+  const cashEntries = entries.filter(e => e.accountType === 'cash');
+  const bankEntries = entries.filter(e => e.accountType === 'bank');
+  
+  const currentCashBalance = cashEntries.length > 0 
+    ? cashEntries.reduce((max, entry) => 
+        entry.createdAt > max.createdAt ? entry : max, cashEntries[0]
       ).balance
     : 0;
+    
+  const currentBankBalance = bankEntries.length > 0 
+    ? bankEntries.reduce((max, entry) => 
+        entry.createdAt > max.createdAt ? entry : max, bankEntries[0]
+      ).balance
+    : 0;
+    
+  const currentBalance = currentCashBalance + currentBankBalance;
   
   // Filter entries based on filter criteria
   const filteredEntries = entries.filter(entry => {
@@ -135,9 +150,11 @@ export const PettyCashView: React.FC = () => {
       return;
     }
     
-    const previousBalance = entries.length > 0 
-      ? entries.reduce((max, entry) => 
-          entry.createdAt > max.createdAt ? entry : max, entries[0]
+    // Calculate previous balance based on account type
+    const accountEntries = entries.filter(e => e.accountType === formAccountType);
+    const previousBalance = accountEntries.length > 0 
+      ? accountEntries.reduce((max, entry) => 
+          entry.createdAt > max.createdAt ? entry : max, accountEntries[0]
         ).balance
       : 0;
     const newBalance = formType === 'in' 
@@ -261,11 +278,34 @@ export const PettyCashView: React.FC = () => {
         {/* Balance Card with Action Buttons */}
         <div className="bg-gradient-to-br from-green-600 to-green-800 rounded-2xl p-6 mb-6 shadow-xl">
           <div className="flex justify-between items-start flex-wrap gap-4">
-            <div>
-              <p className="text-green-100 text-sm font-medium mb-1">Saldo Saat Ini</p>
-              <p className="text-4xl font-bold text-white">
-                Rp {currentBalance.toLocaleString('id-ID')}
-              </p>
+            <div className="flex-1">
+              <p className="text-green-100 text-sm font-medium mb-3">Saldo Saat Ini</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-2">
+                <div className="bg-white/10 rounded-xl p-4 backdrop-blur-sm">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Wallet size={20} className="text-green-100" />
+                    <p className="text-green-100 text-xs font-medium">Kas</p>
+                  </div>
+                  <p className="text-2xl font-bold text-white">
+                    Rp {currentCashBalance.toLocaleString('id-ID')}
+                  </p>
+                </div>
+                <div className="bg-white/10 rounded-xl p-4 backdrop-blur-sm">
+                  <div className="flex items-center gap-2 mb-2">
+                    <CreditCard size={20} className="text-green-100" />
+                    <p className="text-green-100 text-xs font-medium">Rekening</p>
+                  </div>
+                  <p className="text-2xl font-bold text-white">
+                    Rp {currentBankBalance.toLocaleString('id-ID')}
+                  </p>
+                </div>
+              </div>
+              <div className="bg-white/10 rounded-xl p-3 backdrop-blur-sm">
+                <p className="text-green-100 text-xs font-medium mb-1">Total Saldo</p>
+                <p className="text-3xl font-bold text-white">
+                  Rp {currentBalance.toLocaleString('id-ID')}
+                </p>
+              </div>
             </div>
             <div className="flex gap-2 flex-wrap">
               <button 
@@ -361,72 +401,171 @@ export const PettyCashView: React.FC = () => {
           )}
         </div>
 
-        {/* Entries List */}
-        <div className="bg-gray-800 rounded-2xl border border-gray-700 overflow-hidden print:border-gray-400">
-          <div className="p-4 border-b border-gray-700 print:border-gray-400">
-            <div className="flex justify-between items-center">
-              <h2 className="text-lg font-semibold text-gray-100 print:text-gray-900">Riwayat Transaksi</h2>
-              <span className="text-sm text-gray-400 print:text-gray-700">
-                {filteredEntries.length} transaksi
-              </span>
-            </div>
+        {/* Mobile Toggle for Cash/Bank View */}
+        <div className="lg:hidden mb-4">
+          <div className="bg-gray-800 rounded-xl p-2 border border-gray-700 flex gap-2">
+            <button
+              onClick={() => setMobileActiveView('cash')}
+              className={`flex-1 px-4 py-3 rounded-lg font-medium transition-all flex items-center justify-center gap-2 ${
+                mobileActiveView === 'cash'
+                  ? 'bg-blue-600 text-white'
+                  : 'text-gray-400 hover:text-gray-200'
+              }`}
+            >
+              <Wallet size={18} />
+              <span>Kas</span>
+            </button>
+            <button
+              onClick={() => setMobileActiveView('bank')}
+              className={`flex-1 px-4 py-3 rounded-lg font-medium transition-all flex items-center justify-center gap-2 ${
+                mobileActiveView === 'bank'
+                  ? 'bg-purple-600 text-white'
+                  : 'text-gray-400 hover:text-gray-200'
+              }`}
+            >
+              <CreditCard size={18} />
+              <span>Rekening</span>
+            </button>
           </div>
-          
-          {filteredEntries.length === 0 ? (
-            <div className="p-12 text-center print:hidden">
-              <Wallet size={48} className="text-gray-600 mx-auto mb-4" />
-              <p className="text-gray-400 text-lg font-medium mb-2">
-                {entries.length === 0 ? 'Belum ada transaksi' : 'Tidak ada transaksi yang sesuai filter'}
-              </p>
-              <p className="text-gray-500 text-sm">
-                {entries.length === 0 
-                  ? 'Klik tombol "Tambah" untuk membuat transaksi pertama'
-                  : 'Coba ubah filter untuk melihat transaksi lainnya'}
-              </p>
-            </div>
-          ) : (
-            <div className="divide-y divide-gray-700 print:divide-gray-300">
-              {filteredEntries.map((entry) => (
-                <div key={entry.id} className="p-4 hover:bg-gray-750 transition-colors print:hover:bg-white print:py-2">
-                  <div className="flex justify-between items-start">
-                    <div className="flex items-start gap-3">
-                      <div className={`p-2 rounded-lg print:hidden ${
-                        entry.type === 'in' 
-                          ? 'bg-green-900/30 text-green-400' 
-                          : 'bg-red-900/30 text-red-400'
-                      }`}>
-                        {entry.type === 'in' ? (
-                          <ArrowDownRight size={20} />
-                        ) : (
-                          <ArrowUpRight size={20} />
-                        )}
-                      </div>
-                      <div>
-                        <p className="text-gray-100 font-medium print:text-gray-900">{entry.description}</p>
-                        <div className="flex items-center gap-2 mt-1 flex-wrap">
-                          <Calendar size={14} className="text-gray-500 print:text-gray-700" />
-                          <p className="text-xs text-gray-400 print:text-gray-700">{entry.date}</p>
-                          <span className="text-xs px-2 py-0.5 rounded bg-gray-700 text-gray-300 print:bg-gray-200 print:text-gray-800">
-                            {entry.accountType === 'cash' ? 'Kas' : 'Rekening'}
-                          </span>
+        </div>
+
+        {/* Entries List - Desktop: Two Columns, Mobile: Toggle View */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Cash Entries */}
+          <div className={`${mobileActiveView === 'bank' ? 'hidden lg:block' : ''}`}>
+            <div className="bg-gray-800 rounded-2xl border border-gray-700 overflow-hidden print:border-gray-400">
+              <div className="p-4 border-b border-gray-700 print:border-gray-400 bg-gradient-to-r from-blue-600/20 to-blue-800/20">
+                <div className="flex justify-between items-center">
+                  <div className="flex items-center gap-2">
+                    <Wallet size={20} className="text-blue-400" />
+                    <h2 className="text-lg font-semibold text-gray-100 print:text-gray-900">Kas</h2>
+                  </div>
+                  <span className="text-sm text-gray-400 print:text-gray-700">
+                    {filteredEntries.filter(e => e.accountType === 'cash').length} transaksi
+                  </span>
+                </div>
+              </div>
+              
+              {filteredEntries.filter(e => e.accountType === 'cash').length === 0 ? (
+                <div className="p-12 text-center print:hidden">
+                  <Wallet size={48} className="text-gray-600 mx-auto mb-4" />
+                  <p className="text-gray-400 text-lg font-medium mb-2">
+                    Belum ada transaksi kas
+                  </p>
+                  <p className="text-gray-500 text-sm">
+                    Klik tombol "Tambah" untuk membuat transaksi
+                  </p>
+                </div>
+              ) : (
+                <div className="divide-y divide-gray-700 print:divide-gray-300 max-h-[600px] overflow-y-auto">
+                  {filteredEntries.filter(e => e.accountType === 'cash').map((entry) => (
+                    <div key={entry.id} className="p-4 hover:bg-gray-750 transition-colors print:hover:bg-white print:py-2">
+                      <div className="flex justify-between items-start">
+                        <div className="flex items-start gap-3">
+                          <div className={`p-2 rounded-lg print:hidden ${
+                            entry.type === 'in' 
+                              ? 'bg-green-900/30 text-green-400' 
+                              : 'bg-red-900/30 text-red-400'
+                          }`}>
+                            {entry.type === 'in' ? (
+                              <ArrowDownRight size={20} />
+                            ) : (
+                              <ArrowUpRight size={20} />
+                            )}
+                          </div>
+                          <div>
+                            <p className="text-gray-100 font-medium print:text-gray-900">{entry.description}</p>
+                            <div className="flex items-center gap-2 mt-1 flex-wrap">
+                              <Calendar size={14} className="text-gray-500 print:text-gray-700" />
+                              <p className="text-xs text-gray-400 print:text-gray-700">{entry.date}</p>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <p className={`text-lg font-bold ${
+                            entry.type === 'in' ? 'text-green-400 print:text-green-700' : 'text-red-400 print:text-red-700'
+                          }`}>
+                            {entry.type === 'in' ? '+' : '-'} Rp {entry.amount.toLocaleString('id-ID')}
+                          </p>
+                          <p className="text-xs text-gray-500 mt-1 print:text-gray-700">
+                            Saldo: Rp {entry.balance.toLocaleString('id-ID')}
+                          </p>
                         </div>
                       </div>
                     </div>
-                    <div className="text-right">
-                      <p className={`text-lg font-bold ${
-                        entry.type === 'in' ? 'text-green-400 print:text-green-700' : 'text-red-400 print:text-red-700'
-                      }`}>
-                        {entry.type === 'in' ? '+' : '-'} Rp {entry.amount.toLocaleString('id-ID')}
-                      </p>
-                      <p className="text-xs text-gray-500 mt-1 print:text-gray-700">
-                        Saldo: Rp {entry.balance.toLocaleString('id-ID')}
-                      </p>
-                    </div>
-                  </div>
+                  ))}
                 </div>
-              ))}
+              )}
             </div>
-          )}
+          </div>
+
+          {/* Bank Entries */}
+          <div className={`${mobileActiveView === 'cash' ? 'hidden lg:block' : ''}`}>
+            <div className="bg-gray-800 rounded-2xl border border-gray-700 overflow-hidden print:border-gray-400">
+              <div className="p-4 border-b border-gray-700 print:border-gray-400 bg-gradient-to-r from-purple-600/20 to-purple-800/20">
+                <div className="flex justify-between items-center">
+                  <div className="flex items-center gap-2">
+                    <CreditCard size={20} className="text-purple-400" />
+                    <h2 className="text-lg font-semibold text-gray-100 print:text-gray-900">Rekening</h2>
+                  </div>
+                  <span className="text-sm text-gray-400 print:text-gray-700">
+                    {filteredEntries.filter(e => e.accountType === 'bank').length} transaksi
+                  </span>
+                </div>
+              </div>
+              
+              {filteredEntries.filter(e => e.accountType === 'bank').length === 0 ? (
+                <div className="p-12 text-center print:hidden">
+                  <CreditCard size={48} className="text-gray-600 mx-auto mb-4" />
+                  <p className="text-gray-400 text-lg font-medium mb-2">
+                    Belum ada transaksi rekening
+                  </p>
+                  <p className="text-gray-500 text-sm">
+                    Klik tombol "Tambah" untuk membuat transaksi
+                  </p>
+                </div>
+              ) : (
+                <div className="divide-y divide-gray-700 print:divide-gray-300 max-h-[600px] overflow-y-auto">
+                  {filteredEntries.filter(e => e.accountType === 'bank').map((entry) => (
+                    <div key={entry.id} className="p-4 hover:bg-gray-750 transition-colors print:hover:bg-white print:py-2">
+                      <div className="flex justify-between items-start">
+                        <div className="flex items-start gap-3">
+                          <div className={`p-2 rounded-lg print:hidden ${
+                            entry.type === 'in' 
+                              ? 'bg-green-900/30 text-green-400' 
+                              : 'bg-red-900/30 text-red-400'
+                          }`}>
+                            {entry.type === 'in' ? (
+                              <ArrowDownRight size={20} />
+                            ) : (
+                              <ArrowUpRight size={20} />
+                            )}
+                          </div>
+                          <div>
+                            <p className="text-gray-100 font-medium print:text-gray-900">{entry.description}</p>
+                            <div className="flex items-center gap-2 mt-1 flex-wrap">
+                              <Calendar size={14} className="text-gray-500 print:text-gray-700" />
+                              <p className="text-xs text-gray-400 print:text-gray-700">{entry.date}</p>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <p className={`text-lg font-bold ${
+                            entry.type === 'in' ? 'text-green-400 print:text-green-700' : 'text-red-400 print:text-red-700'
+                          }`}>
+                            {entry.type === 'in' ? '+' : '-'} Rp {entry.amount.toLocaleString('id-ID')}
+                          </p>
+                          <p className="text-xs text-gray-500 mt-1 print:text-gray-700">
+                            Saldo: Rp {entry.balance.toLocaleString('id-ID')}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       </div>
 
