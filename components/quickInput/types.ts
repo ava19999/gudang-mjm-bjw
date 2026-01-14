@@ -19,3 +19,21 @@ export interface QuickInputRow {
     error?: string;
     isLoading?: boolean;
 }
+
+export interface BarangKeluarRow {
+    id: number;
+    tanggal: string; // Date in YYYY-MM-DD format
+    tempo: string; // Payment terms (CASH, 3 BLN, 2 BLN, 1 BLN, NADIR)
+    customer: string;
+    partNumber: string; // Number part
+    namaBarang: string; // Barang
+    brand?: string; // Brand
+    aplikasi?: string; // Aplikasi
+    rak?: string; // Rak
+    qtySaatIni?: number; // Qty saat ini (current stock)
+    qtyKeluar: number; // Qty keluar (outgoing quantity)
+    totalHargaKeluar: number; // Total harga keluar
+    hargaSatuan: number; // Total harga satuan (calculated: totalHargaKeluar / qtyKeluar)
+    error?: string;
+    isLoading?: boolean;
+}

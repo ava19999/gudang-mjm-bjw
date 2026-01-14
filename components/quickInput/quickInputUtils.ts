@@ -1,5 +1,5 @@
 // FILE: src/components/quickInput/quickInputUtils.ts
-import { QuickInputRow } from './types';
+import { QuickInputRow, BarangKeluarRow } from './types';
 
 // Helper to get today's date in YYYY-MM-DD format
 const getTodayDate = (): string => {
@@ -26,6 +26,22 @@ export const createEmptyRow = (id: number): QuickInputRow => ({
     resiTempo: '',
 });
 
+export const createEmptyBarangKeluarRow = (id: number): BarangKeluarRow => ({
+    id,
+    tanggal: getTodayDate(),
+    tempo: 'CASH',
+    customer: '',
+    partNumber: '',
+    namaBarang: '',
+    brand: '',
+    aplikasi: '',
+    rak: '',
+    qtySaatIni: 0,
+    qtyKeluar: 0,
+    totalHargaKeluar: 0,
+    hargaSatuan: 0,
+});
+
 export const checkIsRowComplete = (row: QuickInputRow) => {
     // Required fields for Input Barang:
     // - Tanggal (Date)
@@ -43,5 +59,25 @@ export const checkIsRowComplete = (row: QuickInputRow) => {
         !!row.namaBarang && 
         row.qtyMasuk > 0 &&
         row.totalHarga > 0
+    );
+};
+
+export const checkIsBarangKeluarRowComplete = (row: BarangKeluarRow) => {
+    // Required fields for Barang Keluar:
+    // - Tanggal (Date)
+    // - Tempo (Payment terms)
+    // - Customer
+    // - Part Number & Nama Barang
+    // - Qty Keluar (Must be > 0)
+    // - Total Harga Keluar (Must be > 0)
+    
+    return (
+        !!row.tanggal &&
+        !!row.tempo &&
+        !!row.customer.trim() &&
+        !!row.partNumber && 
+        !!row.namaBarang && 
+        row.qtyKeluar > 0 &&
+        row.totalHargaKeluar > 0
     );
 };
