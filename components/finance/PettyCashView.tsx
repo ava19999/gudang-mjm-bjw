@@ -2,10 +2,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   Wallet, Plus, Calendar, ArrowUpRight, ArrowDownRight, 
-  Upload, Download, Printer, X, Check, AlertCircle, 
+  Download, Printer, X, Check, 
   Keyboard, Search, Filter
 } from 'lucide-react';
-import { generateId, parseCSV } from '../../utils';
+import { generateId } from '../../utils';
 
 interface PettyCashEntry {
   id: string;
@@ -15,13 +15,7 @@ interface PettyCashEntry {
   amount: number;
   balance: number;
   createdAt: number;
-}
-
-interface CSVPreviewEntry {
-  date: string;
-  description: string;
-  type: 'in' | 'out';
-  amount: number;
+  accountType: 'cash' | 'bank';
 }
 
 // Frequently used descriptions for autocomplete
@@ -44,25 +38,21 @@ const FREQUENT_DESCRIPTIONS = [
 export const PettyCashView: React.FC = () => {
   const [entries, setEntries] = useState<PettyCashEntry[]>([]);
   const [isAdding, setIsAdding] = useState(false);
-  const [isUploadingCSV, setIsUploadingCSV] = useState(false);
   const [showPrintView, setShowPrintView] = useState(false);
   
   // Form states
   const [formDate, setFormDate] = useState('');
   const [formType, setFormType] = useState<'in' | 'out'>('out');
+  const [formAccountType, setFormAccountType] = useState<'cash' | 'bank'>('cash');
   const [formDescription, setFormDescription] = useState('');
   const [formAmount, setFormAmount] = useState('');
   const [filteredSuggestions, setFilteredSuggestions] = useState<string[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(-1);
   
-  // CSV upload states
-  const [csvFile, setCSVFile] = useState<File | null>(null);
-  const [csvErrors, setCSVErrors] = useState<string[]>([]);
-  const [csvPreview, setCSVPreview] = useState<CSVPreviewEntry[]>([]);
-  
   // Filter states
   const [filterType, setFilterType] = useState<'all' | 'in' | 'out'>('all');
+  const [filterAccountType, setFilterAccountType] = useState<'all' | 'cash' | 'bank'>('all');
   const [filterDateFrom, setFilterDateFrom] = useState('');
   const [filterDateTo, setFilterDateTo] = useState('');
   
@@ -97,9 +87,9 @@ export const PettyCashView: React.FC = () => {
       const today = new Date().toISOString().split('T')[0];
       setFormDate(today);
       setFormType('out');
+      setFormAccountType('cash');
       setFormDescription('');
       setFormAmount('');
-      setCSVErrors([]);
       // Focus on date field after modal opens
       setTimeout(() => dateInputRef.current?.focus(), 100);
     }
@@ -127,6 +117,7 @@ export const PettyCashView: React.FC = () => {
   // Filter entries based on filter criteria
   const filteredEntries = entries.filter(entry => {
     if (filterType !== 'all' && entry.type !== filterType) return false;
+    if (filterAccountType !== 'all' && entry.accountType !== filterAccountType) return false;
     if (filterDateFrom && entry.date < filterDateFrom) return false;
     if (filterDateTo && entry.date > filterDateTo) return false;
     return true;
@@ -158,6 +149,7 @@ export const PettyCashView: React.FC = () => {
       date: formDate,
       description: formDescription.trim(),
       type: formType,
+      accountType: formAccountType,
       amount,
       balance: newBalance,
       createdAt: Date.now(),
@@ -215,131 +207,17 @@ export const PettyCashView: React.FC = () => {
     }
   };
   
-  const handleCSVUpload = (file: File) => {
-    setCSVFile(file);
-    setCSVErrors([]);
-    setCSVPreview([]);
-    
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      try {
-        const text = e.target?.result as string;
-        const parsed = parseCSV(text);
-        
-        const errors: string[] = [];
-        const validEntries: CSVPreviewEntry[] = [];
-        
-        parsed.forEach((row, index) => {
-          const lineNum = index + 2; // +2 because index starts at 0 and we skip header
-          
-          // Validate required fields
-          if (!row.date && !row.tanggal) {
-            errors.push(`Baris ${lineNum}: Kolom tanggal tidak ditemukan`);
-            return;
-          }
-          if (!row.description && !row.keterangan) {
-            errors.push(`Baris ${lineNum}: Kolom keterangan tidak ditemukan`);
-            return;
-          }
-          if (!row.type && !row.tipe) {
-            errors.push(`Baris ${lineNum}: Kolom tipe tidak ditemukan`);
-            return;
-          }
-          if (!row.amount && !row.jumlah) {
-            errors.push(`Baris ${lineNum}: Kolom jumlah tidak ditemukan`);
-            return;
-          }
-          
-          const date = row.date || row.tanggal;
-          const description = row.description || row.keterangan;
-          const type = (row.type || row.tipe).toLowerCase();
-          const amountStr = row.amount || row.jumlah;
-          
-          // Validate date format
-          if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-            errors.push(`Baris ${lineNum}: Format tanggal harus YYYY-MM-DD`);
-            return;
-          }
-          
-          // Validate type
-          if (type !== 'in' && type !== 'out') {
-            errors.push(`Baris ${lineNum}: Tipe harus 'in' atau 'out'`);
-            return;
-          }
-          
-          // Validate amount
-          const amount = parseFloat(amountStr.replace(/[^\d.-]/g, ''));
-          if (isNaN(amount) || amount <= 0) {
-            errors.push(`Baris ${lineNum}: Jumlah harus berupa angka positif`);
-            return;
-          }
-          
-          validEntries.push({
-            date,
-            description,
-            type: type as 'in' | 'out',
-            amount,
-          });
-        });
-        
-        setCSVErrors(errors);
-        setCSVPreview(validEntries);
-        
-      } catch (error) {
-        setCSVErrors(['Gagal membaca file CSV. Pastikan format file benar.']);
-      }
-    };
-    
-    reader.readAsText(file);
-  };
-  
-  const handleImportCSV = () => {
-    if (csvPreview.length === 0) return;
-    
-    let currentBalance = entries.length > 0 
-      ? entries.reduce((max, entry) => 
-          entry.createdAt > max.createdAt ? entry : max, entries[0]
-        ).balance
-      : 0;
-    const newEntries: PettyCashEntry[] = [];
-    
-    csvPreview.forEach(item => {
-      currentBalance = item.type === 'in' 
-        ? currentBalance + item.amount 
-        : currentBalance - item.amount;
-      
-      newEntries.push({
-        id: generateId(),
-        date: item.date,
-        description: item.description,
-        type: item.type,
-        amount: item.amount,
-        balance: currentBalance,
-        createdAt: Date.now(),
-      });
-    });
-    
-    setEntries(prev => [...prev, ...newEntries].sort((a, b) => {
-      if (a.date !== b.date) return a.date.localeCompare(b.date);
-      return a.createdAt - b.createdAt;
-    }));
-    
-    setIsUploadingCSV(false);
-    setCSVFile(null);
-    setCSVPreview([]);
-    setCSVErrors([]);
-  };
-  
   const handlePrint = () => {
     window.print();
   };
   
   const handleDownloadCSV = () => {
-    const headers = ['Tanggal', 'Keterangan', 'Tipe', 'Jumlah', 'Saldo'];
+    const headers = ['Tanggal', 'Keterangan', 'Tipe', 'Akun', 'Jumlah', 'Saldo'];
     const rows = filteredEntries.map(entry => [
       entry.date,
       entry.description,
-      entry.type,
+      entry.type === 'in' ? 'Masuk' : 'Keluar',
+      entry.accountType === 'cash' ? 'Kas' : 'Rekening',
       entry.amount,
       entry.balance,
     ]);
@@ -399,14 +277,6 @@ export const PettyCashView: React.FC = () => {
                 <span className="font-medium">Tambah</span>
               </button>
               <button 
-                onClick={() => setIsUploadingCSV(true)}
-                className="bg-white/20 hover:bg-white/30 backdrop-blur-sm text-white px-4 py-2 rounded-xl flex items-center gap-2 transition-all"
-                title="Upload CSV untuk batch input"
-              >
-                <Upload size={20} />
-                <span className="font-medium hidden sm:inline">Upload CSV</span>
-              </button>
-              <button 
                 onClick={handlePrint}
                 className="bg-white/20 hover:bg-white/30 backdrop-blur-sm text-white px-4 py-2 rounded-xl flex items-center gap-2 transition-all"
                 title="Print transaksi"
@@ -432,9 +302,9 @@ export const PettyCashView: React.FC = () => {
             <Filter size={18} className="text-gray-400" />
             <h3 className="text-sm font-semibold text-gray-300">Filter Transaksi</h3>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
             <div>
-              <label className="block text-xs text-gray-400 mb-1">Tipe</label>
+              <label className="block text-xs text-gray-400 mb-1">Tipe Transaksi</label>
               <select 
                 value={filterType}
                 onChange={(e) => setFilterType(e.target.value as any)}
@@ -443,6 +313,18 @@ export const PettyCashView: React.FC = () => {
                 <option value="all">Semua</option>
                 <option value="in">Masuk</option>
                 <option value="out">Keluar</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Akun</label>
+              <select 
+                value={filterAccountType}
+                onChange={(e) => setFilterAccountType(e.target.value as any)}
+                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-gray-100 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+              >
+                <option value="all">Semua</option>
+                <option value="cash">Kas</option>
+                <option value="bank">Rekening</option>
               </select>
             </div>
             <div>
@@ -464,10 +346,11 @@ export const PettyCashView: React.FC = () => {
               />
             </div>
           </div>
-          {(filterType !== 'all' || filterDateFrom || filterDateTo) && (
+          {(filterType !== 'all' || filterAccountType !== 'all' || filterDateFrom || filterDateTo) && (
             <button 
               onClick={() => {
                 setFilterType('all');
+                setFilterAccountType('all');
                 setFilterDateFrom('');
                 setFilterDateTo('');
               }}
@@ -520,9 +403,12 @@ export const PettyCashView: React.FC = () => {
                       </div>
                       <div>
                         <p className="text-gray-100 font-medium print:text-gray-900">{entry.description}</p>
-                        <div className="flex items-center gap-2 mt-1">
+                        <div className="flex items-center gap-2 mt-1 flex-wrap">
                           <Calendar size={14} className="text-gray-500 print:text-gray-700" />
                           <p className="text-xs text-gray-400 print:text-gray-700">{entry.date}</p>
+                          <span className="text-xs px-2 py-0.5 rounded bg-gray-700 text-gray-300 print:bg-gray-200 print:text-gray-800">
+                            {entry.accountType === 'cash' ? 'Kas' : 'Rekening'}
+                          </span>
                         </div>
                       </div>
                     </div>
@@ -601,6 +487,37 @@ export const PettyCashView: React.FC = () => {
                   >
                     <ArrowUpRight size={20} />
                     <span>Keluar</span>
+                  </button>
+                </div>
+              </div>
+              
+              {/* Account Type Selector */}
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-2">
+                  Akun
+                </label>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    onClick={() => setFormAccountType('cash')}
+                    className={`px-4 py-3 rounded-lg border-2 transition-all flex items-center justify-center gap-2 font-medium ${
+                      formAccountType === 'cash'
+                        ? 'border-blue-500 bg-blue-500/20 text-blue-400'
+                        : 'border-gray-600 bg-gray-700 text-gray-300 hover:border-gray-500'
+                    }`}
+                  >
+                    <Wallet size={20} />
+                    <span>Kas</span>
+                  </button>
+                  <button
+                    onClick={() => setFormAccountType('bank')}
+                    className={`px-4 py-3 rounded-lg border-2 transition-all flex items-center justify-center gap-2 font-medium ${
+                      formAccountType === 'bank'
+                        ? 'border-purple-500 bg-purple-500/20 text-purple-400'
+                        : 'border-gray-600 bg-gray-700 text-gray-300 hover:border-gray-500'
+                    }`}
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
+                    <span>Rekening</span>
                   </button>
                 </div>
               </div>
@@ -708,147 +625,6 @@ export const PettyCashView: React.FC = () => {
               >
                 <Check size={20} />
                 Simpan
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* CSV Upload Modal */}
-      {isUploadingCSV && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-gray-800 rounded-2xl p-6 max-w-2xl w-full border border-gray-700 max-h-[90vh] overflow-y-auto">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-xl font-bold text-gray-100">Upload CSV - Batch Input</h3>
-              <button 
-                onClick={() => {
-                  setIsUploadingCSV(false);
-                  setCSVFile(null);
-                  setCSVErrors([]);
-                  setCSVPreview([]);
-                }}
-                className="text-gray-400 hover:text-gray-200 transition-colors"
-              >
-                <X size={24} />
-              </button>
-            </div>
-            
-            {/* CSV Format Help */}
-            <div className="bg-gray-700/50 rounded-lg p-4 mb-4 text-sm text-gray-300">
-              <p className="font-medium mb-2">Format CSV yang dibutuhkan:</p>
-              <div className="bg-gray-900 rounded p-3 font-mono text-xs overflow-x-auto">
-                <div>date,description,type,amount</div>
-                <div>2024-01-15,Pembelian ATK,out,50000</div>
-                <div>2024-01-16,Penerimaan Kas,in,100000</div>
-              </div>
-              <div className="mt-3 space-y-1 text-xs">
-                <p>• <strong>date</strong>: Format YYYY-MM-DD</p>
-                <p>• <strong>description</strong>: Keterangan transaksi</p>
-                <p>• <strong>type</strong>: 'in' (masuk) atau 'out' (keluar)</p>
-                <p>• <strong>amount</strong>: Jumlah dalam angka</p>
-                <p className="text-gray-400 mt-2">* Bisa juga menggunakan header Bahasa Indonesia: tanggal, keterangan, tipe, jumlah</p>
-              </div>
-            </div>
-            
-            {/* File Upload */}
-            <div className="mb-4">
-              <label className="block w-full">
-                <div className="border-2 border-dashed border-gray-600 rounded-xl p-8 text-center hover:border-gray-500 transition-colors cursor-pointer">
-                  <Upload size={48} className="text-gray-500 mx-auto mb-3" />
-                  <p className="text-gray-300 font-medium mb-1">
-                    {csvFile ? csvFile.name : 'Pilih file CSV'}
-                  </p>
-                  <p className="text-gray-500 text-sm">
-                    Atau drag & drop file di sini
-                  </p>
-                </div>
-                <input 
-                  type="file"
-                  accept=".csv"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) handleCSVUpload(file);
-                  }}
-                  className="hidden"
-                />
-              </label>
-            </div>
-            
-            {/* Errors */}
-            {csvErrors.length > 0 && (
-              <div className="bg-red-900/30 border border-red-700 rounded-lg p-4 mb-4">
-                <div className="flex items-center gap-2 mb-2">
-                  <AlertCircle size={20} className="text-red-400" />
-                  <p className="font-medium text-red-400">Ditemukan {csvErrors.length} error:</p>
-                </div>
-                <div className="space-y-1 text-sm text-red-300 max-h-32 overflow-y-auto">
-                  {csvErrors.map((error, index) => (
-                    <p key={index}>• {error}</p>
-                  ))}
-                </div>
-              </div>
-            )}
-            
-            {/* Preview */}
-            {csvPreview.length > 0 && (
-              <div className="mb-4">
-                <p className="text-sm font-medium text-gray-300 mb-2">
-                  Preview: {csvPreview.length} transaksi valid
-                </p>
-                <div className="bg-gray-700 rounded-lg overflow-hidden max-h-64 overflow-y-auto">
-                  <table className="w-full text-sm">
-                    <thead className="bg-gray-600 sticky top-0">
-                      <tr>
-                        <th className="text-left p-2 text-gray-300">Tanggal</th>
-                        <th className="text-left p-2 text-gray-300">Keterangan</th>
-                        <th className="text-left p-2 text-gray-300">Tipe</th>
-                        <th className="text-right p-2 text-gray-300">Jumlah</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {csvPreview.map((item, index) => (
-                        <tr key={index} className="border-t border-gray-600">
-                          <td className="p-2 text-gray-300">{item.date}</td>
-                          <td className="p-2 text-gray-300">{item.description}</td>
-                          <td className="p-2">
-                            <span className={`px-2 py-1 rounded text-xs font-medium ${
-                              item.type === 'in' 
-                                ? 'bg-green-900/30 text-green-400' 
-                                : 'bg-red-900/30 text-red-400'
-                            }`}>
-                              {item.type}
-                            </span>
-                          </td>
-                          <td className="p-2 text-right text-gray-300">
-                            Rp {item.amount.toLocaleString('id-ID')}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-            
-            <div className="flex gap-3">
-              <button 
-                onClick={() => {
-                  setIsUploadingCSV(false);
-                  setCSVFile(null);
-                  setCSVErrors([]);
-                  setCSVPreview([]);
-                }}
-                className="flex-1 bg-gray-700 hover:bg-gray-600 text-white px-4 py-3 rounded-xl transition-colors font-medium"
-              >
-                Batal
-              </button>
-              <button 
-                onClick={handleImportCSV}
-                disabled={csvPreview.length === 0}
-                className="flex-1 bg-green-600 hover:bg-green-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white px-4 py-3 rounded-xl transition-colors font-medium flex items-center justify-center gap-2"
-              >
-                <Check size={20} />
-                Import {csvPreview.length > 0 && `(${csvPreview.length})`}
               </button>
             </div>
           </div>
