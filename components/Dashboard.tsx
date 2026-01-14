@@ -152,7 +152,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   // --- RENDER ---
   return (
-    <div className="bg-gray-900 min-h-screen pb-24 font-sans text-gray-100">
+    <div className="bg-gray-900 min-h-screen pb-24 md:pb-4 font-sans text-gray-100">
       {showItemForm && ( 
         <ItemForm initialData={editingItem} onCancel={() => setShowItemForm(false)} onSuccess={handleFormSuccess} /> 
       )}
