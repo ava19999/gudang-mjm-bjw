@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   Wallet, Plus, Calendar, ArrowUpRight, ArrowDownRight, 
   Download, Printer, X, Check, 
-  Keyboard, Search, Filter
+  Keyboard, Search, Filter, CreditCard
 } from 'lucide-react';
 import { generateId } from '../../utils';
 
@@ -516,7 +516,7 @@ export const PettyCashView: React.FC = () => {
                         : 'border-gray-600 bg-gray-700 text-gray-300 hover:border-gray-500'
                     }`}
                   >
-                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
+                    <CreditCard size={20} />
                     <span>Rekening</span>
                   </button>
                 </div>
