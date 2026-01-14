@@ -1,5 +1,5 @@
 // FILE: src/components/finance/ClosingView.tsx
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   Calendar, Download, FileDown, TrendingUp, TrendingDown,
   Printer, Search
@@ -94,25 +94,32 @@ export const ClosingView: React.FC = () => {
   };
 
   // Calculate daily totals for Barang Masuk
+  const dailyTotals = useMemo(() => {
+    const totals = new Map<string, number>();
+    filteredMasuk.forEach(item => {
+      const date = item.created_at.split('T')[0];
+      totals.set(date, (totals.get(date) || 0) + item.harga_total);
+    });
+    return totals;
+  }, [filteredMasuk]);
+
   const getDailyTotalMasuk = (date: string) => {
-    const dayItems = filteredMasuk.filter(item => 
-      item.created_at.split('T')[0] === date.split('T')[0]
-    );
-    return dayItems.reduce((sum, item) => sum + item.harga_total, 0);
+    return dailyTotals.get(date.split('T')[0]) || 0;
   };
 
   // Calculate store totals for Barang Keluar
-  const getStoreTotals = () => {
+  const storeTotals = useMemo(() => {
     const totals: Record<string, number> = {};
     filteredKeluar.forEach(item => {
       const store = item.kode_toko || 'Unknown';
       totals[store] = (totals[store] || 0) + item.harga_total;
     });
     return totals;
-  };
+  }, [filteredKeluar]);
 
-  const grandTotal = filteredKeluar.reduce((sum, item) => sum + item.harga_total, 0);
-  const storeTotals = getStoreTotals();
+  const grandTotal = useMemo(() => {
+    return filteredKeluar.reduce((sum, item) => sum + item.harga_total, 0);
+  }, [filteredKeluar]);
 
   // Export to JPEG
   const exportToJPEG = async () => {
