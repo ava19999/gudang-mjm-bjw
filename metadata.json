@@ -1,0 +1,7 @@
+{
+  "name": "StockMaster AI",
+  "description": "A smart inventory management application to track parts, prices, and locations (Rak) with AI-powered description generation and image analysis.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
