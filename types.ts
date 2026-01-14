@@ -174,3 +174,41 @@ export interface ScanResiLog {
     harga_total: number;
     status: string;
 }
+
+// Data Agung Online Menu Interfaces
+export interface BaseWarehouseItem {
+    id: string;
+    partNumber: string;
+    name: string;
+    quantity: number;
+}
+
+export interface OnlineProduct {
+    id: string;
+    partNumber: string;
+    name: string;
+    brand: string;
+    quantity: number;
+    isActive: boolean;
+    timestamp: number;
+}
+
+export interface ProdukKosong {
+    id: string;
+    partNumber: string;
+    name: string;
+    brand: string;
+    quantity: number;
+    isOnlineActive: boolean;
+    timestamp: number;
+}
+
+export interface TableMasuk {
+    id: string;
+    partNumber: string;
+    name: string;
+    brand: string;
+    quantity: number;
+    isActive: boolean;
+    timestamp: number;
+}

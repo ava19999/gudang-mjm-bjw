@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { ShoppingCart, Package, Plus, ClipboardList, Home } from 'lucide-react';
 import { ActiveView } from '../../types/ui';
 import { FinanceMenu } from '../finance/FinanceMenu';
+import { OnlineMenu } from '../online/OnlineMenu';
 import { NotificationBadge } from '../common/NotificationBadge';
 
 interface MobileNavProps {
