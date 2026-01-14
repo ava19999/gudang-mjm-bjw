@@ -3,6 +3,7 @@ import React from 'react';
 import { ShoppingCart, Package, Plus, ClipboardList, Home } from 'lucide-react';
 import { ActiveView } from '../../types/ui';
 import { FinanceMenu } from '../finance/FinanceMenu';
+import { NotificationBadge } from '../common/NotificationBadge';
 
 interface MobileNavProps {
   isAdmin: boolean;
@@ -64,7 +65,7 @@ export const MobileNav: React.FC<MobileNavProps> = ({
                           <div className={`p-2 rounded-xl transition-all duration-200 ${activeView==='orders'?'bg-purple-900/30 shadow-lg shadow-purple-900/20':'bg-transparent'}`}>
                               <ClipboardList size={22} className={`transition-all duration-200 ${activeView==='orders'?'fill-purple-900/50 drop-shadow-sm':''}`} />
                           </div>
-                          {pendingOrdersCount>0 && <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 bg-red-500 text-white text-[9px] font-bold rounded-full border-2 border-gray-800 flex items-center justify-center shadow-lg">{pendingOrdersCount}</span>}
+                          <NotificationBadge count={pendingOrdersCount} color="red" />
                       </div>
                       <span className={`text-[10px] font-semibold transition-all ${activeView==='orders'?'text-purple-300':'text-gray-500'}`}>Pesanan</span>
                   </button>
@@ -91,7 +92,7 @@ export const MobileNav: React.FC<MobileNavProps> = ({
                           <div className={`p-2.5 rounded-xl transition-all duration-200 ${activeView==='orders'?'bg-blue-900/30 shadow-lg shadow-blue-900/20':'bg-transparent'}`}>
                               <ClipboardList size={24} className={`transition-all duration-200 ${activeView==='orders'?'fill-blue-900/50 drop-shadow-sm':''}`} />
                           </div>
-                          {myPendingOrdersCount > 0 && <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 bg-orange-500 text-white text-[9px] font-bold rounded-full border-2 border-gray-800 flex items-center justify-center shadow-lg animate-pulse">{myPendingOrdersCount}</span>}
+                          <NotificationBadge count={myPendingOrdersCount} color="orange" animate={true} />
                       </div>
                       <span className={`text-[11px] font-semibold transition-all ${activeView==='orders'?'text-blue-300':'text-gray-500'}`}>Pesanan</span>
                   </button>
