@@ -17,6 +17,13 @@ interface PettyCashEntry {
   createdAt: number;
 }
 
+interface CSVPreviewEntry {
+  date: string;
+  description: string;
+  type: 'in' | 'out';
+  amount: number;
+}
+
 // Frequently used descriptions for autocomplete
 const FREQUENT_DESCRIPTIONS = [
   'Pembelian ATK',
@@ -52,7 +59,7 @@ export const PettyCashView: React.FC = () => {
   // CSV upload states
   const [csvFile, setCSVFile] = useState<File | null>(null);
   const [csvErrors, setCSVErrors] = useState<string[]>([]);
-  const [csvPreview, setCSVPreview] = useState<any[]>([]);
+  const [csvPreview, setCSVPreview] = useState<CSVPreviewEntry[]>([]);
   
   // Filter states
   const [filterType, setFilterType] = useState<'all' | 'in' | 'out'>('all');
@@ -112,7 +119,9 @@ export const PettyCashView: React.FC = () => {
   }, [formDescription, showSuggestions]);
   
   const currentBalance = entries.length > 0 
-    ? entries[entries.length - 1].balance 
+    ? entries.reduce((max, entry) => 
+        entry.createdAt > max.createdAt ? entry : max, entries[0]
+      ).balance
     : 0;
   
   // Filter entries based on filter criteria
@@ -135,7 +144,11 @@ export const PettyCashView: React.FC = () => {
       return;
     }
     
-    const previousBalance = entries.length > 0 ? entries[entries.length - 1].balance : 0;
+    const previousBalance = entries.length > 0 
+      ? entries.reduce((max, entry) => 
+          entry.createdAt > max.createdAt ? entry : max, entries[0]
+        ).balance
+      : 0;
     const newBalance = formType === 'in' 
       ? previousBalance + amount 
       : previousBalance - amount;
@@ -214,7 +227,7 @@ export const PettyCashView: React.FC = () => {
         const parsed = parseCSV(text);
         
         const errors: string[] = [];
-        const validEntries: any[] = [];
+        const validEntries: CSVPreviewEntry[] = [];
         
         parsed.forEach((row, index) => {
           const lineNum = index + 2; // +2 because index starts at 0 and we skip header
@@ -283,7 +296,11 @@ export const PettyCashView: React.FC = () => {
   const handleImportCSV = () => {
     if (csvPreview.length === 0) return;
     
-    let currentBalance = entries.length > 0 ? entries[entries.length - 1].balance : 0;
+    let currentBalance = entries.length > 0 
+      ? entries.reduce((max, entry) => 
+          entry.createdAt > max.createdAt ? entry : max, entries[0]
+        ).balance
+      : 0;
     const newEntries: PettyCashEntry[] = [];
     
     csvPreview.forEach(item => {
@@ -376,7 +393,7 @@ export const PettyCashView: React.FC = () => {
               <button 
                 onClick={() => setIsAdding(true)}
                 className="bg-white/20 hover:bg-white/30 backdrop-blur-sm text-white px-4 py-2 rounded-xl flex items-center gap-2 transition-all"
-                title="Tambah transaksi baru (Shortcut: Ctrl+N)"
+                title="Tambah transaksi baru"
               >
                 <Plus size={20} />
                 <span className="font-medium">Tambah</span>
