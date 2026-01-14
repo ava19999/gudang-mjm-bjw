@@ -8,8 +8,10 @@ import {
   Order, 
   ChatSession, 
   ReturRecord, 
-  ScanResiLog 
+  ScanResiLog,
+  BaseMjmItem
 } from '../types';
+import { supabase } from '../lib/supabase';
 
 // Mock data
 const mockInventory: InventoryItem[] = [];
@@ -261,4 +263,25 @@ export const updateReturKeterangan = async (
 export const addReturTransaction = async (record: ReturRecord, store?: string | null): Promise<void> => {
   console.log('Mock: addReturTransaction called');
   return Promise.resolve();
+};
+
+// --- BASE_MJM FUNCTIONS ---
+export const fetchBaseMjm = async (): Promise<BaseMjmItem[]> => {
+  try {
+    console.log('[SupabaseService] Fetching from table: base_mjm');
+    const { data, error } = await supabase
+      .from('base_mjm')
+      .select('*');
+    
+    if (error) {
+      console.error('[fetchBaseMjm] Error:', error.message, error.details, error.hint);
+      throw error;
+    }
+    
+    console.log(`[fetchBaseMjm] Successfully fetched ${data?.length || 0} items from base_mjm`);
+    return data || [];
+  } catch (error) {
+    console.error('[fetchBaseMjm] Exception:', error);
+    return [];
+  }
 };

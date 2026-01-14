@@ -14,6 +14,7 @@ import { PettyCashView } from './components/finance/PettyCashView';
 import { BarangKosongView } from './components/finance/BarangKosongView';
 import { ClosingView } from './components/finance/ClosingView';
 import { DataAgungView } from './components/online/DataAgungView';
+import { GudangView } from './components/GudangView';
 
 // --- NEW SPLIT COMPONENTS ---
 import { Toast } from './components/common/Toast';
@@ -352,6 +353,7 @@ const AppContent: React.FC = () => {
       <div className="flex-1 overflow-y-auto bg-gray-900">
         {activeView === 'shop' && <ShopView items={items} cart={cart} isAdmin={isAdmin} isKingFano={isKingFano} bannerUrl={bannerUrl} onAddToCart={addToCart} onRemoveFromCart={(id) => setCart(prev => prev.filter(c => c.id !== id))} onUpdateCartItem={updateCartItem} onCheckout={doCheckout} onUpdateBanner={handleUpdateBanner} />}
         {activeView === 'inventory' && isAdmin && <Dashboard items={items} orders={orders} history={history} refreshTrigger={refreshTrigger} onViewOrders={() => setActiveView('orders')} onAddNew={() => { setEditItem(null); setIsEditing(true); }} onEdit={(item) => { setEditItem(item); setIsEditing(true); }} onDelete={handleDelete} />}
+        {activeView === 'gudang' && isAdmin && <GudangView showToast={showToast} />}
         {activeView === 'quick_input' && isAdmin && <QuickInputView items={items} onRefresh={refreshData} showToast={showToast} />}
         {activeView === 'petty_cash' && isAdmin && <PettyCashView />}
         {activeView === 'barang_kosong' && isAdmin && <BarangKosongView />}

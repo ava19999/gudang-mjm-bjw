@@ -175,6 +175,16 @@ export interface ScanResiLog {
     status: string;
 }
 
+// Base MJM Warehouse Data Interface
+export interface BaseMjmItem {
+    part_number: string;
+    name: string;
+    application: string;
+    quantity: number;
+    shelf: string;
+    brand: string;
+}
+
 // Data Agung Online Menu Interfaces
 export interface BaseWarehouseItem {
     id: string;

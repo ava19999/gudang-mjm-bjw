@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { 
   ShieldCheck, Package, CloudLightning, ShoppingCart, Plus, 
-  ClipboardList, Home, LogOut 
+  ClipboardList, Home, LogOut, Warehouse
 } from 'lucide-react';
 import { ActiveView } from '../../types/ui';
 import { StoreConfig } from '../../types/store';
@@ -68,6 +68,7 @@ export const Header: React.FC<HeaderProps> = ({
                 <>
                   <button onClick={() => setActiveView('shop')} className={`hidden md:flex items-center gap-2 px-3 py-2 text-sm font-semibold rounded-xl transition-all ${activeView==='shop'?'bg-purple-900/40 text-purple-300 ring-1 ring-purple-800/60 shadow-lg':'text-gray-400 hover:bg-gray-700/80 hover:text-gray-200'}`}><ShoppingCart size={18}/> Beranda</button>
                   <button onClick={() => setActiveView('inventory')} className={`hidden md:flex items-center gap-2 px-3 py-2 text-sm font-semibold rounded-xl transition-all ${activeView==='inventory'?'bg-purple-900/40 text-purple-300 ring-1 ring-purple-800/60 shadow-lg':'text-gray-400 hover:bg-gray-700/80 hover:text-gray-200'}`}><Package size={18}/> Gudang</button>
+                  <button onClick={() => setActiveView('gudang')} className={`hidden md:flex items-center gap-2 px-3 py-2 text-sm font-semibold rounded-xl transition-all ${activeView==='gudang'?'bg-blue-900/40 text-blue-300 ring-1 ring-blue-800/60 shadow-lg':'text-gray-400 hover:bg-gray-700/80 hover:text-gray-200'}`}><Warehouse size={18}/> Base MJM</button>
                   <button onClick={() => setActiveView('quick_input')} className={`hidden md:flex items-center gap-2 px-3 py-2 text-sm font-semibold rounded-xl transition-all ${activeView==='quick_input'?'bg-green-900/40 text-green-300 ring-1 ring-green-800/60 shadow-lg':'text-gray-400 hover:bg-gray-700/80 hover:text-gray-200'}`}><Plus size={18}/> Input Barang</button>
                   <FinanceMenu activeView={activeView} setActiveView={setActiveView} />
                   <OnlineMenu activeView={activeView} setActiveView={setActiveView} />
