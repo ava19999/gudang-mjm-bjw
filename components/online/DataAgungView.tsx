@@ -12,6 +12,8 @@ interface DataAgungViewProps {
 
 type TableType = 'base' | 'online' | 'kosong' | 'masuk';
 
+const TABLES: TableType[] = ['base', 'online', 'kosong', 'masuk'];
+
 export const DataAgungView: React.FC<DataAgungViewProps> = ({ items, onRefresh, showToast }) => {
   // State for the four tables
   const [onlineProducts, setOnlineProducts] = useState<OnlineProduct[]>([]);
@@ -119,10 +121,9 @@ export const DataAgungView: React.FC<DataAgungViewProps> = ({ items, onRefresh, 
         case 'ArrowLeft':
           e.preventDefault();
           // Move to previous table
-          const tables: TableType[] = ['base', 'online', 'kosong', 'masuk'];
-          const currentIndex = tables.indexOf(activeTable);
+          const currentIndex = TABLES.indexOf(activeTable);
           if (currentIndex > 0) {
-            setActiveTable(tables[currentIndex - 1]);
+            setActiveTable(TABLES[currentIndex - 1]);
             setSelectedRow(0);
           }
           break;
@@ -130,10 +131,9 @@ export const DataAgungView: React.FC<DataAgungViewProps> = ({ items, onRefresh, 
         case 'ArrowRight':
           e.preventDefault();
           // Move to next table
-          const tablesRight: TableType[] = ['base', 'online', 'kosong', 'masuk'];
-          const currentIndexRight = tablesRight.indexOf(activeTable);
-          if (currentIndexRight < tablesRight.length - 1) {
-            setActiveTable(tablesRight[currentIndexRight + 1]);
+          const currentIndexRight = TABLES.indexOf(activeTable);
+          if (currentIndexRight < TABLES.length - 1) {
+            setActiveTable(TABLES[currentIndexRight + 1]);
             setSelectedRow(0);
           }
           break;
@@ -326,7 +326,7 @@ export const DataAgungView: React.FC<DataAgungViewProps> = ({ items, onRefresh, 
   };
 
   // Auto-sync: Check for quantity changes
-  React.useEffect(() => {
+  useEffect(() => {
     const itemsToMoveToMasuk: TableMasuk[] = [];
     
     // Update quantities in online products
