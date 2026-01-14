@@ -1,6 +1,6 @@
 // FILE: src/components/finance/FinanceMenu.tsx
 import React, { useState } from 'react';
-import { Wallet, PackageX, ChevronDown, ChevronUp } from 'lucide-react';
+import { Wallet, PackageX, ChevronDown, ChevronUp, Calendar } from 'lucide-react';
 import { ActiveView } from '../../types/ui';
 
 interface FinanceMenuProps {
@@ -16,7 +16,7 @@ export const FinanceMenu: React.FC<FinanceMenuProps> = ({
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   
-  const isFinanceActive = activeView === 'petty_cash' || activeView === 'barang_kosong';
+  const isFinanceActive = activeView === 'petty_cash' || activeView === 'barang_kosong' || activeView === 'closing';
 
   const handleMainClick = () => {
     if (isMobile) {
@@ -66,6 +66,18 @@ export const FinanceMenu: React.FC<FinanceMenuProps> = ({
               <PackageX size={16} />
               <span className="text-sm font-medium">Barang Kosong</span>
             </button>
+            <button
+              onClick={() => {
+                setActiveView('closing');
+                setIsOpen(false);
+              }}
+              className={`w-full px-4 py-3 text-left hover:bg-gray-700 transition-colors flex items-center gap-2 border-t border-gray-700 ${
+                activeView === 'closing' ? 'bg-gray-700 text-blue-400' : 'text-gray-300'
+              }`}
+            >
+              <Calendar size={16} />
+              <span className="text-sm font-medium">Closing</span>
+            </button>
           </div>
         )}
       </div>
@@ -113,6 +125,18 @@ export const FinanceMenu: React.FC<FinanceMenuProps> = ({
           >
             <PackageX size={16} />
             <span className="text-sm font-medium">Barang Kosong</span>
+          </button>
+          <button
+            onClick={() => {
+              setActiveView('closing');
+              setIsOpen(false);
+            }}
+            className={`w-full px-4 py-3 text-left hover:bg-gray-700 transition-colors flex items-center gap-2 border-t border-gray-700 ${
+              activeView === 'closing' ? 'bg-gray-700 text-blue-400' : 'text-gray-300'
+            }`}
+          >
+            <Calendar size={16} />
+            <span className="text-sm font-medium">Closing</span>
           </button>
         </div>
       )}
