@@ -1,6 +1,7 @@
 // FILE: src/components/Dashboard.tsx
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { InventoryItem, Order, StockHistory } from '../types';
+// Pastikan import ini sesuai
 import { fetchInventoryPaginated, fetchInventoryStats, fetchInventoryAllFiltered } from '../services/supabaseService';
 import { ItemForm } from './ItemForm';
 import { DashboardStats } from './DashboardStats';
@@ -69,28 +70,49 @@ export const Dashboard: React.FC<DashboardProps> = ({
     setPage(1);
   }, [debouncedSearch, filterType, debouncedBrand, debouncedApp, priceSort]);
 
+  // --- DATA LOADING (BAGIAN YANG DIPERBAIKI) ---
   const loadData = useCallback(async () => {
     setLoading(true);
     
-    // If price sorting is active, fetch all data
-    if (priceSort !== 'none') {
-      const allData = await fetchInventoryAllFiltered(debouncedSearch, filterType, debouncedBrand, debouncedApp, selectedStore);
-      setAllItems(allData);
-      setTotalPages(Math.ceil(allData.length / 50));
-    } else {
-      // Otherwise, use paginated fetch
-      // @ts-ignore
-      const { data, count } = await fetchInventoryPaginated(page, 50, debouncedSearch, filterType, debouncedBrand, debouncedApp, selectedStore);
-      setLocalItems(data);
-      setAllItems([]); // Clear all items when not sorting
-      setTotalPages(Math.ceil(count / 50));
+    // Kita bungkus filter jadi satu objek
+    const filters = {
+        search: debouncedSearch,
+        brand: debouncedBrand,
+        app: debouncedApp,
+        type: filterType
+    };
+
+    try {
+        // If price sorting is active, fetch all data
+        if (priceSort !== 'none') {
+          // PERBAIKAN: Kirim store dulu, baru filters
+          const allData = await fetchInventoryAllFiltered(selectedStore, filters);
+          setAllItems(allData);
+          setTotalPages(Math.ceil(allData.length / 50));
+        } else {
+          // Otherwise, use paginated fetch
+          // PERBAIKAN: Urutan argumen disesuaikan dengan supabaseService.ts
+          // (store, page, perPage, filters)
+          const result = await fetchInventoryPaginated(selectedStore, page, 50, filters);
+          
+          setLocalItems(result.data);
+          setAllItems([]); // Clear all items when not sorting
+          
+          // Gunakan result.total dari service baru (sebelumnya mungkin result.count)
+          const totalCount = result.total || 0;
+          setTotalPages(Math.ceil(totalCount / 50));
+        }
+    } catch (error) {
+        console.error("Gagal memuat data dashboard:", error);
     }
     
     setLoading(false);
   }, [page, debouncedSearch, filterType, debouncedBrand, debouncedApp, priceSort, selectedStore]);
 
   const loadStats = useCallback(async () => {
+    // Bagian ini sudah benar karena fetchInventoryStats hanya butuh parameter store
     const invStats = await fetchInventoryStats(selectedStore);
+    
     const startOfDay = new Date();
     startOfDay.setHours(0, 0, 0, 0);
     const todayIn = history
@@ -111,9 +133,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
     // Determine which dataset to use
     const itemsToSort = priceSort !== 'none' ? allItems : localItems;
     
+    // Jika tidak ada sort harga, langsung return data dari server (sudah dipaginasi)
     if (priceSort === 'none') return itemsToSort;
     
-    // Sort all items by price
+    // Jika sort harga aktif (pakai allItems), kita sort manual di client
     const sorted = [...itemsToSort].sort((a, b) => {
       const priceA = a.costPrice || a.price || 0;
       const priceB = b.costPrice || b.price || 0;
@@ -125,7 +148,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       }
     });
     
-    // Apply pagination to sorted results
+    // Apply pagination manual untuk data yang disort di client
     const pageSize = 50;
     const startIdx = (page - 1) * pageSize;
     const endIdx = startIdx + pageSize;
@@ -138,12 +161,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   const handleFormSuccess = (updatedItem?: InventoryItem) => {
       if (updatedItem) {
+          // Optimistic update
           setLocalItems(currentItems => currentItems.map(item => item.id === updatedItem.id ? updatedItem : item));
           if (editingItem) {
              const diff = updatedItem.quantity - editingItem.quantity;
              setStats(prev => ({ ...prev, totalStock: prev.totalStock + diff }));
           }
           setShowItemForm(false);
+          loadData(); // Reload data untuk memastikan sinkron
       } else {
           setShowItemForm(false);
           loadData(); loadStats();

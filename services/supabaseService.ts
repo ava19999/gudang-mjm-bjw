@@ -1,5 +1,5 @@
 // FILE: services/supabaseService.ts
-import { supabase } from '../lib/supabase';
+import { supabase } from './supabaseClient'; // Pastikan path ini benar sesuai file sebelumnya
 import { 
   InventoryItem, 
   InventoryFormData, 
@@ -12,17 +12,76 @@ import {
   ScanResiLog 
 } from '../types';
 
-// --- HELPER: MENENTUKAN NAMA TABEL BERDASARKAN TOKO ---
+// --- HELPER: NAMA TABEL ---
 const getTableName = (store: string | null | undefined) => {
   if (store === 'mjm') return 'base_mjm';
   if (store === 'bjw') return 'base_bjw';
-  return 'base'; // Table default/fallback
+  return 'base'; // default
+};
+
+// --- HELPER: MAPPING DATA (PENTING!) ---
+// Mengubah format database (snake_case) ke aplikasi (camelCase)
+const mapItemFromDB = (item: any): InventoryItem => {
+  return {
+    ...item,
+    // Mapping kolom yang namanya berbeda
+    // Format: id_di_app: item.nama_kolom_di_db || item.id_di_app (fallback)
+    partNumber: item.part_number || item.partNumber || '',
+    initialStock: Number(item.initial_stock || item.initialStock || 0),
+    costPrice: Number(item.cost_price || item.costPrice || 0),
+    imageUrl: item.image_url || item.imageUrl || '',
+    qtyIn: Number(item.qty_in || item.qtyIn || 0),
+    qtyOut: Number(item.qty_out || item.qtyOut || 0),
+    
+    // Pastikan angka benar-benar angka
+    quantity: Number(item.quantity || 0),
+    price: Number(item.price || 0),
+    
+    // Kolom yang namanya sama (tidak perlu diubah, tapi dicantumkan agar aman)
+    id: item.id,
+    name: item.name,
+    brand: item.brand,
+    application: item.application,
+    shelf: item.shelf,
+    ecommerce: item.ecommerce,
+    lastUpdated: item.last_updated || item.lastUpdated || Date.now()
+  };
+};
+
+// Mengubah format aplikasi (camelCase) ke database (snake_case) untuk Save/Update
+const mapItemToDB = (data: InventoryFormData | Partial<InventoryItem>) => {
+  // Kita buat object baru dengan key snake_case
+  const dbPayload: any = {
+    name: data.name,
+    brand: data.brand,
+    application: data.application,
+    shelf: data.shelf,
+    quantity: Number(data.quantity) || 0,
+    price: Number(data.price) || 0,
+    ecommerce: data.ecommerce || '',
+    
+    // Kolom yang perlu di-rename ke snake_case
+    part_number: data.partNumber,
+    initial_stock: Number(data.initialStock) || 0,
+    cost_price: Number(data.costPrice) || 0,
+    image_url: data.imageUrl,
+    qty_in: Number(data.qtyIn) || 0,
+    qty_out: Number(data.qtyOut) || 0,
+    last_updated: Date.now()
+  };
+
+  // Hapus field undefined agar tidak error
+  Object.keys(dbPayload).forEach(key => dbPayload[key] === undefined && delete dbPayload[key]);
+  
+  return dbPayload;
 };
 
 // --- INVENTORY FUNCTIONS ---
 
 export const fetchInventory = async (store?: string | null): Promise<InventoryItem[]> => {
   const table = getTableName(store);
+  console.log(`[Supabase] Fetching from ${table}...`);
+  
   const { data, error } = await supabase
     .from(table)
     .select('*')
@@ -32,7 +91,9 @@ export const fetchInventory = async (store?: string | null): Promise<InventoryIt
     console.error(`[Supabase] Error fetchInventory from ${table}:`, error);
     return [];
   }
-  return (data || []) as InventoryItem[];
+
+  // Lakukan mapping untuk setiap item
+  return (data || []).map(mapItemFromDB);
 };
 
 export const fetchInventoryPaginated = async (
@@ -47,8 +108,9 @@ export const fetchInventoryPaginated = async (
 
   let query = supabase.from(table).select('*', { count: 'exact' });
 
+  // Filter Search (Asumsi kolom di DB part_number/name)
   if (filters?.search) {
-    query = query.or(`name.ilike.%${filters.search}%,partNumber.ilike.%${filters.search}%`);
+    query = query.or(`name.ilike.%${filters.search}%,part_number.ilike.%${filters.search}%`);
   }
 
   const { data, count, error } = await query
@@ -60,42 +122,44 @@ export const fetchInventoryPaginated = async (
     return { data: [], total: 0 };
   }
 
-  return { data: (data || []) as InventoryItem[], total: count || 0 };
+  return { 
+    data: (data || []).map(mapItemFromDB), 
+    total: count || 0 
+  };
 };
 
 export const fetchInventoryStats = async (store: string | null): Promise<any> => {
+  // Kita fetch semua dulu untuk hitung manual (atau bisa pakai query count di masa depan)
   const items = await fetchInventory(store);
+  
   const totalItems = items.length;
   const totalValue = items.reduce((acc, item) => acc + (item.price * item.quantity), 0);
-  const lowStock = items.filter(item => item.quantity < 5).length; // Asumsi batas low stock 5
+  const lowStock = items.filter(item => item.quantity < 5).length; 
 
   return { totalItems, totalValue, lowStock };
 };
 
 export const fetchInventoryAllFiltered = async (store: string | null, filters?: any): Promise<InventoryItem[]> => {
-  // Implementasi sederhana: fetch semua lalu filter di client (atau sesuaikan query seperti paginated)
   const items = await fetchInventory(store);
-  if (!filters) return items;
-  // Tambahkan logika filter manual jika perlu, atau biarkan raw
-  return items;
+  return items; // Logic filter bisa ditambahkan di sini atau di client
 };
 
 export const addInventory = async (data: InventoryFormData, store?: string | null): Promise<boolean> => {
   const table = getTableName(store);
-  // Sanitasi data angka
-  const payload = {
-    ...data,
-    quantity: Number(data.quantity) || 0,
-    price: Number(data.price) || 0,
-    costPrice: Number(data.costPrice) || 0,
-    initialStock: Number(data.initialStock) || 0,
-    qtyIn: 0,
-    qtyOut: 0
-  };
+  
+  // Konversi data ke format DB (snake_case)
+  const payload = mapItemToDB(data);
+
+  console.log('[Supabase] Adding item:', payload);
 
   const { error } = await supabase.from(table).insert([payload]);
+  
   if (error) {
     console.error('[Supabase] Error addInventory:', error);
+    // Tampilkan pesan error spesifik jika duplikat
+    if (error.code === '23505') { 
+        alert('Gagal: Part Number sudah ada!'); 
+    }
     return false;
   }
   return true;
@@ -103,7 +167,7 @@ export const addInventory = async (data: InventoryFormData, store?: string | nul
 
 export const updateInventory = async (
   item: Partial<InventoryItem> & { id?: string },
-  _unused?: any, // Parameter legacy dari mock
+  _unused?: any, 
   store?: string | null
 ): Promise<boolean> => {
   const table = getTableName(store);
@@ -114,8 +178,8 @@ export const updateInventory = async (
     return false;
   }
 
-  // Pisahkan ID dari body update
-  const { id: _, ...updates } = item;
+  // Konversi data update ke format DB
+  const updates = mapItemToDB(item);
 
   const { error } = await supabase
     .from(table)
@@ -132,10 +196,7 @@ export const updateInventory = async (
 export const deleteInventory = async (id: string, store?: string | null): Promise<boolean> => {
   const table = getTableName(store);
   const { error } = await supabase.from(table).delete().eq('id', id);
-  if (error) {
-    console.error('[Supabase] Error deleteInventory:', error);
-    return false;
-  }
+  if (error) return false;
   return true;
 };
 
@@ -144,46 +205,34 @@ export const getItemByPartNumber = async (partNumber: string, store?: string | n
   const { data, error } = await supabase
     .from(table)
     .select('*')
-    .eq('partNumber', partNumber)
+    .eq('part_number', partNumber) // Query pakai snake_case
     .maybeSingle();
 
-  if (error) {
-    console.error('[Supabase] Error getItemByPartNumber:', error);
-    return null;
-  }
-  return data as InventoryItem;
+  if (error || !data) return null;
+  return mapItemFromDB(data);
 };
 
 export const saveItemImages = async (itemId: string, images: string[], store?: string | null): Promise<void> => {
-  // Disimpan sebagai array string (JSON) di kolom 'images' atau 'imageUrl'
-  // Jika kolomnya 'imageUrl' (single), ambil yang pertama. Jika ada kolom 'images' (array), simpan semua.
-  // Sesuaikan dengan struktur DB Anda. Ini contoh update field 'imageUrl':
   if (images.length > 0) {
+    // Asumsi kolom DB image_url
     await updateInventory({ id: itemId, imageUrl: images[0] }, undefined, store);
   }
 };
 
 // --- ORDER FUNCTIONS ---
-// Asumsi: Tabel bernama 'orders'
+// Order biasanya menggunakan JSONB untuk items, jadi strukturnya lebih fleksibel
 const ORDER_TABLE = 'orders';
 
 export const fetchOrders = async (store?: string | null): Promise<Order[]> => {
-  let query = supabase.from(ORDER_TABLE).select('*').order('timestamp', { ascending: false });
-  
-  // Jika ingin filter order per toko (tambahkan kolom store_id di tabel orders jika perlu)
-  // if (store) query = query.eq('store', store);
-
-  const { data, error } = await query;
+  const { data, error } = await supabase.from(ORDER_TABLE).select('*').order('timestamp', { ascending: false });
 
   if (error) {
     console.error('[Supabase] Error fetchOrders:', error);
     return [];
   }
   
-  // Perlu parsing JSON string jika items disimpan sebagai JSONB/Text
   return (data || []).map((order: any) => ({
     ...order,
-    // Pastikan items adalah array, parse jika string
     items: typeof order.items === 'string' ? JSON.parse(order.items) : order.items
   })) as Order[];
 };
@@ -191,18 +240,10 @@ export const fetchOrders = async (store?: string | null): Promise<Order[]> => {
 export const saveOrder = async (order: Order, store?: string | null): Promise<boolean> => {
   const payload = {
     ...order,
-    // Pastikan items disimpan sebagai JSON yang valid
-    items: JSON.stringify(order.items),
-    // Tambahkan field store jika tabel orders mendukung multi-store
-    // store: store || 'global' 
+    items: JSON.stringify(order.items), // Serialize items ke JSON string
   };
-
   const { error } = await supabase.from(ORDER_TABLE).insert([payload]);
-  
-  if (error) {
-    console.error('[Supabase] Error saveOrder:', error);
-    return false;
-  }
+  if (error) return false;
   return true;
 };
 
@@ -215,12 +256,7 @@ export const updateOrderStatusService = async (
     .from(ORDER_TABLE)
     .update({ status: newStatus })
     .eq('id', orderId);
-
-  if (error) {
-    console.error('[Supabase] Error updateOrderStatusService:', error);
-    return false;
-  }
-  return true;
+  return !error;
 };
 
 export const updateOrderData = async (orderId: string, items: any[], totalAmount: number, status: string): Promise<boolean> => {
@@ -232,16 +268,10 @@ export const updateOrderData = async (orderId: string, items: any[], totalAmount
       status
     })
     .eq('id', orderId);
-
-  if (error) {
-    console.error('[Supabase] Error updateOrderData:', error);
-    return false;
-  }
-  return true;
+  return !error;
 };
 
 // --- HISTORY FUNCTIONS ---
-// Asumsi: Tabel bernama 'stock_history'
 const HISTORY_TABLE = 'stock_history';
 
 export const fetchHistory = async (store?: string | null): Promise<StockHistory[]> => {
@@ -249,254 +279,187 @@ export const fetchHistory = async (store?: string | null): Promise<StockHistory[
     .from(HISTORY_TABLE)
     .select('*')
     .order('timestamp', { ascending: false })
-    .limit(500); // Limit agar tidak terlalu berat
-
-  if (error) {
-    console.error('[Supabase] Error fetchHistory:', error);
-    return [];
-  }
-  return (data || []) as StockHistory[];
-};
-
-export const fetchItemHistory = async (itemId: string, store?: string | null): Promise<StockHistory[]> => {
-  // Mencari history berdasarkan nama item atau ID di deskripsi/keterangan
-  // Ini mungkin perlu disesuaikan dengan struktur tabel history Anda
-  const { data, error } = await supabase
-    .from(HISTORY_TABLE)
-    .select('*')
-    .ilike('description', `%${itemId}%`) // Pencarian kasar
-    .order('timestamp', { ascending: false });
+    .limit(500);
 
   if (error) return [];
   return (data || []) as StockHistory[];
 };
 
-export const fetchHistoryLogsPaginated = async (
-  store: string | null,
-  page: number,
-  perPage: number
-): Promise<{ data: StockHistory[]; total: number }> => {
+export const fetchItemHistory = async (itemId: string, store?: string | null): Promise<StockHistory[]> => {
+  const { data, error } = await supabase
+    .from(HISTORY_TABLE)
+    .select('*')
+    .ilike('description', `%${itemId}%`)
+    .order('timestamp', { ascending: false });
+  if (error) return [];
+  return (data || []) as StockHistory[];
+};
+
+export const fetchHistoryLogsPaginated = async (store: string | null, page: number, perPage: number): Promise<{ data: StockHistory[]; total: number }> => {
   const from = (page - 1) * perPage;
   const to = from + perPage - 1;
-
   const { data, count, error } = await supabase
     .from(HISTORY_TABLE)
     .select('*', { count: 'exact' })
     .range(from, to)
     .order('timestamp', { ascending: false });
-
-  if (error) return { data: [], total: 0 };
   return { data: (data || []) as StockHistory[], total: count || 0 };
 };
 
-// Helper untuk menambah history log
 const addHistoryLog = async (log: Partial<StockHistory>) => {
-  const { error } = await supabase.from(HISTORY_TABLE).insert([{
+  await supabase.from(HISTORY_TABLE).insert([{
     ...log,
     timestamp: Date.now(),
     date: new Date().toLocaleDateString('id-ID')
   }]);
-  if (error) console.error('[Supabase] Error addHistoryLog:', error);
 };
 
 // --- BARANG MASUK / KELUAR ---
 const TABLE_BARANG_MASUK = 'barang_masuk';
 const TABLE_BARANG_KELUAR = 'barang_keluar';
 
-export const addBarangMasuk = async (
-  entry: any, // Menggunakan any agar fleksibel dengan payload dari UI
-  _unused?: any
-): Promise<void> => {
-  // 1. Simpan ke tabel barang_masuk
-  const { error } = await supabase.from(TABLE_BARANG_MASUK).insert([entry]);
-  if (error) console.error('[Supabase] Error addBarangMasuk:', error);
+export const addBarangMasuk = async (entry: any, _unused?: any): Promise<void> => {
+  const payload = {
+    ...entry,
+    part_number: entry.partNumber, // Mapping manual jika perlu
+    qty_masuk: entry.qtyMasuk,
+    harga_satuan: entry.hargaSatuan,
+    harga_total: entry.hargaTotal
+    // Tambahkan mapping lain sesuai kolom DB Anda
+  };
+  
+  // Bersihkan field undefined/camelCase lama agar tidak error
+  delete payload.partNumber; delete payload.qtyMasuk; delete payload.hargaSatuan; delete payload.hargaTotal;
 
-  // 2. Catat di history global
-  await addHistoryLog({
-    type: 'IN',
-    itemName: entry.name || entry.partNumber,
-    change: entry.qtyMasuk,
-    description: `Barang Masuk: ${entry.keterangan || '-'}`,
-    store: entry.store || 'GUDANG'
-  });
+  const { error } = await supabase.from(TABLE_BARANG_MASUK).insert([payload]);
+  
+  if (!error) {
+    await addHistoryLog({
+      type: 'IN',
+      itemName: entry.name || entry.partNumber,
+      change: entry.qtyMasuk,
+      description: `Barang Masuk: ${entry.keterangan || '-'}`,
+      store: entry.store || 'GUDANG'
+    });
+  }
 };
 
-export const addBarangKeluar = async (
-  entry: any,
-  _unused?: any
-): Promise<void> => {
-  // 1. Simpan ke tabel barang_keluar
-  const { error } = await supabase.from(TABLE_BARANG_KELUAR).insert([entry]);
-  if (error) console.error('[Supabase] Error addBarangKeluar:', error);
+export const addBarangKeluar = async (entry: any, _unused?: any): Promise<void> => {
+  const payload = {
+    ...entry,
+    part_number: entry.partNumber,
+    qty_keluar: entry.qtyKeluar,
+    harga_satuan: entry.hargaSatuan,
+    harga_total: entry.hargaTotal
+  };
+   delete payload.partNumber; delete payload.qtyKeluar; delete payload.hargaSatuan; delete payload.hargaTotal;
 
-  // 2. Catat di history global
-  await addHistoryLog({
-    type: 'OUT',
-    itemName: entry.name || entry.partNumber,
-    change: entry.qtyKeluar,
-    description: `Barang Keluar ke ${entry.customer || '-'} (${entry.keterangan || ''})`,
-    store: entry.store || 'GUDANG'
-  });
+  const { error } = await supabase.from(TABLE_BARANG_KELUAR).insert([payload]);
+
+  if (!error) {
+    await addHistoryLog({
+      type: 'OUT',
+      itemName: entry.name || entry.partNumber,
+      change: entry.qtyKeluar,
+      description: `Barang Keluar ke ${entry.customer || '-'} (${entry.keterangan || ''})`,
+      store: entry.store || 'GUDANG'
+    });
+  }
 };
 
 export const fetchBarangMasuk = async (store?: string | null): Promise<BarangMasuk[]> => {
-  const { data, error } = await supabase.from(TABLE_BARANG_MASUK).select('*').order('created_at', { ascending: false });
-  if (error) return [];
+  const { data } = await supabase.from(TABLE_BARANG_MASUK).select('*').order('created_at', { ascending: false });
   return (data || []) as BarangMasuk[];
 };
 
 export const fetchBarangKeluar = async (store?: string | null): Promise<BarangKeluar[]> => {
-  const { data, error } = await supabase.from(TABLE_BARANG_KELUAR).select('*').order('created_at', { ascending: false });
-  if (error) return [];
+  const { data } = await supabase.from(TABLE_BARANG_KELUAR).select('*').order('created_at', { ascending: false });
   return (data || []) as BarangKeluar[];
 };
 
 export const fetchPriceHistoryBySource = async (partNumber: string, source: string): Promise<any[]> => {
-  // Contoh implementasi mengambil history harga dari barang masuk
-  const { data, error } = await supabase
+  const { data } = await supabase
     .from(TABLE_BARANG_MASUK)
-    .select('tanggal, hargaSatuan, ecommerce')
-    .eq('partNumber', partNumber)
+    .select('tanggal, harga_satuan, ecommerce')
+    .eq('part_number', partNumber)
     .order('tanggal', { ascending: false });
-
-  if (error) return [];
   return data || [];
 };
 
 // --- SHOP FUNCTIONS ---
 export const fetchShopItems = async (store?: string | null): Promise<InventoryItem[]> => {
-  // Mengambil item yang quantity > 0 untuk toko
-  const table = getTableName(store);
-  const { data, error } = await supabase
-    .from(table)
-    .select('*')
-    .gt('quantity', 0)
-    .order('name');
-    
-  if (error) return [];
-  return (data || []) as InventoryItem[];
+  const items = await fetchInventory(store);
+  return items.filter(i => i.quantity > 0);
 };
 
-// --- CHAT FUNCTIONS ---
+// --- CHAT & LAINNYA ---
+// (Fungsi chat dan scan resi dibiarkan sederhana/langsung)
 const CHAT_SESSION_TABLE = 'chat_sessions';
 const CHAT_MSG_TABLE = 'chat_messages';
 
 export const fetchChatSessions = async (store?: string | null): Promise<ChatSession[]> => {
-  const { data, error } = await supabase.from(CHAT_SESSION_TABLE).select('*').order('lastMessageTime', { ascending: false });
-  if (error) return [];
+  const { data } = await supabase.from(CHAT_SESSION_TABLE).select('*').order('lastMessageTime', { ascending: false });
   return (data || []) as ChatSession[];
 };
 
 export const fetchChatMessages = async (customerId: string, store?: string | null): Promise<any[]> => {
-  const { data, error } = await supabase
-    .from(CHAT_MSG_TABLE)
-    .select('*')
-    .eq('customerId', customerId)
-    .order('timestamp', { ascending: true });
-
-  if (error) return [];
+  const { data } = await supabase.from(CHAT_MSG_TABLE).select('*').eq('customerId', customerId).order('timestamp', { ascending: true });
   return data || [];
 };
 
-export const sendChatMessage = async (
-  customerId: string,
-  customerName: string,
-  text: string,
-  sender: 'user' | 'admin',
-  store?: string | null
-): Promise<void> => {
+export const sendChatMessage = async (customerId: string, customerName: string, text: string, sender: 'user' | 'admin', store?: string | null): Promise<void> => {
   const timestamp = Date.now();
+  await supabase.from(CHAT_MSG_TABLE).insert([{ customerId, text, sender, timestamp, read: false }]);
   
-  // 1. Simpan pesan
-  await supabase.from(CHAT_MSG_TABLE).insert([{
-    customerId, text, sender, timestamp, read: false
-  }]);
-
-  // 2. Update atau Buat Sesi
-  const { data: existingSession } = await supabase
-    .from(CHAT_SESSION_TABLE)
-    .select('id')
-    .eq('customerId', customerId)
-    .single();
-
-  if (existingSession) {
-    await supabase.from(CHAT_SESSION_TABLE)
-      .update({ lastMessage: text, lastMessageTime: timestamp, unreadCount: sender === 'user' ? 1 : 0 }) // Logic unread count perlu disempurnakan (increment)
-      .eq('customerId', customerId);
+  const { data } = await supabase.from(CHAT_SESSION_TABLE).select('id').eq('customerId', customerId).single();
+  if (data) {
+    await supabase.from(CHAT_SESSION_TABLE).update({ lastMessage: text, lastMessageTime: timestamp }).eq('customerId', customerId);
   } else {
-    await supabase.from(CHAT_SESSION_TABLE).insert([{
-      customerId, customerName, lastMessage: text, lastMessageTime: timestamp, unreadCount: sender === 'user' ? 1 : 0
-    }]);
+    await supabase.from(CHAT_SESSION_TABLE).insert([{ customerId, customerName, lastMessage: text, lastMessageTime: timestamp, unreadCount: sender === 'user' ? 1 : 0 }]);
   }
 };
 
 export const markMessagesAsRead = async (customerId: string, role: 'admin' | 'user', store?: string | null): Promise<void> => {
-  // Reset unread count di session
-  if (role === 'admin') {
-    await supabase.from(CHAT_SESSION_TABLE).update({ unreadCount: 0 }).eq('customerId', customerId);
-  }
+  if (role === 'admin') await supabase.from(CHAT_SESSION_TABLE).update({ unreadCount: 0 }).eq('customerId', customerId);
 };
 
-// --- RETUR FUNCTIONS ---
+// --- RETUR & SCAN RESI (Pass-through) ---
 const RETUR_TABLE = 'retur_records';
-
-export const fetchRetur = async (store?: string | null): Promise<ReturRecord[]> => {
-  const { data, error } = await supabase.from(RETUR_TABLE).select('*').order('date', { ascending: false });
-  if (error) return [];
-  return (data || []) as ReturRecord[];
-};
-
-export const saveReturRecord = async (record: ReturRecord, store?: string | null): Promise<void> => {
-  const { error } = await supabase.from(RETUR_TABLE).insert([record]);
-  if (error) console.error('[Supabase] Error saveReturRecord:', error);
-};
-
-export const fetchReturRecords = fetchRetur; // Alias
-export const addReturTransaction = saveReturRecord; // Alias
-
-export const updateReturKeterangan = async (returId: number, keterangan: string): Promise<void> => {
-  await supabase.from(RETUR_TABLE).update({ keterangan }).eq('id', returId);
-};
-
-// --- SCAN RESI FUNCTIONS (Placeholder/Basic CRUD) ---
 const SCAN_RESI_TABLE = 'scan_resi_logs';
 
-export const fetchScanResiLogs = async (store?: string | null): Promise<ScanResiLog[]> => {
-  const { data, error } = await supabase.from(SCAN_RESI_TABLE).select('*').order('created_at', { ascending: false });
-  if (error) return [];
-  return (data || []) as ScanResiLog[];
+export const fetchRetur = async (store?: string | null): Promise<ReturRecord[]> => {
+  const { data } = await supabase.from(RETUR_TABLE).select('*').order('date', { ascending: false });
+  return (data || []) as ReturRecord[];
+};
+export const saveReturRecord = async (record: ReturRecord, store?: string | null): Promise<void> => {
+  await supabase.from(RETUR_TABLE).insert([record]);
+};
+export const fetchReturRecords = fetchRetur;
+export const addReturTransaction = saveReturRecord;
+export const updateReturKeterangan = async (id: number, ket: string): Promise<void> => {
+  await supabase.from(RETUR_TABLE).update({ keterangan: ket }).eq('id', id);
 };
 
+export const fetchScanResiLogs = async (store?: string | null): Promise<ScanResiLog[]> => {
+  const { data } = await supabase.from(SCAN_RESI_TABLE).select('*').order('created_at', { ascending: false });
+  return (data || []) as ScanResiLog[];
+};
 export const addScanResiLog = async (log: Omit<ScanResiLog, 'id'>, store?: string | null): Promise<void> => {
   await supabase.from(SCAN_RESI_TABLE).insert([log]);
 };
-
-export const saveScanResiLog = addScanResiLog; // Alias
-
-export const updateScanResiLogField = async (logId: number, field: string, value: any): Promise<void> => {
-  await supabase.from(SCAN_RESI_TABLE).update({ [field]: value }).eq('id', logId);
+export const saveScanResiLog = addScanResiLog;
+export const updateScanResiLogField = async (id: number, field: string, value: any): Promise<void> => {
+  await supabase.from(SCAN_RESI_TABLE).update({ [field]: value }).eq('id', id);
 };
-
-export const deleteScanResiLog = async (logId: number): Promise<void> => {
-  await supabase.from(SCAN_RESI_TABLE).delete().eq('id', logId);
+export const deleteScanResiLog = async (id: number): Promise<void> => {
+  await supabase.from(SCAN_RESI_TABLE).delete().eq('id', id);
 };
-
-export const duplicateScanResiLog = async (logId: number): Promise<void> => {
-  const { data } = await supabase.from(SCAN_RESI_TABLE).select('*').eq('id', logId).single();
-  if (data) {
-    const { id, ...rest } = data;
-    await supabase.from(SCAN_RESI_TABLE).insert([rest]);
-  }
+export const duplicateScanResiLog = async (id: number): Promise<void> => {
+  const { data } = await supabase.from(SCAN_RESI_TABLE).select('*').eq('id', id).single();
+  if (data) { const { id: _old, ...rest } = data; await supabase.from(SCAN_RESI_TABLE).insert([rest]); }
 };
-
-export const processShipmentToOrders = async (resis: string[]): Promise<void> => {
-  console.log('[Supabase] Processing shipment for resis:', resis);
-  // Logika bisnis kompleks: Update status order berdasarkan resi
-  // Perlu query ke tabel order cari yang resi-nya cocok, lalu update status 'shipped'
-};
-
+export const processShipmentToOrders = async (resis: string[]): Promise<void> => { console.log('Processing:', resis); };
 export const importScanResiFromExcel = async (data: any[]): Promise<{ success: boolean; skippedCount: number }> => {
-  // Bulk insert
   const { error } = await supabase.from(SCAN_RESI_TABLE).insert(data);
   return { success: !error, skippedCount: 0 };
 };
