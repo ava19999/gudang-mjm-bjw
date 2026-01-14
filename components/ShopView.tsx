@@ -172,7 +172,7 @@ export const ShopView: React.FC<ShopViewProps> = ({
   };
 
   return (
-    <div className="relative min-h-full pb-20 bg-gray-900 text-gray-100 flex flex-col h-full overflow-hidden">
+    <div className="relative min-h-full pb-24 md:pb-4 bg-gray-900 text-gray-100 flex flex-col h-full overflow-hidden">
       {/* Crop Modal */}
       {tempBannerImg && <ImageCropper imageSrc={tempBannerImg} onConfirm={handleCropConfirm} onCancel={() => setTempBannerImg(null)} />}
       

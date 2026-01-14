@@ -32,51 +32,60 @@ export const FinanceMenu: React.FC<FinanceMenuProps> = ({
       <div className="relative">
         <button 
           onClick={handleMainClick}
-          className={`w-full flex flex-col items-center justify-center gap-1 ${
+          className={`w-full flex flex-col items-center justify-center gap-1.5 transition-all duration-200 active:scale-95 ${
             isFinanceActive ? 'text-yellow-400' : 'text-gray-500 hover:text-gray-300'
           }`}
         >
-          <Wallet size={22} className={isFinanceActive ? 'fill-yellow-900/50' : ''} />
-          <span className="text-[10px] font-medium">Keuangan</span>
+          {isFinanceActive && <div className="absolute top-0 left-1/2 -translate-x-1/2 w-12 h-1 bg-gradient-to-r from-transparent via-yellow-400 to-transparent rounded-full"></div>}
+          <div className={`p-2 rounded-xl transition-all duration-200 ${isFinanceActive ? 'bg-yellow-900/30 shadow-lg shadow-yellow-900/20' : 'bg-transparent'}`}>
+            <Wallet size={22} className={`transition-all duration-200 ${isFinanceActive ? 'fill-yellow-900/50 drop-shadow-sm' : ''}`} />
+          </div>
+          <span className={`text-[10px] font-semibold transition-all ${isFinanceActive ? 'text-yellow-300' : 'text-gray-500'}`}>Keuangan</span>
         </button>
 
         {isOpen && (
-          <div className="absolute bottom-full left-0 right-0 mb-2 bg-gray-800 border border-gray-700 rounded-xl shadow-xl overflow-hidden">
+          <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-3 bg-gray-800/95 backdrop-blur-sm border border-gray-700 rounded-2xl shadow-2xl overflow-hidden min-w-[200px] animate-in slide-in-from-bottom-2 fade-in duration-200">
             <button
               onClick={() => {
                 setActiveView('petty_cash');
                 setIsOpen(false);
               }}
-              className={`w-full px-4 py-3 text-left hover:bg-gray-700 transition-colors flex items-center gap-2 ${
-                activeView === 'petty_cash' ? 'bg-gray-700 text-green-400' : 'text-gray-300'
+              className={`w-full px-4 py-3.5 text-left hover:bg-gray-700/80 transition-all duration-150 flex items-center gap-3 active:scale-[0.98] ${
+                activeView === 'petty_cash' ? 'bg-gradient-to-r from-green-900/30 to-transparent text-green-400 shadow-inner' : 'text-gray-300'
               }`}
             >
-              <Wallet size={16} />
-              <span className="text-sm font-medium">Petty Cash</span>
+              <div className={`p-1.5 rounded-lg ${activeView === 'petty_cash' ? 'bg-green-900/40' : 'bg-gray-700/50'}`}>
+                <Wallet size={18} />
+              </div>
+              <span className="text-sm font-semibold">Petty Cash</span>
             </button>
             <button
               onClick={() => {
                 setActiveView('barang_kosong');
                 setIsOpen(false);
               }}
-              className={`w-full px-4 py-3 text-left hover:bg-gray-700 transition-colors flex items-center gap-2 border-t border-gray-700 ${
-                activeView === 'barang_kosong' ? 'bg-gray-700 text-yellow-400' : 'text-gray-300'
+              className={`w-full px-4 py-3.5 text-left hover:bg-gray-700/80 transition-all duration-150 flex items-center gap-3 border-t border-gray-700/50 active:scale-[0.98] ${
+                activeView === 'barang_kosong' ? 'bg-gradient-to-r from-yellow-900/30 to-transparent text-yellow-400 shadow-inner' : 'text-gray-300'
               }`}
             >
-              <PackageX size={16} />
-              <span className="text-sm font-medium">Barang Kosong</span>
+              <div className={`p-1.5 rounded-lg ${activeView === 'barang_kosong' ? 'bg-yellow-900/40' : 'bg-gray-700/50'}`}>
+                <PackageX size={18} />
+              </div>
+              <span className="text-sm font-semibold">Barang Kosong</span>
             </button>
             <button
               onClick={() => {
                 setActiveView('closing');
                 setIsOpen(false);
               }}
-              className={`w-full px-4 py-3 text-left hover:bg-gray-700 transition-colors flex items-center gap-2 border-t border-gray-700 ${
-                activeView === 'closing' ? 'bg-gray-700 text-blue-400' : 'text-gray-300'
+              className={`w-full px-4 py-3.5 text-left hover:bg-gray-700/80 transition-all duration-150 flex items-center gap-3 border-t border-gray-700/50 active:scale-[0.98] ${
+                activeView === 'closing' ? 'bg-gradient-to-r from-blue-900/30 to-transparent text-blue-400 shadow-inner' : 'text-gray-300'
               }`}
             >
-              <Calendar size={16} />
-              <span className="text-sm font-medium">Closing</span>
+              <div className={`p-1.5 rounded-lg ${activeView === 'closing' ? 'bg-blue-900/40' : 'bg-gray-700/50'}`}>
+                <Calendar size={18} />
+              </div>
+              <span className="text-sm font-semibold">Closing</span>
             </button>
           </div>
         )}
