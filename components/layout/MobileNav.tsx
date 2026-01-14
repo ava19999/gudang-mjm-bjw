@@ -16,22 +16,85 @@ export const MobileNav: React.FC<MobileNavProps> = ({
   isAdmin, activeView, setActiveView, pendingOrdersCount, myPendingOrdersCount
 }) => {
   return (
-    <div className="md:hidden fixed bottom-0 left-0 right-0 bg-gray-800 border-t border-gray-700 pb-safe z-40 shadow-[0_-4px_20px_rgba(0,0,0,0.2)]">
-      <div className={`grid ${isAdmin ? 'grid-cols-5' : 'grid-cols-2'} h-16`}>
+    <div className="md:hidden fixed bottom-0 left-0 right-0 bg-gradient-to-t from-gray-800 via-gray-800 to-gray-800/95 border-t border-gray-700 pb-safe z-40 shadow-[0_-4px_24px_rgba(0,0,0,0.3)] backdrop-blur-sm">
+      <div className={`grid ${isAdmin ? 'grid-cols-5' : 'grid-cols-2'} h-[68px]`}>
           {isAdmin ? (
               <>
-                  <button onClick={()=>setActiveView('shop')} className={`flex flex-col items-center justify-center gap-1 ${activeView==='shop'?'text-purple-400':'text-gray-500 hover:text-gray-300'}`}><ShoppingCart size={22} className={activeView==='shop'?'fill-purple-900/50':''} /><span className="text-[10px] font-medium">Beranda</span></button>
-                  <button onClick={()=>setActiveView('inventory')} className={`flex flex-col items-center justify-center gap-1 ${activeView==='inventory'?'text-purple-400':'text-gray-500 hover:text-gray-300'}`}><Package size={22} className={activeView==='inventory'?'fill-purple-900/50':''} /><span className="text-[10px] font-medium">Gudang</span></button>
-                  <button onClick={()=>setActiveView('quick_input')} className={`relative flex flex-col items-center justify-center gap-1 ${activeView==='quick_input'?'text-green-400':'text-gray-500 hover:text-gray-300'}`}><div className="relative"><Plus size={22} className={activeView==='quick_input'?'fill-green-900/50':''} /></div><span className="text-[10px] font-medium">Input</span></button>
+                  <button 
+                      onClick={()=>setActiveView('shop')} 
+                      className={`flex flex-col items-center justify-center gap-1.5 transition-all duration-200 active:scale-95 relative ${activeView==='shop'?'text-purple-400':'text-gray-500 hover:text-gray-300'}`}
+                  >
+                      {activeView==='shop' && <div className="absolute top-0 left-1/2 -translate-x-1/2 w-12 h-1 bg-gradient-to-r from-transparent via-purple-400 to-transparent rounded-full"></div>}
+                      <div className={`p-2 rounded-xl transition-all duration-200 ${activeView==='shop'?'bg-purple-900/30 shadow-lg shadow-purple-900/20':'bg-transparent'}`}>
+                          <ShoppingCart size={22} className={`transition-all duration-200 ${activeView==='shop'?'fill-purple-900/50 drop-shadow-sm':''}`} />
+                      </div>
+                      <span className={`text-[10px] font-semibold transition-all ${activeView==='shop'?'text-purple-300':'text-gray-500'}`}>Beranda</span>
+                  </button>
+                  
+                  <button 
+                      onClick={()=>setActiveView('inventory')} 
+                      className={`flex flex-col items-center justify-center gap-1.5 transition-all duration-200 active:scale-95 relative ${activeView==='inventory'?'text-purple-400':'text-gray-500 hover:text-gray-300'}`}
+                  >
+                      {activeView==='inventory' && <div className="absolute top-0 left-1/2 -translate-x-1/2 w-12 h-1 bg-gradient-to-r from-transparent via-purple-400 to-transparent rounded-full"></div>}
+                      <div className={`p-2 rounded-xl transition-all duration-200 ${activeView==='inventory'?'bg-purple-900/30 shadow-lg shadow-purple-900/20':'bg-transparent'}`}>
+                          <Package size={22} className={`transition-all duration-200 ${activeView==='inventory'?'fill-purple-900/50 drop-shadow-sm':''}`} />
+                      </div>
+                      <span className={`text-[10px] font-semibold transition-all ${activeView==='inventory'?'text-purple-300':'text-gray-500'}`}>Gudang</span>
+                  </button>
+                  
+                  <button 
+                      onClick={()=>setActiveView('quick_input')} 
+                      className={`relative flex flex-col items-center justify-center gap-1.5 transition-all duration-200 active:scale-95 ${activeView==='quick_input'?'text-green-400':'text-gray-500 hover:text-gray-300'}`}
+                  >
+                      {activeView==='quick_input' && <div className="absolute top-0 left-1/2 -translate-x-1/2 w-12 h-1 bg-gradient-to-r from-transparent via-green-400 to-transparent rounded-full"></div>}
+                      <div className={`p-2 rounded-xl transition-all duration-200 ${activeView==='quick_input'?'bg-green-900/30 shadow-lg shadow-green-900/20':'bg-transparent'}`}>
+                          <Plus size={22} className={`transition-all duration-200 ${activeView==='quick_input'?'fill-green-900/50 drop-shadow-sm':''}`} />
+                      </div>
+                      <span className={`text-[10px] font-semibold transition-all ${activeView==='quick_input'?'text-green-300':'text-gray-500'}`}>Input</span>
+                  </button>
+                  
                   <FinanceMenu activeView={activeView} setActiveView={setActiveView} isMobile={true} />
-                  <button onClick={()=>setActiveView('orders')} className={`relative flex flex-col items-center justify-center gap-1 ${activeView==='orders'?'text-purple-400':'text-gray-500 hover:text-gray-300'}`}><div className="relative"><ClipboardList size={22} className={activeView==='orders'?'fill-purple-900/50':''} />{pendingOrdersCount>0 && <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full border border-gray-900"></span>}</div><span className="text-[10px] font-medium">Pesanan</span></button>
+                  
+                  <button 
+                      onClick={()=>setActiveView('orders')} 
+                      className={`relative flex flex-col items-center justify-center gap-1.5 transition-all duration-200 active:scale-95 ${activeView==='orders'?'text-purple-400':'text-gray-500 hover:text-gray-300'}`}
+                  >
+                      {activeView==='orders' && <div className="absolute top-0 left-1/2 -translate-x-1/2 w-12 h-1 bg-gradient-to-r from-transparent via-purple-400 to-transparent rounded-full"></div>}
+                      <div className="relative">
+                          <div className={`p-2 rounded-xl transition-all duration-200 ${activeView==='orders'?'bg-purple-900/30 shadow-lg shadow-purple-900/20':'bg-transparent'}`}>
+                              <ClipboardList size={22} className={`transition-all duration-200 ${activeView==='orders'?'fill-purple-900/50 drop-shadow-sm':''}`} />
+                          </div>
+                          {pendingOrdersCount>0 && <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 bg-red-500 text-white text-[9px] font-bold rounded-full border-2 border-gray-800 flex items-center justify-center shadow-lg">{pendingOrdersCount}</span>}
+                      </div>
+                      <span className={`text-[10px] font-semibold transition-all ${activeView==='orders'?'text-purple-300':'text-gray-500'}`}>Pesanan</span>
+                  </button>
               </>
           ) : (
               <>
-                  <button onClick={()=>setActiveView('shop')} className={`flex flex-col items-center justify-center gap-1 ${activeView==='shop'?'text-blue-400':'text-gray-500 hover:text-gray-300'}`}><Home size={22} className={activeView==='shop'?'fill-blue-900/50':''} /><span className="text-[10px] font-medium">Belanja</span></button>
-                  <button onClick={()=>setActiveView('orders')} className={`relative flex flex-col items-center justify-center gap-1 ${activeView==='orders'?'text-blue-400':'text-gray-500 hover:text-gray-300'}`}>
-                      <div className="relative"><ClipboardList size={22} className={activeView==='orders'?'fill-blue-900/50':''} />{myPendingOrdersCount > 0 && <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-orange-500 rounded-full border border-gray-900"></span>}</div>
-                      <span className="text-[10px] font-medium">Pesanan</span></button>
+                  <button 
+                      onClick={()=>setActiveView('shop')} 
+                      className={`flex flex-col items-center justify-center gap-1.5 transition-all duration-200 active:scale-95 relative ${activeView==='shop'?'text-blue-400':'text-gray-500 hover:text-gray-300'}`}
+                  >
+                      {activeView==='shop' && <div className="absolute top-0 left-1/2 -translate-x-1/2 w-16 h-1 bg-gradient-to-r from-transparent via-blue-400 to-transparent rounded-full"></div>}
+                      <div className={`p-2.5 rounded-xl transition-all duration-200 ${activeView==='shop'?'bg-blue-900/30 shadow-lg shadow-blue-900/20':'bg-transparent'}`}>
+                          <Home size={24} className={`transition-all duration-200 ${activeView==='shop'?'fill-blue-900/50 drop-shadow-sm':''}`} />
+                      </div>
+                      <span className={`text-[11px] font-semibold transition-all ${activeView==='shop'?'text-blue-300':'text-gray-500'}`}>Belanja</span>
+                  </button>
+                  
+                  <button 
+                      onClick={()=>setActiveView('orders')} 
+                      className={`relative flex flex-col items-center justify-center gap-1.5 transition-all duration-200 active:scale-95 ${activeView==='orders'?'text-blue-400':'text-gray-500 hover:text-gray-300'}`}
+                  >
+                      {activeView==='orders' && <div className="absolute top-0 left-1/2 -translate-x-1/2 w-16 h-1 bg-gradient-to-r from-transparent via-blue-400 to-transparent rounded-full"></div>}
+                      <div className="relative">
+                          <div className={`p-2.5 rounded-xl transition-all duration-200 ${activeView==='orders'?'bg-blue-900/30 shadow-lg shadow-blue-900/20':'bg-transparent'}`}>
+                              <ClipboardList size={24} className={`transition-all duration-200 ${activeView==='orders'?'fill-blue-900/50 drop-shadow-sm':''}`} />
+                          </div>
+                          {myPendingOrdersCount > 0 && <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 bg-orange-500 text-white text-[9px] font-bold rounded-full border-2 border-gray-800 flex items-center justify-center shadow-lg animate-pulse">{myPendingOrdersCount}</span>}
+                      </div>
+                      <span className={`text-[11px] font-semibold transition-all ${activeView==='orders'?'text-blue-300':'text-gray-500'}`}>Pesanan</span>
+                  </button>
               </>
           )}
       </div>
