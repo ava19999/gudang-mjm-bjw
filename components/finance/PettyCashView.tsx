@@ -199,39 +199,36 @@ export const PettyCashView: React.FC = () => {
     // Remove the entry
     const updatedEntries = entries.filter(e => e.id !== entryId);
     
-    // Recalculate balances for all entries of the same account type after the deleted entry
-    const accountEntries = updatedEntries.filter(e => e.accountType === entryToDelete.accountType);
-    const sortedAccountEntries = accountEntries.sort((a, b) => {
+    // Sort all entries by date and time for proper ordering
+    const sortedEntries = [...updatedEntries].sort((a, b) => {
       if (a.date !== b.date) return a.date.localeCompare(b.date);
       return a.createdAt - b.createdAt;
     });
     
-    // Recalculate balances
-    let runningBalance = 0;
-    const recalculatedEntries = updatedEntries.map(entry => {
-      if (entry.accountType !== entryToDelete.accountType) {
-        return entry;
+    // Recalculate balances for each account type separately
+    const recalculatedEntries = sortedEntries.map((entry) => {
+      // Find all previous entries for this account type
+      const previousEntries = sortedEntries.filter(e => 
+        e.accountType === entry.accountType && 
+        (e.date < entry.date || (e.date === entry.date && e.createdAt < entry.createdAt))
+      );
+      
+      // Calculate balance from all previous entries
+      let balance = 0;
+      for (const prevEntry of previousEntries) {
+        balance += prevEntry.type === 'in' ? prevEntry.amount : -prevEntry.amount;
       }
       
-      const entryIndex = sortedAccountEntries.findIndex(e => e.id === entry.id);
-      if (entryIndex === 0) {
-        runningBalance = entry.type === 'in' ? entry.amount : -entry.amount;
-      } else {
-        runningBalance = entry.type === 'in' 
-          ? runningBalance + entry.amount 
-          : runningBalance - entry.amount;
-      }
+      // Add current entry to balance
+      balance += entry.type === 'in' ? entry.amount : -entry.amount;
       
       return {
         ...entry,
-        balance: runningBalance
+        balance
       };
     });
     
-    setEntries(recalculatedEntries.sort((a, b) => {
-      if (a.date !== b.date) return a.date.localeCompare(b.date);
-      return a.createdAt - b.createdAt;
-    }));
+    setEntries(recalculatedEntries);
   };
   
   const handleKeyDown = (e: React.KeyboardEvent, field: 'date' | 'type' | 'description' | 'amount') => {
