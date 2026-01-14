@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { ShoppingCart, Package, Plus, ClipboardList, Home } from 'lucide-react';
 import { ActiveView } from '../../types/ui';
 import { FinanceMenu } from '../finance/FinanceMenu';
+import { OnlineMenu } from '../online/OnlineMenu';
 import { NotificationBadge } from '../common/NotificationBadge';
 
 interface MobileNavProps {
@@ -45,7 +46,7 @@ export const MobileNav: React.FC<MobileNavProps> = ({
         isVisible ? 'translate-y-0' : 'translate-y-full'
       }`}
     >
-      <div className={`grid ${isAdmin ? 'grid-cols-5' : 'grid-cols-2'} h-[68px]`}>
+      <div className={`grid ${isAdmin ? 'grid-cols-6' : 'grid-cols-2'} h-[68px]`}>
           {isAdmin ? (
               <>
                   <button 
@@ -82,6 +83,8 @@ export const MobileNav: React.FC<MobileNavProps> = ({
                   </button>
                   
                   <FinanceMenu activeView={activeView} setActiveView={setActiveView} isMobile={true} />
+                  
+                  <OnlineMenu activeView={activeView} setActiveView={setActiveView} isMobile={true} />
                   
                   <button 
                       onClick={()=>setActiveView('orders')} 

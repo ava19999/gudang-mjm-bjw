@@ -7,6 +7,7 @@ import {
 import { ActiveView } from '../../types/ui';
 import { StoreConfig } from '../../types/store';
 import { FinanceMenu } from '../finance/FinanceMenu';
+import { OnlineMenu } from '../online/OnlineMenu';
 
 interface HeaderProps {
   isAdmin: boolean;
@@ -69,6 +70,7 @@ export const Header: React.FC<HeaderProps> = ({
                   <button onClick={() => setActiveView('inventory')} className={`hidden md:flex items-center gap-2 px-3 py-2 text-sm font-semibold rounded-xl transition-all ${activeView==='inventory'?'bg-purple-900/40 text-purple-300 ring-1 ring-purple-800/60 shadow-lg':'text-gray-400 hover:bg-gray-700/80 hover:text-gray-200'}`}><Package size={18}/> Gudang</button>
                   <button onClick={() => setActiveView('quick_input')} className={`hidden md:flex items-center gap-2 px-3 py-2 text-sm font-semibold rounded-xl transition-all ${activeView==='quick_input'?'bg-green-900/40 text-green-300 ring-1 ring-green-800/60 shadow-lg':'text-gray-400 hover:bg-gray-700/80 hover:text-gray-200'}`}><Plus size={18}/> Input Barang</button>
                   <FinanceMenu activeView={activeView} setActiveView={setActiveView} />
+                  <OnlineMenu activeView={activeView} setActiveView={setActiveView} />
                   <button onClick={() => setActiveView('orders')} className={`hidden md:flex items-center gap-2 px-3 py-2 text-sm font-semibold rounded-xl transition-all ${activeView==='orders'?'bg-purple-900/40 text-purple-300 ring-1 ring-purple-800/60 shadow-lg':'text-gray-400 hover:bg-gray-700/80 hover:text-gray-200'}`}>
                     <ClipboardList size={18}/> Pesanan {pendingOrdersCount > 0 && <span className="bg-red-500 text-white text-[10px] h-5 min-w-[20px] px-1.5 flex items-center justify-center rounded-full ml-1 font-bold shadow-lg">{pendingOrdersCount}</span>}
                   </button>
