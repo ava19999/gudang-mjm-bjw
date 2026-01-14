@@ -1,5 +1,5 @@
 // FILE: src/components/layout/MobileNav.tsx
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { ShoppingCart, Package, Plus, ClipboardList, Home } from 'lucide-react';
 import { ActiveView } from '../../types/ui';
 import { FinanceMenu } from '../finance/FinanceMenu';
@@ -16,8 +16,35 @@ interface MobileNavProps {
 export const MobileNav: React.FC<MobileNavProps> = ({
   isAdmin, activeView, setActiveView, pendingOrdersCount, myPendingOrdersCount
 }) => {
+  const [isVisible, setIsVisible] = useState(true);
+  const [lastScrollY, setLastScrollY] = useState(0);
+
+  useEffect(() => {
+    const handleScroll = () => {
+      const currentScrollY = window.scrollY;
+      
+      // Show nav when scrolling up or at the top
+      if (currentScrollY < lastScrollY || currentScrollY < 50) {
+        setIsVisible(true);
+      } 
+      // Hide nav when scrolling down (and not at the top)
+      else if (currentScrollY > lastScrollY && currentScrollY > 100) {
+        setIsVisible(false);
+      }
+      
+      setLastScrollY(currentScrollY);
+    };
+
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, [lastScrollY]);
+
   return (
-    <div className="md:hidden fixed bottom-0 left-0 right-0 bg-gradient-to-t from-gray-800 via-gray-800 to-gray-800/95 border-t border-gray-700 pb-safe z-40 shadow-[0_-4px_24px_rgba(0,0,0,0.3)] backdrop-blur-sm">
+    <div 
+      className={`md:hidden fixed bottom-0 left-0 right-0 bg-gradient-to-t from-gray-800 via-gray-800 to-gray-800/95 border-t border-gray-700 pb-safe z-40 shadow-[0_-4px_24px_rgba(0,0,0,0.3)] backdrop-blur-sm transition-transform duration-300 ${
+        isVisible ? 'translate-y-0' : 'translate-y-full'
+      }`}
+    >
       <div className={`grid ${isAdmin ? 'grid-cols-5' : 'grid-cols-2'} h-[68px]`}>
           {isAdmin ? (
               <>

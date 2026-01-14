@@ -106,7 +106,7 @@ export const StatCard: React.FC<StatCardProps> = ({
       </div>
       
       <div className="relative z-10">
-        <div className={`${interactive ? 'text-2xl' : 'text-3xl'} font-extrabold ${backgroundImage ? 'text-yellow-50' : 'text-white'} drop-shadow-md ${detailText ? 'mb-1' : ''}`}>
+        <div className={`${interactive ? 'text-xl' : 'text-2xl'} font-extrabold ${backgroundImage ? 'text-yellow-50' : 'text-white'} drop-shadow-md ${detailText ? 'mb-1' : ''}`}>
           {value}
         </div>
         {detailText && (
