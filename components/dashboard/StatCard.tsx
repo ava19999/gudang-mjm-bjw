@@ -20,6 +20,7 @@ const colorConfig = {
     shadow: 'shadow-blue-900/20 hover:shadow-blue-800/30',
     iconBg: 'bg-blue-900/60',
     textColor: 'text-blue-400',
+    hoverBorder: '',
   },
   purple: {
     gradient: 'from-purple-900/50 via-purple-800/30 to-gray-800',
@@ -27,6 +28,7 @@ const colorConfig = {
     shadow: 'shadow-purple-900/20 hover:shadow-purple-800/30',
     iconBg: 'bg-purple-900/60',
     textColor: 'text-purple-400',
+    hoverBorder: '',
   },
   green: {
     gradient: 'from-green-900/30 to-gray-800',
@@ -67,18 +69,20 @@ export const StatCard: React.FC<StatCardProps> = ({
   const config = colorConfig[color];
   const Tag = interactive ? 'button' : 'div';
   
+  const transitionDuration = interactive ? 'transition-all duration-200' : 'transition-all duration-300';
+  
   const baseClasses = `
     min-w-[145px] snap-start snap-always 
     bg-gradient-to-br ${config.gradient}
     p-3.5 rounded-2xl border ${config.border}
     flex flex-col justify-between h-[110px] 
     md:w-auto shadow-lg ${config.shadow}
-    transition-all duration-${interactive ? '200' : '300'}
+    ${transitionDuration}
     relative overflow-hidden
   `;
   
   const interactiveClasses = interactive 
-    ? `text-left ${config.hoverBorder || ''} hover:shadow-lg active:scale-[0.97] shadow-md cursor-pointer`
+    ? `text-left ${config.hoverBorder} hover:shadow-lg active:scale-[0.97] shadow-md cursor-pointer`
     : '';
 
   return (
