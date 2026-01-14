@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   Wallet, Plus, Calendar, ArrowUpRight, ArrowDownRight, 
-  Download, Printer, X, Check, 
+  Download, Printer, X, Check, Trash2,
   Keyboard, Search, Filter, CreditCard
 } from 'lucide-react';
 import { generateId } from '../../utils';
@@ -34,6 +34,14 @@ const FREQUENT_DESCRIPTIONS = [
   'Penerimaan Kas',
   'Penggantian Dana',
 ];
+
+// Format currency with thousands separators and trailing zeros
+const formatCurrency = (amount: number): string => {
+  return amount.toLocaleString('id-ID', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0
+  });
+};
 
 export const PettyCashView: React.FC = () => {
   const [entries, setEntries] = useState<PettyCashEntry[]>([]);
@@ -180,6 +188,52 @@ export const PettyCashView: React.FC = () => {
     setIsAdding(false);
   };
   
+  const handleDeleteEntry = (entryId: string) => {
+    if (!confirm('Apakah Anda yakin ingin menghapus transaksi ini?')) {
+      return;
+    }
+    
+    const entryToDelete = entries.find(e => e.id === entryId);
+    if (!entryToDelete) return;
+    
+    // Remove the entry
+    const updatedEntries = entries.filter(e => e.id !== entryId);
+    
+    // Recalculate balances for all entries of the same account type after the deleted entry
+    const accountEntries = updatedEntries.filter(e => e.accountType === entryToDelete.accountType);
+    const sortedAccountEntries = accountEntries.sort((a, b) => {
+      if (a.date !== b.date) return a.date.localeCompare(b.date);
+      return a.createdAt - b.createdAt;
+    });
+    
+    // Recalculate balances
+    let runningBalance = 0;
+    const recalculatedEntries = updatedEntries.map(entry => {
+      if (entry.accountType !== entryToDelete.accountType) {
+        return entry;
+      }
+      
+      const entryIndex = sortedAccountEntries.findIndex(e => e.id === entry.id);
+      if (entryIndex === 0) {
+        runningBalance = entry.type === 'in' ? entry.amount : -entry.amount;
+      } else {
+        runningBalance = entry.type === 'in' 
+          ? runningBalance + entry.amount 
+          : runningBalance - entry.amount;
+      }
+      
+      return {
+        ...entry,
+        balance: runningBalance
+      };
+    });
+    
+    setEntries(recalculatedEntries.sort((a, b) => {
+      if (a.date !== b.date) return a.date.localeCompare(b.date);
+      return a.createdAt - b.createdAt;
+    }));
+  };
+  
   const handleKeyDown = (e: React.KeyboardEvent, field: 'date' | 'type' | 'description' | 'amount') => {
     // Handle Enter key for form submission
     if (e.key === 'Enter' && field === 'amount') {
@@ -287,7 +341,7 @@ export const PettyCashView: React.FC = () => {
                     <p className="text-green-100 text-xs font-medium">Kas</p>
                   </div>
                   <p className="text-2xl font-bold text-white">
-                    Rp {currentCashBalance.toLocaleString('id-ID')}
+                    Rp {formatCurrency(currentCashBalance)}
                   </p>
                 </div>
                 <div className="bg-white/10 rounded-xl p-4 pl-6 sm:pl-4 backdrop-blur-sm">
@@ -296,14 +350,14 @@ export const PettyCashView: React.FC = () => {
                     <p className="text-green-100 text-xs font-medium">Rekening</p>
                   </div>
                   <p className="text-2xl font-bold text-white">
-                    Rp {currentBankBalance.toLocaleString('id-ID')}
+                    Rp {formatCurrency(currentBankBalance)}
                   </p>
                 </div>
               </div>
               <div className="bg-white/10 rounded-xl p-3 pl-6 sm:pl-3 backdrop-blur-sm">
                 <p className="text-green-100 text-xs font-medium mb-1">Total Saldo</p>
                 <p className="text-3xl font-bold text-white">
-                  Rp {currentBalance.toLocaleString('id-ID')}
+                  Rp {formatCurrency(currentBalance)}
                 </p>
               </div>
             </div>
@@ -459,37 +513,46 @@ export const PettyCashView: React.FC = () => {
               ) : (
                 <div className="divide-y divide-gray-700 print:divide-gray-300 max-h-[600px] overflow-y-auto">
                   {filteredEntries.filter(e => e.accountType === 'cash').map((entry) => (
-                    <div key={entry.id} className="p-4 hover:bg-gray-750 transition-colors print:hover:bg-white print:py-2">
-                      <div className="flex justify-between items-start">
-                        <div className="flex items-start gap-3">
-                          <div className={`p-2 rounded-lg print:hidden ${
+                    <div key={entry.id} className="p-3 hover:bg-gray-750 transition-colors print:hover:bg-white print:py-2 group">
+                      <div className="flex justify-between items-start gap-2">
+                        <div className="flex items-start gap-2 min-w-0 flex-1">
+                          <div className={`p-1.5 rounded-lg print:hidden flex-shrink-0 ${
                             entry.type === 'in' 
                               ? 'bg-green-900/30 text-green-400' 
                               : 'bg-red-900/30 text-red-400'
                           }`}>
                             {entry.type === 'in' ? (
-                              <ArrowDownRight size={20} />
+                              <ArrowDownRight size={16} />
                             ) : (
-                              <ArrowUpRight size={20} />
+                              <ArrowUpRight size={16} />
                             )}
                           </div>
-                          <div>
-                            <p className="text-gray-100 font-medium print:text-gray-900">{entry.description}</p>
-                            <div className="flex items-center gap-2 mt-1 flex-wrap">
-                              <Calendar size={14} className="text-gray-500 print:text-gray-700" />
+                          <div className="min-w-0 flex-1">
+                            <p className="text-gray-100 font-medium text-sm print:text-gray-900 truncate">{entry.description}</p>
+                            <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                              <Calendar size={12} className="text-gray-500 print:text-gray-700 flex-shrink-0" />
                               <p className="text-xs text-gray-400 print:text-gray-700">{entry.date}</p>
                             </div>
                           </div>
                         </div>
-                        <div className="text-right">
-                          <p className={`text-lg font-bold ${
-                            entry.type === 'in' ? 'text-green-400 print:text-green-700' : 'text-red-400 print:text-red-700'
-                          }`}>
-                            {entry.type === 'in' ? '+' : '-'} Rp {entry.amount.toLocaleString('id-ID')}
-                          </p>
-                          <p className="text-xs text-gray-500 mt-1 print:text-gray-700">
-                            Saldo: Rp {entry.balance.toLocaleString('id-ID')}
-                          </p>
+                        <div className="flex items-start gap-2">
+                          <div className="text-right">
+                            <p className={`text-base font-bold ${
+                              entry.type === 'in' ? 'text-green-400 print:text-green-700' : 'text-red-400 print:text-red-700'
+                            }`}>
+                              {entry.type === 'in' ? '+' : '-'} Rp {formatCurrency(entry.amount)}
+                            </p>
+                            <p className="text-xs text-gray-500 mt-0.5 print:text-gray-700">
+                              Saldo: Rp {formatCurrency(entry.balance)}
+                            </p>
+                          </div>
+                          <button
+                            onClick={() => handleDeleteEntry(entry.id)}
+                            className="opacity-0 group-hover:opacity-100 print:hidden transition-opacity p-1.5 hover:bg-red-500/20 rounded-lg text-red-400 hover:text-red-300"
+                            title="Hapus transaksi"
+                          >
+                            <Trash2 size={16} />
+                          </button>
                         </div>
                       </div>
                     </div>
@@ -527,37 +590,46 @@ export const PettyCashView: React.FC = () => {
               ) : (
                 <div className="divide-y divide-gray-700 print:divide-gray-300 max-h-[600px] overflow-y-auto">
                   {filteredEntries.filter(e => e.accountType === 'bank').map((entry) => (
-                    <div key={entry.id} className="p-4 hover:bg-gray-750 transition-colors print:hover:bg-white print:py-2">
-                      <div className="flex justify-between items-start">
-                        <div className="flex items-start gap-3">
-                          <div className={`p-2 rounded-lg print:hidden ${
+                    <div key={entry.id} className="p-3 hover:bg-gray-750 transition-colors print:hover:bg-white print:py-2 group">
+                      <div className="flex justify-between items-start gap-2">
+                        <div className="flex items-start gap-2 min-w-0 flex-1">
+                          <div className={`p-1.5 rounded-lg print:hidden flex-shrink-0 ${
                             entry.type === 'in' 
                               ? 'bg-green-900/30 text-green-400' 
                               : 'bg-red-900/30 text-red-400'
                           }`}>
                             {entry.type === 'in' ? (
-                              <ArrowDownRight size={20} />
+                              <ArrowDownRight size={16} />
                             ) : (
-                              <ArrowUpRight size={20} />
+                              <ArrowUpRight size={16} />
                             )}
                           </div>
-                          <div>
-                            <p className="text-gray-100 font-medium print:text-gray-900">{entry.description}</p>
-                            <div className="flex items-center gap-2 mt-1 flex-wrap">
-                              <Calendar size={14} className="text-gray-500 print:text-gray-700" />
+                          <div className="min-w-0 flex-1">
+                            <p className="text-gray-100 font-medium text-sm print:text-gray-900 truncate">{entry.description}</p>
+                            <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                              <Calendar size={12} className="text-gray-500 print:text-gray-700 flex-shrink-0" />
                               <p className="text-xs text-gray-400 print:text-gray-700">{entry.date}</p>
                             </div>
                           </div>
                         </div>
-                        <div className="text-right">
-                          <p className={`text-lg font-bold ${
-                            entry.type === 'in' ? 'text-green-400 print:text-green-700' : 'text-red-400 print:text-red-700'
-                          }`}>
-                            {entry.type === 'in' ? '+' : '-'} Rp {entry.amount.toLocaleString('id-ID')}
-                          </p>
-                          <p className="text-xs text-gray-500 mt-1 print:text-gray-700">
-                            Saldo: Rp {entry.balance.toLocaleString('id-ID')}
-                          </p>
+                        <div className="flex items-start gap-2">
+                          <div className="text-right">
+                            <p className={`text-base font-bold ${
+                              entry.type === 'in' ? 'text-green-400 print:text-green-700' : 'text-red-400 print:text-red-700'
+                            }`}>
+                              {entry.type === 'in' ? '+' : '-'} Rp {formatCurrency(entry.amount)}
+                            </p>
+                            <p className="text-xs text-gray-500 mt-0.5 print:text-gray-700">
+                              Saldo: Rp {formatCurrency(entry.balance)}
+                            </p>
+                          </div>
+                          <button
+                            onClick={() => handleDeleteEntry(entry.id)}
+                            className="opacity-0 group-hover:opacity-100 print:hidden transition-opacity p-1.5 hover:bg-red-500/20 rounded-lg text-red-400 hover:text-red-300"
+                            title="Hapus transaksi"
+                          >
+                            <Trash2 size={16} />
+                          </button>
                         </div>
                       </div>
                     </div>
