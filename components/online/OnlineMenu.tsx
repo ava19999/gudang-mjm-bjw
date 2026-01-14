@@ -19,12 +19,7 @@ export const OnlineMenu: React.FC<OnlineMenuProps> = ({
   const isOnlineActive = activeView === 'data_agung';
 
   const handleMainClick = () => {
-    if (isMobile) {
-      setIsOpen(!isOpen);
-    } else {
-      // On desktop, toggle dropdown
-      setIsOpen(!isOpen);
-    }
+    setIsOpen(!isOpen);
   };
 
   if (isMobile) {

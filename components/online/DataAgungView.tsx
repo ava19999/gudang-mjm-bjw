@@ -162,14 +162,16 @@ export const DataAgungView: React.FC<DataAgungViewProps> = ({ items, onRefresh, 
 
   // Auto-sync: Check for quantity changes
   React.useEffect(() => {
+    const itemsToMoveToMasuk: TableMasuk[] = [];
+    
     // Update quantities in online products
     setOnlineProducts(prev =>
       prev.map(product => {
         const currentItem = items.find(i => i.partNumber === product.partNumber);
         if (currentItem && currentItem.quantity !== product.quantity) {
-          // If qty increased to > 0, move to Table Masuk
+          // If qty increased to > 0, add to items to move
           if (product.quantity === 0 && currentItem.quantity > 0) {
-            const masukItem: TableMasuk = {
+            itemsToMoveToMasuk.push({
               id: generateId(),
               partNumber: product.partNumber,
               name: product.name,
@@ -177,9 +179,7 @@ export const DataAgungView: React.FC<DataAgungViewProps> = ({ items, onRefresh, 
               quantity: currentItem.quantity,
               isActive: true,
               timestamp: Date.now()
-            };
-            setTableMasuk(prev => [...prev, masukItem]);
-            return { ...product, quantity: currentItem.quantity };
+            });
           }
           return { ...product, quantity: currentItem.quantity };
         }
@@ -192,9 +192,9 @@ export const DataAgungView: React.FC<DataAgungViewProps> = ({ items, onRefresh, 
       prev.map(product => {
         const currentItem = items.find(i => i.partNumber === product.partNumber);
         if (currentItem && currentItem.quantity !== product.quantity) {
-          // If qty increased to > 0, move to Table Masuk
+          // If qty increased to > 0, add to items to move
           if (product.quantity === 0 && currentItem.quantity > 0) {
-            const masukItem: TableMasuk = {
+            itemsToMoveToMasuk.push({
               id: generateId(),
               partNumber: product.partNumber,
               name: product.name,
@@ -202,15 +202,18 @@ export const DataAgungView: React.FC<DataAgungViewProps> = ({ items, onRefresh, 
               quantity: currentItem.quantity,
               isActive: true,
               timestamp: Date.now()
-            };
-            setTableMasuk(prev => [...prev, masukItem]);
-            return { ...product, quantity: currentItem.quantity };
+            });
           }
           return { ...product, quantity: currentItem.quantity };
         }
         return product;
       })
     );
+
+    // Move items to Table Masuk if any
+    if (itemsToMoveToMasuk.length > 0) {
+      setTableMasuk(prev => [...prev, ...itemsToMoveToMasuk]);
+    }
 
     // Update quantities in table masuk
     setTableMasuk(prev =>
@@ -234,7 +237,7 @@ export const DataAgungView: React.FC<DataAgungViewProps> = ({ items, onRefresh, 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Table 1: Base Warehouse */}
         <div className="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden">
-          <div className="bg-gray-750 px-4 py-3 border-b border-gray-700">
+          <div className="bg-gray-700 px-4 py-3 border-b border-gray-700">
             <h2 className="text-lg font-bold text-gray-100 flex items-center gap-2">
               <Package size={20} className="text-blue-400" />
               Base Warehouse
@@ -276,7 +279,7 @@ export const DataAgungView: React.FC<DataAgungViewProps> = ({ items, onRefresh, 
 
         {/* Table 2: Produk Online */}
         <div className="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden">
-          <div className="bg-gray-750 px-4 py-3 border-b border-gray-700">
+          <div className="bg-gray-700 px-4 py-3 border-b border-gray-700">
             <div className="flex items-center justify-between">
               <div>
                 <h2 className="text-lg font-bold text-gray-100 flex items-center gap-2">
@@ -344,7 +347,7 @@ export const DataAgungView: React.FC<DataAgungViewProps> = ({ items, onRefresh, 
 
         {/* Table 3: Produk Kosong */}
         <div className="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden">
-          <div className="bg-gray-750 px-4 py-3 border-b border-gray-700">
+          <div className="bg-gray-700 px-4 py-3 border-b border-gray-700">
             <h2 className="text-lg font-bold text-gray-100 flex items-center gap-2">
               <Package size={20} className="text-yellow-400" />
               Produk Kosong
@@ -401,7 +404,7 @@ export const DataAgungView: React.FC<DataAgungViewProps> = ({ items, onRefresh, 
 
         {/* Table 4: Table Masuk */}
         <div className="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden">
-          <div className="bg-gray-750 px-4 py-3 border-b border-gray-700">
+          <div className="bg-gray-700 px-4 py-3 border-b border-gray-700">
             <h2 className="text-lg font-bold text-gray-100 flex items-center gap-2">
               <Package size={20} className="text-purple-400" />
               Table Masuk
