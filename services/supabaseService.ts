@@ -144,6 +144,10 @@ export const fetchBarangMasuk = async (store?: string | null): Promise<BarangMas
   return Promise.resolve([]);
 };
 
+export const fetchBarangKeluar = async (store?: string | null): Promise<BarangKeluar[]> => {
+  return Promise.resolve([]);
+};
+
 export const fetchPriceHistoryBySource = async (
   partNumber: string,
   source: string,
