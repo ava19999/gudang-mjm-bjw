@@ -101,10 +101,14 @@ export const ShopItemList: React.FC<ShopItemListProps> = ({
                   </div>
                 )}
 
-                {/* PERBAIKAN: Stok Netral (Tanpa Warna Merah/Kuning) */}
+                {/* PERBAIKAN: Stok dengan Low Stock Alert */}
                 <div className="absolute top-2 left-2 pointer-events-none">
-                  <span className="text-[9px] font-bold px-1.5 py-0.5 rounded shadow-sm border bg-black/60 text-white backdrop-blur border-white/10">
-                      {item.quantity} Unit
+                  <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded shadow-sm border backdrop-blur ${
+                    item.isLowStock 
+                      ? 'bg-red-600/90 text-white border-red-400/30' 
+                      : 'bg-black/60 text-white border-white/10'
+                  }`} role="status" aria-label={item.isLowStock ? `Low stock: ${item.quantity} units remaining` : `${item.quantity} units in stock`}>
+                      {item.quantity} Unit {item.isLowStock ? <span aria-hidden="true">⚠️</span> : ''}
                   </span>
                 </div>
 
@@ -191,8 +195,12 @@ export const ShopItemList: React.FC<ShopItemListProps> = ({
                   <span className="text-[10px] md:text-xs font-bold text-gray-500 font-mono bg-gray-900 px-1.5 py-0.5 rounded border border-gray-800">
                     {item.partNumber}
                   </span>
-                  <span className="text-[9px] md:text-[10px] font-bold px-1.5 py-0.5 rounded bg-black/60 text-white border border-white/10">
-                    {item.quantity} Unit
+                  <span className={`text-[9px] md:text-[10px] font-bold px-1.5 py-0.5 rounded border ${
+                    item.isLowStock
+                      ? 'bg-red-600/90 text-white border-red-400/30'
+                      : 'bg-black/60 text-white border-white/10'
+                  }`} role="status" aria-label={item.isLowStock ? `Low stock: ${item.quantity} units remaining` : `${item.quantity} units in stock`}>
+                    {item.quantity} Unit {item.isLowStock ? <span aria-hidden="true">⚠️</span> : ''}
                   </span>
                 </div>
                 <h3 className="text-sm md:text-base font-bold text-gray-200 truncate mb-1" title={item.name}>
