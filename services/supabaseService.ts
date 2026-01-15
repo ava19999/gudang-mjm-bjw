@@ -3,11 +3,7 @@ import { supabase } from './supabaseClient';
 import { 
   InventoryItem, 
   InventoryFormData, 
-  StockHistory, 
   Order, 
-  ChatSession, 
-  ReturRecord, 
-  ScanResiLog,
   OfflineOrderRow,
   OnlineOrderRow,
   SoldItemRow,
@@ -19,6 +15,11 @@ const getTableName = (store: string | null | undefined) => {
   if (store === 'mjm') return 'base_mjm';
   if (store === 'bjw') return 'base_bjw';
   return 'base';
+};
+
+const getLogTableName = (baseName: 'barang_masuk' | 'barang_keluar', store: string | null | undefined) => {
+  const suffix = store === 'mjm' ? '_mjm' : (store === 'bjw' ? '_bjw' : '');
+  return `${baseName}${suffix}`;
 };
 
 // --- HELPER: SAFE DATE PARSING ---
@@ -75,7 +76,7 @@ const mapItemFromDB = (item: any, photoData?: any): InventoryItem => {
     initialStock: 0, 
     qtyIn: 0, 
     qtyOut: 0,
-    lastUpdated: parseDateToNumber(item.last_updated) 
+    lastUpdated: parseDateToNumber(item.created_at || item.last_updated) 
   };
 };
 
@@ -87,47 +88,29 @@ const mapItemToDB = (data: any) => {
     application: data.application,
     shelf: data.shelf,
     quantity: Number(data.quantity) || 0,
-    last_updated: new Date().toISOString()
+    created_at: new Date().toISOString()
   };
   Object.keys(dbPayload).forEach(key => dbPayload[key] === undefined && delete dbPayload[key]);
   return dbPayload;
 };
 
-// --- HELPER: FETCH HARGA ---
-interface PriceData {
-  part_number: string;
-  harga: number; 
-}
+// --- HELPER: FETCH HARGA & FOTO ---
+interface PriceData { part_number: string; harga: number; }
 
 const fetchLatestPricesForItems = async (items: any[], store?: string | null): Promise<Record<string, PriceData>> => {
   if (!items || items.length === 0) return {};
-  
-  const partNumbersToCheck = items
-    .map(i => {
+  const partNumbersToCheck = items.map(i => {
        const pn = i.part_number || i.partNumber;
        return typeof pn === 'string' ? pn.trim() : pn;
-    })
-    .filter(Boolean);
-
+  }).filter(Boolean);
   if (partNumbersToCheck.length === 0) return {};
 
   try {
-    const { data, error } = await supabase
-      .from('list_harga_jual')
-      .select('part_number, harga') 
-      .in('part_number', partNumbersToCheck);
-
+    const { data, error } = await supabase.from('list_harga_jual').select('part_number, harga').in('part_number', partNumbersToCheck);
     if (error) return {};
-
     const priceMap: Record<string, PriceData> = {};
     (data || []).forEach((row: any) => {
-      if (row.part_number) {
-        const key = row.part_number.trim(); 
-        priceMap[key] = {
-             part_number: row.part_number,
-             harga: Number(row.harga || 0)
-        };
-      }
+      if (row.part_number) priceMap[row.part_number.trim()] = { part_number: row.part_number, harga: Number(row.harga || 0) };
     });
     return priceMap;
   } catch (e) { return {}; }
@@ -137,13 +120,10 @@ const fetchPhotosForItems = async (items: any[]) => {
   if (!items || items.length === 0) return {};
   const partNumbers = items.map(i => i.part_number || i.partNumber).filter(Boolean);
   if (partNumbers.length === 0) return {};
-
   try {
     const { data } = await supabase.from('foto').select('*').in('part_number', partNumbers);
     const photoMap: Record<string, any> = {};
-    (data || []).forEach((row: any) => {
-      if (row.part_number) photoMap[row.part_number] = row;
-    });
+    (data || []).forEach((row: any) => { if (row.part_number) photoMap[row.part_number] = row; });
     return photoMap;
   } catch (e) { return {}; }
 };
@@ -162,8 +142,7 @@ export const fetchInventory = async (store?: string | null): Promise<InventoryIt
   const table = getTableName(store);
   const { data: items, error } = await supabase.from(table).select('*').order('name', { ascending: true });
   
-  if (error) { console.error(`[Supabase] Error:`, error); return []; }
-  if (!items) return [];
+  if (error || !items) return [];
 
   const photoMap = await fetchPhotosForItems(items);
   const priceMap = await fetchLatestPricesForItems(items, store);
@@ -171,9 +150,7 @@ export const fetchInventory = async (store?: string | null): Promise<InventoryIt
   return items.map(item => {
     const mapped = mapItemFromDB(item, photoMap[item.part_number]);
     const lookupKey = (item.part_number || '').trim();
-    if (priceMap[lookupKey]) {
-      mapped.price = priceMap[lookupKey].harga; 
-    }
+    if (priceMap[lookupKey]) mapped.price = priceMap[lookupKey].harga; 
     return mapped;
   });
 };
@@ -197,9 +174,7 @@ export const fetchInventoryPaginated = async (store: string | null, page: number
     data: items.map(item => {
       const mapped = mapItemFromDB(item, photoMap[item.part_number]);
       const lookupKey = (item.part_number || '').trim();
-      if (priceMap[lookupKey]) {
-        mapped.price = priceMap[lookupKey].harga; 
-      }
+      if (priceMap[lookupKey]) mapped.price = priceMap[lookupKey].harga; 
       return mapped;
     }), 
     total: count || 0 
@@ -219,6 +194,7 @@ export const fetchInventoryAllFiltered = async (store: string | null, filters?: 
 };
 
 // --- ADD & UPDATE & DELETE INVENTORY ---
+
 export const addInventory = async (data: InventoryFormData, store?: string | null): Promise<string | null> => {
   const table = getTableName(store);
   if (!data.partNumber) { alert("Part Number wajib!"); return null; }
@@ -233,6 +209,7 @@ export const addInventory = async (data: InventoryFormData, store?: string | nul
   return data.partNumber;
 };
 
+// --- UPDATE INVENTORY (DIPERBAIKI UNTUK LOGIC BARANG MASUK) ---
 export const updateInventory = async (arg1: any, arg2?: any, arg3?: any): Promise<InventoryItem | null> => {
   let item: InventoryItem = arg1;
   let transactionData: any = arg2;
@@ -241,33 +218,71 @@ export const updateInventory = async (arg1: any, arg2?: any, arg3?: any): Promis
   const pk = item.partNumber;
   if (!pk) return null;
   const table = getTableName(store);
-  const updates = mapItemToDB(item);
-
-  const { error } = await supabase.from(table).update(updates).eq('part_number', pk);
-  if (error) { alert(`Gagal Update: ${error.message}`); return null; }
+  
+  // 1. Update Stok Utama
+  const { error } = await supabase.from(table).update(mapItemToDB(item)).eq('part_number', pk);
+  if (error) { 
+    alert(`Gagal Update Stok: ${error.message}`); 
+    return null; 
+  }
 
   await savePhotosToTable(pk, item.images || []);
 
+  // 2. Insert Log Mutasi
   if (transactionData) {
      try {
-       const logPayload = {
+       const isBarangMasuk = transactionData.type === 'in';
+       // Tentukan nama tabel log
+       const logTable = getLogTableName(isBarangMasuk ? 'barang_masuk' : 'barang_keluar', store);
+       const validTempo = isBarangMasuk ? (transactionData.tempo || 'CASH') : (transactionData.resiTempo || transactionData.tempo || '-');
+
+       // Base payload
+       let finalLogData: any = {
            part_number: pk,
-           name: item.name,
            brand: item.brand,
            application: item.application,
            rak: item.shelf,
-           stock_ahir: item.quantity, 
-           ecommerce: transactionData.ecommerce || '',
-           customer: transactionData.customer || '',
-           tempo: transactionData.resiTempo || '',
-           created_at: new Date().toISOString()
+           ecommerce: transactionData.ecommerce || '-',
+           customer: transactionData.customer || '-',
+           tempo: validTempo,
+           created_at: transactionData.tanggal ? new Date(transactionData.tanggal).toISOString() : new Date().toISOString()
        };
-       const logTable = transactionData.type === 'in' ? 'barang_masuk' : 'barang_keluar';
-       const logData = transactionData.type === 'in' 
-          ? { ...logPayload, qty_masuk: Number(transactionData.qty), harga_satuan: 0, harga_total: 0 } 
-          : { ...logPayload, qty_keluar: Number(transactionData.qty), harga_satuan: item.price, harga_total: item.price * Number(transactionData.qty), resi: transactionData.resiTempo || '' };
-       await supabase.from(logTable).insert([logData]);
-     } catch (e) { console.error('Gagal log mutasi:', e); }
+
+       if (isBarangMasuk) {
+          // PAYLOAD KHUSUS BARANG MASUK (Sesuai Struktur SQL Baru)
+          finalLogData = {
+              ...finalLogData,
+              nama_barang: item.name,        // Menggunakan nama_barang
+              stok_akhir: item.quantity,     // Menggunakan stok_akhir
+              qty_masuk: Number(transactionData.qty),
+              harga_satuan: Number(transactionData.price || 0),
+              harga_total: Number(transactionData.qty) * Number(transactionData.price || 0)
+          };
+       } else {
+          // PAYLOAD KHUSUS BARANG KELUAR
+          finalLogData = {
+              ...finalLogData,
+              name: item.name,               // Menggunakan name (Legacy)
+              stock_ahir: item.quantity,     // Menggunakan stock_ahir (Legacy)
+              qty_keluar: Number(transactionData.qty),
+              harga_satuan: Number(item.price || 0),
+              harga_total: Number(item.price || 0) * Number(transactionData.qty),
+              resi: transactionData.resiTempo || '-'
+          };
+       }
+       
+       console.log(`Mencoba insert ke ${logTable} dengan data:`, finalLogData);
+       const { error: logError } = await supabase.from(logTable).insert([finalLogData]);
+       
+       if (logError) {
+           console.error('LOG INSERT ERROR:', logError);
+           alert(`Gagal simpan riwayat ke ${logTable}: ${logError.message}`);
+       } else {
+           console.log(`Sukses insert ke ${logTable}`);
+       }
+     } catch (e: any) { 
+        console.error('Gagal log mutasi:', e);
+     }
   }
   return item;
 };
@@ -294,7 +309,35 @@ export const getItemByPartNumber = async (partNumber: string, store?: string | n
   return mapped;
 };
 
-// --- SHOP ITEMS ---
+// --- FUNGSI BARU: FETCH DATA BARANG MASUK ---
+export const fetchBarangMasukLog = async (store: string | null, page = 1, limit = 20) => {
+    const table = getLogTableName('barang_masuk', store);
+    
+    const from = (page - 1) * limit;
+    const to = from + limit - 1;
+
+    const { data, count, error } = await supabase
+        .from(table)
+        .select('*', { count: 'exact' })
+        .order('created_at', { ascending: false })
+        .range(from, to);
+
+    if (error) {
+        console.error("Error fetching barang masuk:", error);
+        return { data: [], total: 0 };
+    }
+    
+    // Mapping: Ubah nama_barang (DB) menjadi name (UI)
+    const mappedData = (data || []).map(row => ({
+        ...row,
+        name: row.nama_barang || row.name, 
+        quantity: row.qty_masuk
+    }));
+
+    return { data: mappedData, total: count || 0 };
+};
+
+// --- SHOP ITEMS (SUDAH DIPULIHKAN PENUH) ---
 interface ShopItemFilters {
   searchTerm?: string;
   category?: string;
@@ -349,43 +392,6 @@ export const fetchShopItems = async (
   }
 };
 
-// --- SAVE OFFLINE ORDER (ORDERS_MJM / ORDERS_BJW) ---
-export const saveOfflineOrder = async (
-  cart: any[], 
-  customerName: string, 
-  tempo: string, 
-  store: string | null
-): Promise<boolean> => {
-  const tableName = store === 'mjm' ? 'orders_mjm' : (store === 'bjw' ? 'orders_bjw' : null);
-  
-  if (!tableName) {
-    alert("Error: Toko tidak teridentifikasi (Bukan MJM/BJW)");
-    return false;
-  }
-  if (!cart || cart.length === 0) return false;
-
-  const orderRows = cart.map(item => ({
-    tanggal: new Date().toISOString(),
-    customer: customerName,
-    part_number: item.partNumber,
-    nama_barang: item.name,
-    quantity: Number(item.cartQuantity),
-    harga_satuan: Number(item.price),
-    harga_total: Number(item.price * item.cartQuantity),
-    status: 'Belum Diproses',
-    tempo: tempo || 'CASH'
-  }));
-
-  try {
-    const { error } = await supabase.from(tableName).insert(orderRows);
-    if (error) throw error;
-    return true;
-  } catch (e: any) {
-    alert(`Gagal menyimpan order: ${e.message}`);
-    return false;
-  }
-};
-
 
 // --- ORDER MANAGEMENT SYSTEM (OFFLINE, ONLINE, SOLD, RETUR) ---
 
@@ -412,7 +418,7 @@ export const fetchOnlineOrders = async (store: string | null): Promise<OnlineOrd
   const { data, error } = await supabase
     .from(table)
     .select('*')
-    .neq('status', 'Diproses') // Ambil yg belum diproses
+    .neq('status', 'Diproses') 
     .order('tanggal', { ascending: false });
 
   if (error) { console.error('Fetch Online Error:', error); return []; }
@@ -451,7 +457,6 @@ export const fetchReturItems = async (store: string | null): Promise<ReturRow[]>
 
 // --- PROCESSING LOGIC (ACC) ---
 
-// A. PROSES OFFLINE (Potong Stok & Pindah ke Barang Keluar)
 export const processOfflineOrderItem = async (
   item: OfflineOrderRow, 
   store: string | null,
@@ -485,7 +490,6 @@ export const processOfflineOrderItem = async (
 
     // ACC: Log Barang Keluar
     const logPayload = {
-      kode_toko: store?.toUpperCase(),
       tempo: item.tempo || 'CASH',
       ecommerce: 'OFFLINE',
       customer: item.customer,
@@ -513,7 +517,6 @@ export const processOfflineOrderItem = async (
   }
 };
 
-// B. PROSES ONLINE (ACC SCAN RESI)
 export const processOnlineOrderItem = async (item: OnlineOrderRow, store: string | null): Promise<boolean> => {
   const scanTable = store === 'mjm' ? 'scan_resi_mjm' : (store === 'bjw' ? 'scan_resi_bjw' : null);
   const stockTable = store === 'mjm' ? 'base_mjm' : (store === 'bjw' ? 'base_bjw' : null);
@@ -532,7 +535,6 @@ export const processOnlineOrderItem = async (item: OnlineOrderRow, store: string
     await supabase.from(stockTable).update({ quantity: newQty }).eq('part_number', item.part_number);
 
     await supabase.from(outTable).insert([{
-      kode_toko: store?.toUpperCase(),
       tempo: 'ONLINE',
       ecommerce: item.ecommerce,
       customer: item.customer,
@@ -557,8 +559,7 @@ export const processOnlineOrderItem = async (item: OnlineOrderRow, store: string
   }
 };
 
-
-// --- OTHERS & PLACEHOLDERS ---
+// --- OTHERS & PLACEHOLDERS (Agar tidak error) ---
 export const fetchOrders = async (store?: string | null): Promise<Order[]> => {
     try {
         const { data } = await supabase.from('orders').select('*').order('timestamp', { ascending: false });
@@ -573,6 +574,36 @@ export const saveOrder = async (order: Order, store?: string | null): Promise<bo
       return true;
   } catch(e: any) { alert(`Gagal Order: ${e.message}`); return false; }
 };
+
+export const saveOfflineOrder = async (
+  cart: any[], 
+  customerName: string, 
+  tempo: string, 
+  store: string | null
+): Promise<boolean> => {
+  const tableName = store === 'mjm' ? 'orders_mjm' : (store === 'bjw' ? 'orders_bjw' : null);
+  if (!tableName) { alert("Error: Toko tidak teridentifikasi"); return false; }
+  if (!cart || cart.length === 0) return false;
+
+  const orderRows = cart.map(item => ({
+    tanggal: new Date().toISOString(),
+    customer: customerName,
+    part_number: item.partNumber,
+    nama_barang: item.name,
+    quantity: Number(item.cartQuantity),
+    harga_satuan: Number(item.price),
+    harga_total: Number(item.price * item.cartQuantity),
+    status: 'Belum Diproses',
+    tempo: tempo || 'CASH'
+  }));
+
+  try {
+    const { error } = await supabase.from(tableName).insert(orderRows);
+    if (error) throw error;
+    return true;
+  } catch (e: any) { alert(`Gagal menyimpan order: ${e.message}`); return false; }
+};
+
 export const updateOrderStatusService = async (id: string, status: string) => {
   const { error } = await supabase.from('orders').update({ status }).eq('id', id);
   return !error;
@@ -582,7 +613,7 @@ export const updateOrderData = async (id: string, items: any[], total: number, s
   return !error;
 };
 
-// Placeholder Functions
+// Placeholder Functions (Safe defaults)
 export const fetchHistory = async () => [];
 export const fetchItemHistory = async () => [];
 export const fetchHistoryLogsPaginated = async () => ({ data: [], total: 0 });
