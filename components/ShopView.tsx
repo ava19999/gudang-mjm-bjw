@@ -95,7 +95,19 @@ export const ShopView: React.FC<ShopViewProps> = ({
             // PERBAIKAN 4: Ganti 'Semua' jadi 'All' agar filter berjalan dengan baik
             const safeCategory = category === 'Semua' ? 'All' : category; 
             
-            const { data, count } = await fetchShopItems(
+            console.log('[ShopView] Fetching shop items with params:', {
+                page, 
+                limit, 
+                debouncedSearch, 
+                safeCategory,
+                debouncedPartNumber,
+                debouncedName,
+                debouncedBrand,
+                debouncedApplication,
+                selectedStore
+            });
+            
+            const result = await fetchShopItems(
                 page, 
                 limit, 
                 debouncedSearch, 
@@ -107,11 +119,15 @@ export const ShopView: React.FC<ShopViewProps> = ({
                 selectedStore
             );
             
-            setShopItems(data || []);
-            const safeCount = count || 0;
+            console.log('[ShopView] Received data:', result);
+            
+            setShopItems(result.data || []);
+            const safeCount = result.count || 0;
             setTotalPages(safeCount > 0 ? Math.ceil(safeCount / limit) : 1);
+            
+            console.log('[ShopView] Set shop items:', result.data?.length, 'Total pages:', Math.ceil(safeCount / limit));
         } catch (err) {
-            console.error("Gagal load shop items:", err);
+            console.error("[ShopView] Gagal load shop items:", err);
             setShopItems([]);
         } finally {
             setLoading(false);

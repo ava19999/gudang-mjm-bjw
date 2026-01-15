@@ -326,9 +326,120 @@ export const addBarangKeluar = async () => {};
 export const fetchBarangMasuk = async () => [];
 export const fetchBarangKeluar = async () => [];
 export const fetchPriceHistoryBySource = async () => [];
-export const fetchShopItems = async (store?: string | null) => {
-    const items = await fetchInventory(store);
-    return items.filter(i => i.quantity > 0);
+// --- ENHANCED FETCH SHOP ITEMS WITH PAGINATION & JOINS ---
+export const fetchShopItems = async (
+  page: number = 1,
+  perPage: number = 50,
+  searchTerm: string = '',
+  category: string = 'All',
+  partNumberSearch: string = '',
+  nameSearch: string = '',
+  brandSearch: string = '',
+  applicationSearch: string = '',
+  store?: string | null
+): Promise<{ data: InventoryItem[]; count: number }> => {
+  const table = getTableName(store);
+  const from = (page - 1) * perPage;
+  const to = from + perPage - 1;
+
+  try {
+    // Build query with count
+    let query = supabase
+      .from(table)
+      .select('*', { count: 'exact' })
+      .gt('quantity', 0); // Only show items in stock for shop view
+
+    // Apply filters
+    if (searchTerm && searchTerm.trim() !== '') {
+      query = query.or(`name.ilike.%${searchTerm}%,part_number.ilike.%${searchTerm}%`);
+    }
+    
+    if (partNumberSearch && partNumberSearch.trim() !== '') {
+      query = query.ilike('part_number', `%${partNumberSearch}%`);
+    }
+    
+    if (nameSearch && nameSearch.trim() !== '') {
+      query = query.ilike('name', `%${nameSearch}%`);
+    }
+    
+    if (brandSearch && brandSearch.trim() !== '') {
+      query = query.ilike('brand', `%${brandSearch}%`);
+    }
+    
+    if (applicationSearch && applicationSearch.trim() !== '') {
+      query = query.ilike('application', `%${applicationSearch}%`);
+    }
+
+    // Apply pagination and ordering
+    const { data: items, count, error } = await query
+      .range(from, to)
+      .order('name', { ascending: true });
+
+    if (error) {
+      console.error(`[fetchShopItems] Error fetching from ${table}:`, error);
+      return { data: [], count: 0 };
+    }
+
+    if (!items || items.length === 0) {
+      return { data: [], count: count || 0 };
+    }
+
+    // Fetch photos and prices for all items
+    const photoMap = await fetchPhotosForItems(items);
+    const priceMap = await fetchLatestPricesForItems(items, store);
+
+    // Map items with photos and prices
+    const mappedItems = items.map(item => {
+      const baseItem = mapItemFromDB(item, photoMap[item.part_number]);
+      const latestPrice = priceMap[item.part_number];
+      
+      return {
+        ...baseItem,
+        // Override price with latest from list_harga_jual if available
+        price: latestPrice?.harga_jual || baseItem.price,
+        // Add low stock flag
+        isLowStock: baseItem.quantity < 5
+      };
+    });
+
+    console.log(`[fetchShopItems] Fetched ${mappedItems.length} items from ${table} (page ${page})`);
+    return { data: mappedItems, count: count || 0 };
+    
+  } catch (error) {
+    console.error('[fetchShopItems] Unexpected error:', error);
+    return { data: [], count: 0 };
+  }
+};
+
+// --- FETCH LATEST PRICES FOR ITEMS ---
+const fetchLatestPricesForItems = async (items: any[], store?: string | null) => {
+  if (!items || items.length === 0) return {};
+  
+  const partNumbers = items.map(i => i.part_number || i.partNumber).filter(Boolean);
+  if (partNumbers.length === 0) return {};
+
+  try {
+    // Get latest price for each part_number from list_harga_jual
+    const { data } = await supabase
+      .from('list_harga_jual')
+      .select('part_number, harga_jual, created_at')
+      .in('part_number', partNumbers)
+      .order('created_at', { ascending: false });
+
+    const priceMap: Record<string, any> = {};
+    
+    // Keep only the latest price for each part_number
+    (data || []).forEach((row: any) => {
+      if (row.part_number && !priceMap[row.part_number]) {
+        priceMap[row.part_number] = row;
+      }
+    });
+    
+    return priceMap;
+  } catch (e) {
+    console.error('[fetchLatestPricesForItems] Error:', e);
+    return {};
+  }
 };
 export const fetchChatSessions = async () => [];
 export const fetchChatMessages = async () => [];

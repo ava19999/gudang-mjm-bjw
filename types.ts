@@ -18,6 +18,7 @@ export interface InventoryItem {
   qtyOut: number;
   lastUpdated: number;
   description?: string;
+  isLowStock?: boolean;  // Low stock indicator (quantity < 5)
 }
 
 export interface InventoryFormData {
