@@ -1,5 +1,21 @@
 // FILE: src/utils.ts
 
+// --- FORMAT TANGGAL (Ditambahkan untuk memperbaiki error) ---
+export const formatDate = (dateString: string | Date): string => {
+  if (!dateString) return "-";
+  const date = new Date(dateString);
+  
+  // Validasi jika tanggal tidak valid
+  if (isNaN(date.getTime())) return "-";
+
+  return new Intl.DateTimeFormat("id-ID", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  }).format(date);
+};
+
+// --- FORMAT RUPIAH ---
 export const formatRupiah = (amount: number): string => {
   return new Intl.NumberFormat('id-ID', {
     style: 'currency',
@@ -9,6 +25,7 @@ export const formatRupiah = (amount: number): string => {
   }).format(amount);
 };
 
+// --- GENERATE ID ACAK ---
 export const generateId = (): string => {
   return Math.random().toString(36).substr(2, 9);
 };
@@ -18,13 +35,15 @@ export const parseNumber = (input: string | number | undefined): number => {
   if (!input) return 0;
   if (typeof input === 'number') return input;
   
+  // Hapus semua karakter kecuali angka, titik, koma, minus
   const cleanStr = input.replace(/[^0-9.,-]/g, '');
+  // Hapus titik dan koma agar bisa diparse sebagai float standar
   const numericOnly = cleanStr.replace(/[,.]/g, ''); 
   return parseFloat(numericOnly) || 0;
 };
 
 // --- PERBAIKAN FUNGSI COMPRESS IMAGE ---
-// Sekarang menerima input berupa File atau string Base64
+// Menerima input berupa File atau string Base64
 export const compressImage = (input: File | string, maxWidth = 800, quality = 0.7): Promise<string> => {
   return new Promise((resolve, reject) => {
     // Helper function untuk memproses gambar setelah menjadi string base64/URL
@@ -83,13 +102,16 @@ export const compressImage = (input: File | string, maxWidth = 800, quality = 0.
   });
 };
 
+// --- PARSE CSV ---
 export const parseCSV = (text: string) => {
   const lines = text.split('\n').filter(l => l.trim() !== '');
   if (lines.length === 0) return [];
+  
   const parseLine = (line: string) => {
       const result = [];
       let startValueIndex = 0;
       let inQuotes = false;
+      
       for (let i = 0; i < line.length; i++) {
           if (line[i] === '"') { inQuotes = !inQuotes; } 
           else if (line[i] === ',' && !inQuotes) {
@@ -99,16 +121,20 @@ export const parseCSV = (text: string) => {
               startValueIndex = i + 1;
           }
       }
+      
       let val = line.substring(startValueIndex).trim();
       if (val.startsWith('"') && val.endsWith('"')) val = val.slice(1, -1).replace(/""/g, '"');
       result.push(val);
       return result;
   };
+
   const headers = parseLine(lines[0]);
   const result = [];
+  
   for (let i = 1; i < lines.length; i++) {
     const currentLine = lines[i];
     if(!currentLine.trim()) continue;
+    
     const matches = parseLine(currentLine);
     if (matches.length > 0) {
         const obj: any = {};
