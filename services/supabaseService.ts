@@ -327,20 +327,35 @@ export const fetchBarangMasuk = async () => [];
 export const fetchBarangKeluar = async () => [];
 export const fetchPriceHistoryBySource = async () => [];
 // --- ENHANCED FETCH SHOP ITEMS WITH PAGINATION & JOINS ---
+// Interface for search filters
+interface ShopItemFilters {
+  searchTerm?: string;
+  category?: string;
+  partNumberSearch?: string;
+  nameSearch?: string;
+  brandSearch?: string;
+  applicationSearch?: string;
+}
+
 export const fetchShopItems = async (
   page: number = 1,
   perPage: number = 50,
-  searchTerm: string = '',
-  category: string = 'All',
-  partNumberSearch: string = '',
-  nameSearch: string = '',
-  brandSearch: string = '',
-  applicationSearch: string = '',
+  filters: ShopItemFilters = {},
   store?: string | null
 ): Promise<{ data: InventoryItem[]; count: number }> => {
   const table = getTableName(store);
   const from = (page - 1) * perPage;
   const to = from + perPage - 1;
+  
+  // Destructure filters with defaults
+  const {
+    searchTerm = '',
+    category = 'All',
+    partNumberSearch = '',
+    nameSearch = '',
+    brandSearch = '',
+    applicationSearch = ''
+  } = filters;
 
   try {
     // Build query with count

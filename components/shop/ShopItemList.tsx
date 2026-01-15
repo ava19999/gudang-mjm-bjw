@@ -107,8 +107,8 @@ export const ShopItemList: React.FC<ShopItemListProps> = ({
                     item.isLowStock 
                       ? 'bg-red-600/90 text-white border-red-400/30' 
                       : 'bg-black/60 text-white border-white/10'
-                  }`}>
-                      {item.quantity} Unit {item.isLowStock ? '⚠️' : ''}
+                  }`} role="status" aria-label={item.isLowStock ? `Low stock: ${item.quantity} units remaining` : `${item.quantity} units in stock`}>
+                      {item.quantity} Unit {item.isLowStock ? <span aria-hidden="true">⚠️</span> : ''}
                   </span>
                 </div>
 
@@ -199,8 +199,8 @@ export const ShopItemList: React.FC<ShopItemListProps> = ({
                     item.isLowStock
                       ? 'bg-red-600/90 text-white border-red-400/30'
                       : 'bg-black/60 text-white border-white/10'
-                  }`}>
-                    {item.quantity} Unit {item.isLowStock ? '⚠️' : ''}
+                  }`} role="status" aria-label={item.isLowStock ? `Low stock: ${item.quantity} units remaining` : `${item.quantity} units in stock`}>
+                    {item.quantity} Unit {item.isLowStock ? <span aria-hidden="true">⚠️</span> : ''}
                   </span>
                 </div>
                 <h3 className="text-sm md:text-base font-bold text-gray-200 truncate mb-1" title={item.name}>

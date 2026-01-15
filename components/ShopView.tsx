@@ -95,27 +95,27 @@ export const ShopView: React.FC<ShopViewProps> = ({
             // PERBAIKAN 4: Ganti 'Semua' jadi 'All' agar filter berjalan dengan baik
             const safeCategory = category === 'Semua' ? 'All' : category; 
             
+            // Group filters into an object
+            const filters = {
+                searchTerm: debouncedSearch,
+                category: safeCategory,
+                partNumberSearch: debouncedPartNumber,
+                nameSearch: debouncedName,
+                brandSearch: debouncedBrand,
+                applicationSearch: debouncedApplication
+            };
+            
             console.log('[ShopView] Fetching shop items with params:', {
                 page, 
-                limit, 
-                debouncedSearch, 
-                safeCategory,
-                debouncedPartNumber,
-                debouncedName,
-                debouncedBrand,
-                debouncedApplication,
+                limit,
+                filters,
                 selectedStore
             });
             
             const result = await fetchShopItems(
                 page, 
                 limit, 
-                debouncedSearch, 
-                safeCategory,
-                debouncedPartNumber,
-                debouncedName,
-                debouncedBrand,
-                debouncedApplication,
+                filters,
                 selectedStore
             );
             
