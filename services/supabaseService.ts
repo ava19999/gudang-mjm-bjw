@@ -427,7 +427,13 @@ export const fetchShopItems = async (
 };
 
 // --- FETCH LATEST PRICES FOR ITEMS ---
-const fetchLatestPricesForItems = async (items: any[], store?: string | null) => {
+interface PriceData {
+  part_number: string;
+  harga_jual: number;
+  created_at: string;
+}
+
+const fetchLatestPricesForItems = async (items: any[], store?: string | null): Promise<Record<string, PriceData>> => {
   if (!items || items.length === 0) return {};
   
   const partNumbers = items.map(i => i.part_number || i.partNumber).filter(Boolean);
@@ -441,10 +447,10 @@ const fetchLatestPricesForItems = async (items: any[], store?: string | null) =>
       .in('part_number', partNumbers)
       .order('created_at', { ascending: false });
 
-    const priceMap: Record<string, any> = {};
+    const priceMap: Record<string, PriceData> = {};
     
     // Keep only the latest price for each part_number
-    (data || []).forEach((row: any) => {
+    (data || []).forEach((row: PriceData) => {
       if (row.part_number && !priceMap[row.part_number]) {
         priceMap[row.part_number] = row;
       }

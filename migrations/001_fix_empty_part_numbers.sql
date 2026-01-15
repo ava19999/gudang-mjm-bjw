@@ -7,9 +7,9 @@
 -- ============================================
 
 -- Generate unique part numbers for rows with empty or null part_number
--- Format: AUTO-MJM-{id} where id is a unique identifier
+-- Format: AUTO-MJM-{uuid} - uses UUID for consistency across all schemas
 UPDATE base_mjm
-SET part_number = CONCAT('AUTO-MJM-', COALESCE(id::text, gen_random_uuid()::text))
+SET part_number = CONCAT('AUTO-MJM-', gen_random_uuid()::text)
 WHERE part_number IS NULL 
    OR part_number = '' 
    OR TRIM(part_number) = '';
@@ -19,9 +19,9 @@ WHERE part_number IS NULL
 -- ============================================
 
 -- Generate unique part numbers for rows with empty or null part_number
--- Format: AUTO-BJW-{id} where id is a unique identifier
+-- Format: AUTO-BJW-{uuid}
 UPDATE base_bjw
-SET part_number = CONCAT('AUTO-BJW-', COALESCE(id::text, gen_random_uuid()::text))
+SET part_number = CONCAT('AUTO-BJW-', gen_random_uuid()::text)
 WHERE part_number IS NULL 
    OR part_number = '' 
    OR TRIM(part_number) = '';
@@ -31,9 +31,9 @@ WHERE part_number IS NULL
 -- ============================================
 
 -- Generate unique part numbers for legacy base table
--- Format: AUTO-BASE-{id}
+-- Format: AUTO-BASE-{uuid}
 UPDATE base
-SET part_number = CONCAT('AUTO-BASE-', COALESCE(id::text, gen_random_uuid()::text))
+SET part_number = CONCAT('AUTO-BASE-', gen_random_uuid()::text)
 WHERE part_number IS NULL 
    OR part_number = '' 
    OR TRIM(part_number) = '';
