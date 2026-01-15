@@ -31,7 +31,8 @@ import { InventoryItem, InventoryFormData, CartItem, Order, StockHistory, OrderS
 import { 
   fetchInventory, addInventory, updateInventory, deleteInventory, getItemByPartNumber, 
   fetchOrders, saveOrder, updateOrderStatusService,
-  fetchHistory, addBarangMasuk, addBarangKeluar, updateOrderData 
+  fetchHistory, addBarangMasuk, addBarangKeluar, updateOrderData,
+  saveOfflineOrder // <--- IMPORT BARU
 } from './services/supabaseService';
 import { generateId } from './utils';
 
@@ -52,7 +53,7 @@ const AppContent: React.FC = () => {
   const [orders, setOrders] = useState<Order[]>([]);
   const [history, setHistory] = useState<StockHistory[]>([]);
   const [loading, setLoading] = useState(false); 
-  const [activeView, setActiveView] = useState<ActiveView>('inventory'); // Start at inventory for admin
+  const [activeView, setActiveView] = useState<ActiveView>('inventory'); 
   
   const [bannerUrl, setBannerUrl] = useState<string>('');
   const [myCustomerId, setMyCustomerId] = useState<string>('');
@@ -76,7 +77,6 @@ const AppContent: React.FC = () => {
     if (!cId) { cId = 'cust-' + generateId(); localStorage.setItem(CUSTOMER_ID_KEY, cId); }
     setMyCustomerId(cId);
     
-    // Only refresh data if authenticated
     if (isAuthenticated) {
       refreshData();
     }
@@ -144,9 +144,7 @@ const AppContent: React.FC = () => {
       setIsEditing(false); setEditItem(null); setLoading(false);
   };
 
-  // --- FIX: FUNGSI UPDATE BANNER YANG SUDAH DIPERBAIKI ---
   const handleUpdateBanner = async (base64: string) => {
-      // 1. Cek dulu apakah banner sudah ada di database untuk mendapatkan ID-nya
       const existingItem = await getItemByPartNumber(BANNER_PART_NUMBER, selectedStore);
 
       const bannerData: any = { 
@@ -166,14 +164,11 @@ const AppContent: React.FC = () => {
       };
 
       let success = false;
-
       if (existingItem) {
-          // Jika sudah ada, gunakan ID yang ditemukan untuk update
           const updateData = { ...bannerData, id: existingItem.id };
           const result = await updateInventory(updateData, undefined, selectedStore);
           success = !!result;
       } else {
-          // Jika belum ada, buat baru
           const result = await addInventory(bannerData, selectedStore);
           success = !!result;
       }
@@ -207,20 +202,59 @@ const AppContent: React.FC = () => {
       setCart(prev => prev.map(item => item.id === itemId ? { ...item, ...changes } : item));
   };
 
-  const doCheckout = async (name: string) => {
-      if (name !== userName && !isAdmin) { 
-        setUserName(name); 
+  // --- NEW CHECKOUT LOGIC (MENGGUNAKAN saveOfflineOrder) ---
+  const doCheckout = async (orderData: any) => {
+      // 1. Ambil Data
+      let customerName = '';
+      let tempo = 'CASH';
+      let note = '';
+
+      if (typeof orderData === 'string') {
+          customerName = orderData;
+      } else {
+          customerName = orderData.customerName;
+          tempo = orderData.tempo || 'CASH';
+          note = orderData.note || '';
       }
-      const totalAmount = cart.reduce((sum, item) => sum + ((item.customPrice ?? item.price) * item.cartQuantity), 0);
-      const newOrder: Order = { id: generateId(), customerName: name, items: [...cart], totalAmount: totalAmount, status: 'pending', timestamp: Date.now() };
-      
+
+      // Gabungkan Note ke Nama jika perlu (opsional)
+      const finalCustomerName = note ? `${customerName} (${note})` : customerName;
+
+      // Update username di state jika guest
+      if (customerName !== userName && !isAdmin) { 
+        setUserName(customerName); 
+      }
+
+      if (cart.length === 0) return;
+
       setLoading(true);
-      if (await saveOrder(newOrder)) {
-          showToast('Pesanan berhasil dibuat!'); setCart([]); setActiveView('orders'); await refreshData();
-      } else { showToast('Gagal membuat pesanan', 'error'); }
-      setLoading(false);
+      try {
+          // 2. SIMPAN KE TABLE ORDERS_MJM / ORDERS_BJW
+          // Stok BELUM dipotong disini, menunggu ACC dari Admin nanti
+          const success = await saveOfflineOrder(
+              cart, 
+              finalCustomerName, 
+              tempo, 
+              selectedStore
+          );
+
+          if (success) {
+              showToast(`Order dibuat! Status: Belum Diproses. Tempo: ${tempo}`, 'success');
+              setCart([]); 
+              setActiveView('shop'); // Tetap di shop agar bisa order lagi atau pindah view
+              await refreshData();
+          } else {
+              showToast('Gagal membuat pesanan (Database Error)', 'error');
+          }
+      } catch (error: any) {
+          console.error("Checkout Error:", error);
+          showToast(`Gagal: ${error.message}`, 'error');
+      } finally {
+          setLoading(false);
+      }
   };
 
+  // --- RETUR LOGIC (UPDATE STOK) ---
   const handleProcessReturn = async (orderId: string, returnedItems: { itemId: string, qty: number }[]) => {
       const order = orders.find(o => o.id === orderId);
       if (!order) return;
@@ -314,12 +348,10 @@ const AppContent: React.FC = () => {
   // --- RENDERING ---
   if (loading && items.length === 0) return <div className="flex flex-col h-screen items-center justify-center bg-gray-900 font-sans text-gray-400 space-y-6"><div className="relative"><div className="w-16 h-16 border-4 border-gray-700 border-t-blue-500 rounded-full animate-spin"></div><div className="absolute inset-0 flex items-center justify-center"><CloudLightning size={20} className="text-blue-500 animate-pulse" /></div></div><div className="text-center space-y-1"><p className="font-medium text-gray-200">Menghubungkan Database</p><p className="text-xs">Memuat Data...</p></div></div>;
 
-  // Show StoreSelector if no store selected
   if (!selectedStore) {
     return <StoreSelector onSelectStore={handleSelectStore} />;
   }
 
-  // Show LoginPage if store selected but not authenticated
   if (!isAuthenticated || !userRole) {
       return (
         <LoginPage 

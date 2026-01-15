@@ -1,81 +1,126 @@
-// FILE: src/components/shop/ShopCheckoutModal.tsx
-import React, { useState } from 'react';
+// FILE: components/shop/ShopCheckoutModal.tsx
+import React, { useState, useEffect } from 'react';
+import { X, CheckCircle, Clock } from 'lucide-react';
 
 interface ShopCheckoutModalProps {
-    isOpen: boolean;
-    onClose: () => void;
-    onConfirm: (finalName: string, tempo: string, note: string) => void;
+  isOpen: boolean;
+  onClose: () => void;
+  onConfirm: (customerName: string, tempo: string, note: string) => void;
 }
 
 export const ShopCheckoutModal: React.FC<ShopCheckoutModalProps> = ({ isOpen, onClose, onConfirm }) => {
-    const [customerNameInput, setCustomerNameInput] = useState(''); 
-    const [tempoInput, setTempoInput] = useState('');
-    const [noteInput, setNoteInput] = useState('');
+  const [customerName, setCustomerName] = useState('');
+  const [tempo, setTempo] = useState('CASH'); // Default CASH
+  const [note, setNote] = useState('');
 
-    if (!isOpen) return null;
+  // Reset form saat modal dibuka
+  useEffect(() => {
+    if (isOpen) {
+      setCustomerName('');
+      setTempo('CASH');
+      setNote('');
+    }
+  }, [isOpen]);
 
-    const handleSubmit = (e: React.FormEvent) => {
-        e.preventDefault();
-        if(customerNameInput.trim()) { 
-            let finalName = customerNameInput;
-            if(tempoInput.trim()) finalName += ` (Tempo: ${tempoInput})`;
-            if(noteInput.trim()) finalName += ` (Note: ${noteInput})`;
-            
-            onConfirm(finalName, tempoInput, noteInput);
-            setCustomerNameInput(''); 
-            setTempoInput('');
-            setNoteInput('');
-        } 
-    };
+  if (!isOpen) return null;
 
-    return (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
-            <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose}></div>
-            <div className="bg-gray-800 rounded-3xl shadow-2xl w-full max-w-sm relative overflow-hidden animate-in zoom-in-95 border border-gray-700">
-                <div className="bg-gray-900 px-6 py-4 border-b border-gray-700">
-                    <h3 className="text-lg font-bold text-gray-100">Konfirmasi Pesanan</h3>
-                </div>
-                <form onSubmit={handleSubmit} className="p-6">
-                    <div className="space-y-4">
-                        <div>
-                            <label className="text-xs font-bold text-gray-500 uppercase">Nama Customer</label>
-                            <input 
-                                type="text" 
-                                required 
-                                autoFocus 
-                                value={customerNameInput} 
-                                onChange={(e) => setCustomerNameInput(e.target.value)} 
-                                className="w-full p-3 border border-gray-600 bg-gray-700 rounded-xl mt-1 text-white placeholder-gray-500 outline-none focus:border-blue-500" 
-                                placeholder="Nama customer..." 
-                            />
-                        </div>
-                        <div>
-                            <label className="text-xs font-bold text-gray-500 uppercase">Tempo</label>
-                            <input 
-                                type="text" 
-                                value={tempoInput} 
-                                onChange={(e) => setTempoInput(e.target.value)} 
-                                className="w-full p-3 border border-gray-600 bg-gray-700 rounded-xl mt-1 text-white placeholder-gray-500 outline-none focus:border-blue-500" 
-                                placeholder="Contoh: 7 hari, 14 hari..." 
-                            />
-                        </div>
-                        <div>
-                            <label className="text-xs font-bold text-gray-500 uppercase">Note</label>
-                            <textarea 
-                                value={noteInput} 
-                                onChange={(e) => setNoteInput(e.target.value)} 
-                                className="w-full p-3 border border-gray-600 bg-gray-700 rounded-xl mt-1 text-white placeholder-gray-500 outline-none focus:border-blue-500 resize-none" 
-                                placeholder="Catatan tambahan..." 
-                                rows={3}
-                            />
-                        </div>
-                    </div>
-                    <div className="mt-6 grid grid-cols-2 gap-3">
-                        <button type="button" onClick={onClose} className="py-3 bg-gray-700 text-gray-300 font-bold rounded-xl hover:bg-gray-600">Batal</button>
-                        <button type="submit" disabled={!customerNameInput.trim()} className="py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 disabled:opacity-50">Kirim</button>
-                    </div>
-                </form>
-            </div>
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!customerName.trim()) {
+      alert('Nama pelanggan wajib diisi!');
+      return;
+    }
+    
+    // Gabungkan Nama dan Note untuk kompatibilitas jika perlu, atau kirim terpisah
+    // Format finalName: "Nama (Note)" agar terbaca di sistem lama, atau sesuaikan handler
+    const finalName = note.trim() ? `${customerName} (${note})` : customerName;
+    
+    onConfirm(finalName, tempo, note);
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+      <div className="bg-gray-900 border border-gray-800 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden">
+        
+        {/* Header */}
+        <div className="bg-gray-800/50 p-4 border-b border-gray-800 flex justify-between items-center">
+          <h2 className="text-lg font-bold text-white flex items-center gap-2">
+            <CheckCircle className="text-green-500" size={20} />
+            Konfirmasi Pesanan
+          </h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-white transition-colors">
+            <X size={20} />
+          </button>
         </div>
-    );
+
+        {/* Form */}
+        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+          
+          {/* Nama Pelanggan */}
+          <div>
+            <label className="block text-sm font-medium text-gray-400 mb-1">Nama Pelanggan / Toko *</label>
+            <input
+              type="text"
+              value={customerName}
+              onChange={(e) => setCustomerName(e.target.value)}
+              className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+              placeholder="Contoh: Budi Motor"
+              required
+            />
+          </div>
+
+          {/* Dropdown Tempo */}
+          <div>
+            <label className="block text-sm font-medium text-gray-400 mb-1 flex items-center gap-2">
+              <Clock size={14} /> Tempo Pembayaran
+            </label>
+            <div className="relative">
+              <select
+                value={tempo}
+                onChange={(e) => setTempo(e.target.value)}
+                className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-white appearance-none focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
+              >
+                <option value="CASH">CASH</option>
+                <option value="1 BLN">1 BLN</option>
+                <option value="2 BLN">2 BLN</option>
+                <option value="3 BLN">3 BLN</option>
+                <option value="NADIR">NADIR</option>
+              </select>
+              <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400">
+                ▼
+              </div>
+            </div>
+          </div>
+
+          {/* Catatan Tambahan */}
+          <div>
+            <label className="block text-sm font-medium text-gray-400 mb-1">Catatan (Opsional)</label>
+            <textarea
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[80px] resize-none"
+              placeholder="Keterangan tambahan..."
+            />
+          </div>
+
+          {/* Tombol Action */}
+          <div className="pt-4 flex gap-3">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 px-4 py-3 bg-gray-800 text-gray-300 rounded-xl font-semibold hover:bg-gray-700 transition-colors"
+            >
+              Batal
+            </button>
+            <button
+              type="submit"
+              className="flex-1 px-4 py-3 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-500 shadow-lg shadow-blue-900/30 transition-all active:scale-95"
+            >
+              Lanjut Bayar
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
 };

@@ -1,5 +1,67 @@
 // FILE: src/types.ts
 
+// --- TYPE DATA UTAMA (SISTEM BARU) ---
+
+// 1. OFFLINE (Table: orders_mjm / orders_bjw)
+export interface OfflineOrderRow {
+  id: string;
+  tanggal: string;
+  customer: string;
+  part_number: string;
+  nama_barang: string;
+  quantity: number;
+  harga_satuan: number;
+  harga_total: number;
+  status: string; // 'Belum Diproses', 'Proses', 'Tolak'
+  tempo: string;
+}
+
+// 2. ONLINE (Table: scan_resi_mjm / scan_resi_bjw)
+export interface OnlineOrderRow {
+  id: number;
+  tanggal: string;
+  resi: string;
+  toko: string; // MJM, BJW, LARIS
+  ecommerce: string; // SHOPEE, TIKTOK
+  customer: string;
+  part_number: string;
+  nama_barang: string;
+  quantity: number;
+  harga_satuan: number;
+  harga_total: number;
+  status: string; // 'Pending', 'Proses'
+}
+
+// 3. SUDAH TERJUAL (Table: barang_keluar_mjm / barang_keluar_bjw)
+export interface SoldItemRow {
+  id: string;
+  created_at: string;
+  kode_toko: string;
+  tempo: string;
+  ecommerce: string;
+  customer: string;
+  part_number: string;
+  name: string;
+  qty_keluar: number;
+  harga_total: number;
+  resi: string;
+}
+
+// 4. RETUR (Table: retur_mjm / retur_bjw)
+export interface ReturRow {
+  id?: number;
+  tanggal_retur: string;
+  resi: string;
+  customer: string;
+  nama_barang: string;
+  quantity: number;
+  status: string;
+  keterangan: string;
+  harga_total: number;
+}
+
+// --- TYPE DATA INVENTORY & LEGACY (JANGAN DIHAPUS) ---
+
 export interface InventoryItem {
   id: string;
   partNumber: string;
@@ -10,14 +72,15 @@ export interface InventoryItem {
   shelf: string;
   price: number;
   costPrice: number;
-  imageUrl: string;      // Foto utama
-  images?: string[];     // <--- OPSIONAL (tanda tanya ?) Mencegah blank screen
+  imageUrl: string;      
+  images?: string[];     
   ecommerce: string;
   initialStock: number;
   qtyIn: number;
   qtyOut: number;
   lastUpdated: number;
   description?: string;
+  isLowStock?: boolean;
 }
 
 export interface InventoryFormData {
@@ -31,7 +94,7 @@ export interface InventoryFormData {
   costPrice: number;
   ecommerce: string;
   imageUrl: string;
-  images: string[];      // Di form kita inisialisasi sebagai array kosong, jadi aman
+  images: string[];      
   initialStock: number;
   qtyIn: number;
   qtyOut: number;
@@ -53,43 +116,6 @@ export interface StockHistory {
   resi: string;
   tempo: string;
   customer: string;
-}
-
-export interface BarangMasuk {
-  id: string;
-  created_at: string;
-  tempo: string;
-  ecommerce: string;
-  keterangan: string;
-  part_number: string;
-  name: string;
-  brand: string;
-  application: string;
-  rak: string;
-  stock_ahir: number;
-  qty_masuk: number;
-  harga_satuan: number;
-  harga_total: number;
-  customer: string;
-}
-
-export interface BarangKeluar {
-  id: string;
-  created_at: string;
-  kode_toko: string;
-  tempo: string;
-  ecommerce: string;
-  customer: string;
-  part_number: string;
-  name: string;
-  brand: string;
-  application: string;
-  rak: string;
-  stock_ahir: number;
-  qty_keluar: number;
-  harga_satuan: number;
-  harga_total: number;
-  resi: string;
 }
 
 export interface OrderItem {
@@ -121,24 +147,7 @@ export interface Order {
     status: 'pending' | 'processing' | 'completed' | 'cancelled';
     timestamp: number;
     keterangan?: string;
-}
-
-export interface ChatMessage {
-    id: string;
-    text: string;
-    sender: 'user' | 'admin';
-    timestamp: number;
-    isRead: boolean;
-}
-  
-export interface ChatSession {
-    customerId: string;
-    customerName: string;
-    messages: ChatMessage[];
-    lastMessage: string;
-    lastTimestamp: number;
-    unreadAdminCount: number;
-    unreadUserCount: number;
+    tempo?: string;
 }
 
 export interface CartItem extends OrderItem {}
@@ -175,7 +184,6 @@ export interface ScanResiLog {
     status: string;
 }
 
-// Data Agung Online Menu Interfaces
 export interface BaseWarehouseItem {
     id: string;
     partNumber: string;
@@ -211,4 +219,14 @@ export interface TableMasuk {
     quantity: number;
     isActive: boolean;
     timestamp: number;
+}
+
+export interface ChatSession {
+    customerId: string;
+    customerName: string;
+    messages: any[];
+    lastMessage: string;
+    lastTimestamp: number;
+    unreadAdminCount: number;
+    unreadUserCount: number;
 }
