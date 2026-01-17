@@ -361,7 +361,36 @@ export const fetchShopItems = async (
   try {
     let query = supabase.from(table).select('*', { count: 'exact' }).gt('quantity', 0);
 
-    if (searchTerm) query = query.or(`name.ilike.%${searchTerm}%,part_number.ilike.%${searchTerm}%`);
+    // Search in product_alias if searchTerm is provided
+    let aliasPartNumbers: string[] = [];
+    if (searchTerm) {
+      try {
+        const { data: aliasData } = await supabase
+          .from('product_alias')
+          .select('part_number')
+          .ilike('alias_name', `%${searchTerm}%`);
+        
+        if (aliasData && aliasData.length > 0) {
+          aliasPartNumbers = [...new Set(aliasData.map(a => a.part_number))];
+        }
+      } catch (aliasError) {
+        console.warn('Product alias search error (table might not exist yet):', aliasError);
+      }
+    }
+
+    // Build search query including alias matches
+    if (searchTerm) {
+      if (aliasPartNumbers.length > 0) {
+        // Search in name, part_number OR in alias results
+        query = query.or(
+          `name.ilike.%${searchTerm}%,part_number.ilike.%${searchTerm}%,part_number.in.(${aliasPartNumbers.join(',')})`
+        );
+      } else {
+        // Standard search without alias
+        query = query.or(`name.ilike.%${searchTerm}%,part_number.ilike.%${searchTerm}%`);
+      }
+    }
+    
     if (partNumberSearch) query = query.ilike('part_number', `%${partNumberSearch}%`);
     if (nameSearch) query = query.ilike('name', `%${nameSearch}%`);
     if (brandSearch) query = query.ilike('brand', `%${brandSearch}%`);
