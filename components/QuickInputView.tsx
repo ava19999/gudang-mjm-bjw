@@ -1,14 +1,13 @@
 // FILE: src/components/QuickInputView.tsx
 import React, { useState, useEffect, useRef } from 'react';
 import { InventoryItem } from '../types';
-import { updateInventory, getItemByPartNumber } from '../services/supabaseService';
+import { updateInventory, getItemByPartNumber, saveOfflineOrder } from '../services/supabaseService';
 import { createEmptyRow, checkIsRowComplete } from './quickInput/quickInputUtils';
 import { QuickInputRow } from './quickInput/types';
 import { QuickInputHeader } from './quickInput/QuickInputHeader';
 import { QuickInputFooter } from './quickInput/QuickInputFooter';
 import { QuickInputTable } from './quickInput/QuickInputTable';
 import { BarangMasukTableView } from './quickInput/BarangMasukTableView';
-import { BarangKeluarTableView } from './quickInput/BarangKeluarTableView'; // Import baru
 import { useStore } from '../context/StoreContext';
 import { ArrowDownCircle, ArrowUpCircle } from 'lucide-react'; // Icon untuk tab
 
@@ -198,21 +197,35 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
     updateRow(row.id, 'isLoading', true);
 
     try {
+      // Mode 'out' tidak lagi langsung mengubah stok, akan diproses via saveOfflineOrder
+      if (mode === 'out') {
+        // Validasi item exists
+        const existingItem = await getItemByPartNumber(row.partNumber, selectedStore);
+        if (!existingItem) {
+          updateRow(row.id, 'error', `Item tidak ditemukan`);
+          updateRow(row.id, 'isLoading', false);
+          return false;
+        }
+        
+        // Validasi stok (hanya check, tidak kurangi)
+        if (existingItem.quantity < row.qtyMasuk) {
+          updateRow(row.id, 'error', `Stok kurang! Sisa: ${existingItem.quantity}`);
+          updateRow(row.id, 'isLoading', false);
+          return false;
+        }
+        
+        // Return true untuk ditandai berhasil validasi, penyimpanan akan dilakukan di saveAllRows
+        updateRow(row.id, 'isLoading', false);
+        return true;
+      }
+      
+      // Mode 'in' - existing logic
       // 1. Ambil data terbaru dari server untuk validasi stok
       const existingItem = await getItemByPartNumber(row.partNumber, selectedStore);
       if (!existingItem) {
         updateRow(row.id, 'error', `Item tidak ditemukan`);
         updateRow(row.id, 'isLoading', false);
         return false;
-      }
-
-      // 2. Validasi Stok untuk Barang Keluar
-      if (mode === 'out') {
-          if (existingItem.quantity < row.qtyMasuk) {
-             updateRow(row.id, 'error', `Stok kurang! Sisa: ${existingItem.quantity}`);
-             updateRow(row.id, 'isLoading', false);
-             return false;
-          }
       }
       
       // 3. Siapkan Transaction Data
@@ -227,13 +240,8 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
         tempo: row.tempo
       };
       
-      // 4. Hitung Stok Baru
-      let newQuantity = existingItem.quantity;
-      if (mode === 'in') {
-          newQuantity = existingItem.quantity + row.qtyMasuk;
-      } else {
-          newQuantity = existingItem.quantity - row.qtyMasuk;
-      }
+      // 4. Hitung Stok Baru (hanya untuk 'in')
+      const newQuantity = existingItem.quantity + row.qtyMasuk;
 
       // 5. Update Database
       const updatedItem = await updateInventory({
@@ -241,14 +249,14 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
         name: row.namaBarang,
         quantity: newQuantity,
         // Update harga master hanya jika Barang Masuk (Last Buying Price)
-        costPrice: mode === 'in' ? (row.hargaSatuan || existingItem.costPrice) : existingItem.costPrice,
+        costPrice: row.hargaSatuan || existingItem.costPrice,
         price: row.hargaJual || existingItem.price,
         lastUpdated: Date.now()
       }, transactionData, selectedStore);
 
       if (updatedItem) {
         setRows(prev => prev.filter(r => r.id !== row.id));
-        if (showToast) showToast(`Item ${row.partNumber} berhasil ${mode === 'in' ? 'masuk' : 'keluar'}`, 'success');
+        if (showToast) showToast(`Item ${row.partNumber} berhasil masuk`, 'success');
         return true;
       } else {
         updateRow(row.id, 'error', 'Gagal simpan');
@@ -271,25 +279,87 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
         if (showToast) showToast('Isi lengkap data sebelum menyimpan!', 'error');
         return;
     }
-    const results = await Promise.all(rowsToSave.map(row => saveRow(row)));
-    const successCount = results.filter(r => r).length;
     
-    if (showToast && successCount > 0) showToast(`${successCount} item berhasil diproses`, 'success');
-    if (successCount > 0) {
-        if (onRefresh) onRefresh();
-        setRefreshTableTrigger(prev => prev + 1); 
+    if (mode === 'out') {
+      // Barang Keluar: Group by customer + tanggal, save to orders
+      // First validate all rows
+      const validationResults = await Promise.all(rowsToSave.map(row => saveRow(row)));
+      const allValid = validationResults.every(r => r);
+      
+      if (!allValid) {
+        setIsSavingAll(false);
+        if (showToast) showToast('Beberapa item gagal validasi. Periksa kembali.', 'error');
+        return;
+      }
+      
+      // Group by customer + date
+      const groupedOrders: Record<string, QuickInputRow[]> = {};
+      rowsToSave.forEach(row => {
+        const key = `${row.customer.trim().toLowerCase()}_${row.tanggal}`;
+        if (!groupedOrders[key]) groupedOrders[key] = [];
+        groupedOrders[key].push(row);
+      });
+      
+      // Save each group as an order
+      let successCount = 0;
+      for (const [key, groupRows] of Object.entries(groupedOrders)) {
+        const firstRow = groupRows[0];
+        const cartItems = groupRows.map(row => ({
+          partNumber: row.partNumber,
+          name: row.namaBarang,
+          cartQuantity: row.qtyMasuk,
+          price: row.hargaSatuan,
+          brand: row.brand || '',
+          application: row.aplikasi || '',
+        }));
+        
+        const success = await saveOfflineOrder(cartItems, firstRow.customer, firstRow.tempo || 'CASH', selectedStore);
+        if (success) {
+          successCount += groupRows.length;
+          // Remove saved rows
+          setRows(prev => prev.filter(r => !groupRows.find(gr => gr.id === r.id)));
+        }
+      }
+      
+      if (showToast && successCount > 0) {
+        showToast(`${successCount} item berhasil disimpan ke Proses Pesanan`, 'success');
+      }
+      
+      if (successCount === rowsToSave.length) {
+        // Reset with empty rows
+        const initialRows = Array.from({ length: 10 }).map((_, index) => {
+          const r = createEmptyRow(index + 1);
+          r.operation = mode;
+          return r;
+        });
+        setRows(initialRows);
+      }
+      
+      if (onRefresh) onRefresh();
+      setRefreshTableTrigger(prev => prev + 1);
+    } else {
+      // Barang Masuk: existing logic
+      const results = await Promise.all(rowsToSave.map(row => saveRow(row)));
+      const successCount = results.filter(r => r).length;
+      
+      if (showToast && successCount > 0) showToast(`${successCount} item berhasil diproses`, 'success');
+      if (successCount > 0) {
+          if (onRefresh) onRefresh();
+          setRefreshTableTrigger(prev => prev + 1); 
+      }
+      
+      const remainingRows = rows.length - successCount;
+      if (remainingRows === 0) {
+         // Reset dengan rows kosong baru sesuai mode
+         const initialRows = Array.from({ length: 10 }).map((_, index) => {
+             const r = createEmptyRow(index + 1);
+             r.operation = mode;
+             return r;
+         });
+         setRows(initialRows);
+      }
     }
     
-    const remainingRows = rows.length - successCount;
-    if (remainingRows === 0) {
-       // Reset dengan rows kosong baru sesuai mode
-       const initialRows = Array.from({ length: 10 }).map((_, index) => {
-           const r = createEmptyRow(index + 1);
-           r.operation = mode;
-           return r;
-       });
-       setRows(initialRows);
-    }
     setIsSavingAll(false);
   };
 
@@ -335,7 +405,8 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
           onSaveAll={saveAllRows} 
           isSaving={isSavingAll} 
           validCount={validRowsCount}
-          customTitle={mode === 'out' ? "Simpan Barang Keluar" : "Simpan Barang Masuk"} 
+          mode={mode}
+          customTitle={mode === 'out' ? `Simpan (${validRowsCount})` : undefined} 
         />
 
         <div className="bg-yellow-900/20 px-4 py-1 text-xs text-yellow-200 text-center border-b border-yellow-900/30">
@@ -369,9 +440,19 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
 
       {/* Table View Section (Dynamic based on Mode) */}
       {mode === 'in' ? (
-          <BarangMasukTableView refreshTrigger={refreshTableTrigger} />
+          <BarangMasukTableView refreshTrigger={refreshTableTrigger} onRefresh={onRefresh} />
       ) : (
-          <BarangKeluarTableView refreshTrigger={refreshTableTrigger} />
+          <div className="bg-gray-900 border-t border-gray-700 p-6 text-center">
+              <div className="bg-red-900/20 border border-red-800/50 rounded-lg p-4 max-w-2xl mx-auto">
+                  <h4 className="text-lg font-bold text-red-400 mb-2">📋 Alur Barang Keluar</h4>
+                  <p className="text-sm text-gray-300 mb-2">
+                      Data akan masuk ke <strong>Proses Pesanan</strong> untuk di-ACC terlebih dahulu.
+                  </p>
+                  <p className="text-xs text-gray-400">
+                      💡 Tips: Customer & tanggal yang sama akan digabung jadi 1 nota.
+                  </p>
+              </div>
+          </div>
       )}
     </div>
   );
