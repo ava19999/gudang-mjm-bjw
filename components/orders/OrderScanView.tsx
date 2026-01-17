@@ -62,9 +62,9 @@ export const OrderScanView: React.FC<OrderScanViewProps> = ({ onShowToast, onRef
   // --- EFFECTS ---
   useEffect(() => {
     loadScanLogs();
-    if (inventoryCache.length === 0) fetchInventory().then(setInventoryCache);
+    if (inventoryCache.length === 0) fetchInventory(currentStore).then(setInventoryCache);
     setTimeout(() => { barcodeInputRef.current?.focus(); }, 100);
-  }, []);
+  }, [currentStore]);
 
   useEffect(() => {
       // Auto Check hanya untuk yang benar-benar 'Siap Kirim'
@@ -80,7 +80,7 @@ export const OrderScanView: React.FC<OrderScanViewProps> = ({ onShowToast, onRef
     }
   }, [highlightedIndex]);
 
-  const loadScanLogs = async () => { setScanLogs(await fetchScanResiLogs()); };
+  const loadScanLogs = async () => { setScanLogs(await fetchScanResiLogs(currentStore)); };
 
   // --- HELPER ---
   const handleNumberChange = (id: number, field: string, value: string) => {
@@ -149,28 +149,28 @@ export const OrderScanView: React.FC<OrderScanViewProps> = ({ onShowToast, onRef
           if (isComplete) {
               // Jika data lengkap, Ubah jadi SIAP KIRIM (apapun status sebelumnya)
               if (existingLog.status !== 'Siap Kirim') {
-                  await updateScanResiLogField(existingLog.id!, 'status', 'Siap Kirim');
+                  await updateScanResiLogField(existingLog.id!, 'status', 'Siap Kirim', currentStore);
                   setScanLogs(prev => prev.map(l => l.id === existingLog.id ? { ...l, status: 'Siap Kirim' } : l));
                   onShowToast(`Resi ${scannedCode} OK -> Siap Kirim`, 'success');
               } else {
-                  onShowToast(`Resi ${scannedCode} sudah Siap Kirim`, 'info');
+                  onShowToast(`Resi ${scannedCode} sudah Siap Kirim`, 'success');
               }
           } else {
               // Jika data TIDAK lengkap, Ubah jadi PENDING (Data Kurang)
               // Meskipun status awalnya 'Order Masuk', karena sudah discan fisik -> jadi Pending
               if (existingLog.status !== 'Pending') {
-                   await updateScanResiLogField(existingLog.id!, 'status', 'Pending');
+                   await updateScanResiLogField(existingLog.id!, 'status', 'Pending', currentStore);
                    setScanLogs(prev => prev.map(l => l.id === existingLog.id ? { ...l, status: 'Pending' } : l));
               }
               onShowToast(`Resi ${scannedCode} Data Masih Kurang!`, 'error');
           }
 
           // Update timestamp agar ketahuan barusan discan
-          await addScanResiLog(scannedCode, selectedMarketplace, selectedStore); 
+          await addScanResiLog(scannedCode, selectedMarketplace, selectedStore, currentStore); 
 
       } else {
           // Barang benar-benar baru (belum ada di CSV)
-          if (await addScanResiLog(scannedCode, selectedMarketplace, selectedStore)) {
+          if (await addScanResiLog(scannedCode, selectedMarketplace, selectedStore, currentStore)) {
               await loadScanLogs();
               onShowToast(`Resi ${scannedCode} Baru (Pending).`, 'success');
           } else {
@@ -196,18 +196,18 @@ export const OrderScanView: React.FC<OrderScanViewProps> = ({ onShowToast, onRef
           const newHargaTotal = currentLog.harga_satuan * newQuantity;
           updatedLog = { ...updatedLog, quantity: newQuantity, harga_total: newHargaTotal };
           setScanLogs(prev => prev.map(log => log.id === id ? updatedLog : log));
-          await updateScanResiLogField(id, 'quantity', newQuantity);
-          await updateScanResiLogField(id, 'harga_total', newHargaTotal);
+          await updateScanResiLogField(id, 'quantity', newQuantity, currentStore);
+          await updateScanResiLogField(id, 'harga_total', newHargaTotal, currentStore);
       } else if (field === 'harga_total') {
           const newTotal = parseFloat(value) || 0;
           const newSatuan = updatedLog.quantity > 0 ? newTotal / updatedLog.quantity : 0;
           updatedLog = { ...updatedLog, harga_total: newTotal, harga_satuan: newSatuan };
           setScanLogs(prev => prev.map(log => log.id === id ? updatedLog : log));
-          await updateScanResiLogField(id, 'harga_total', newTotal);
-          await updateScanResiLogField(id, 'harga_satuan', newSatuan);
+          await updateScanResiLogField(id, 'harga_total', newTotal, currentStore);
+          await updateScanResiLogField(id, 'harga_satuan', newSatuan, currentStore);
       } else {
           setScanLogs(prev => prev.map(log => log.id === id ? updatedLog : log));
-          await updateScanResiLogField(id, field, value);
+          await updateScanResiLogField(id, field, value, currentStore);
       }
 
       // PERHATIKAN:
@@ -237,14 +237,14 @@ export const OrderScanView: React.FC<OrderScanViewProps> = ({ onShowToast, onRef
 
   const handleDuplicate = async (id: number) => {
     setIsDuplicating(id);
-    if (await duplicateScanResiLog(id)) { onShowToast("Duplikasi Berhasil", 'success'); await loadScanLogs(); } 
+    if (await duplicateScanResiLog(id, currentStore)) { onShowToast("Duplikasi Berhasil", 'success'); await loadScanLogs(); } 
     else { onShowToast("Gagal duplikasi", 'error'); }
     setIsDuplicating(null);
   };
 
   const handleDeleteLog = async (id: number) => {
     if (window.confirm("Hapus item ini?")) {
-        if (await deleteScanResiLog(id)) { onShowToast("Item dihapus.", 'success'); await loadScanLogs(); } 
+        if (await deleteScanResiLog(id, currentStore)) { onShowToast("Item dihapus.", 'success'); await loadScanLogs(); } 
         else { onShowToast("Gagal menghapus.", 'error'); }
     }
   };

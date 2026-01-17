@@ -22,14 +22,18 @@ export interface OnlineOrderRow {
   tanggal: string;
   resi: string;
   toko: string; // MJM, BJW, LARIS
-  ecommerce: string; // SHOPEE, TIKTOK
+  ecommerce: string; // SHOPEE, TIKTOK, KILAT, RESELLER, EKSPOR
   customer: string;
   part_number: string;
   nama_barang: string;
   quantity: number;
   harga_satuan: number;
   harga_total: number;
-  status: string; // 'Pending', 'Proses'
+  status: string; // 'Order Masuk', 'Pending', 'Siap Kirim', 'Terjual'
+  sub_toko?: string; // Sub-store for TIKTOK/SHOPEE/KILAT (LARIS, MJM, BJW)
+  negara?: string; // Country for EKSPOR (PH, MY, SG, HK)
+  split_item?: number; // 0=single, 1=left, 2=right, etc.
+  parent_resi?: string; // Reference to original resi if split
 }
 
 // 3. SUDAH TERJUAL (Table: barang_keluar_mjm / barang_keluar_bjw)
@@ -58,6 +62,14 @@ export interface ReturRow {
   status: string;
   keterangan: string;
   harga_total: number;
+}
+
+// 5. PRODUCT ALIAS (Table: product_alias)
+export interface ProductAlias {
+  id?: number;
+  part_number: string; // The canonical/main part number
+  alias: string; // The alternative part number
+  created_at?: string;
 }
 
 // --- TYPE DATA INVENTORY & LEGACY (JANGAN DIHAPUS) ---
@@ -182,6 +194,10 @@ export interface ScanResiLog {
     harga_satuan: number;
     harga_total: number;
     status: string;
+    sub_toko?: string; // Sub-store for TIKTOK/SHOPEE/KILAT (LARIS, MJM, BJW)
+    negara?: string; // Country for EKSPOR (PH, MY, SG, HK)
+    split_item?: number; // 0=single, 1=left, 2=right, etc.
+    parent_resi?: string; // Reference to original resi if split
 }
 
 export interface BaseWarehouseItem {
