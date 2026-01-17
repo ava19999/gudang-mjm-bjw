@@ -1,6 +1,6 @@
 // FILE: src/components/online/OnlineMenu.tsx
 import React, { useState } from 'react';
-import { Globe, ChevronDown, ChevronUp } from 'lucide-react';
+import { Globe, ChevronDown, ChevronUp, Scan } from 'lucide-react';
 import { ActiveView } from '../../types/ui';
 
 interface OnlineMenuProps {
@@ -16,7 +16,7 @@ export const OnlineMenu: React.FC<OnlineMenuProps> = ({
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   
-  const isOnlineActive = activeView === 'data_agung';
+  const isOnlineActive = activeView === 'data_agung' || activeView === 'scan_resi';
 
   const handleMainClick = () => {
     setIsOpen(!isOpen);
@@ -54,6 +54,20 @@ export const OnlineMenu: React.FC<OnlineMenuProps> = ({
               </div>
               <span className="text-sm font-semibold">Data Agung</span>
             </button>
+            <button
+              onClick={() => {
+                setActiveView('scan_resi');
+                setIsOpen(false);
+              }}
+              className={`w-full px-4 py-3.5 text-left hover:bg-gray-700/80 transition-all duration-150 flex items-center gap-3 active:scale-[0.98] ${
+                activeView === 'scan_resi' ? 'bg-gradient-to-r from-blue-900/30 to-transparent text-blue-400 shadow-inner' : 'text-gray-300'
+              }`}
+            >
+              <div className={`p-1.5 rounded-lg ${activeView === 'scan_resi' ? 'bg-blue-900/40' : 'bg-gray-700/50'}`}>
+                <Scan size={18} />
+              </div>
+              <span className="text-sm font-semibold">Scan Resi</span>
+            </button>
           </div>
         )}
       </div>
@@ -89,6 +103,18 @@ export const OnlineMenu: React.FC<OnlineMenuProps> = ({
           >
             <Globe size={16} />
             <span className="text-sm font-medium">Data Agung</span>
+          </button>
+          <button
+            onClick={() => {
+              setActiveView('scan_resi');
+              setIsOpen(false);
+            }}
+            className={`w-full px-4 py-3 text-left hover:bg-gray-700 transition-colors flex items-center gap-2 ${
+              activeView === 'scan_resi' ? 'bg-gray-700 text-blue-400' : 'text-gray-300'
+            }`}
+          >
+            <Scan size={16} />
+            <span className="text-sm font-medium">Scan Resi</span>
           </button>
         </div>
       )}

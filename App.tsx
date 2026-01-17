@@ -14,6 +14,7 @@ import { PettyCashView } from './components/finance/PettyCashView';
 import { BarangKosongView } from './components/finance/BarangKosongView';
 import { ClosingView } from './components/finance/ClosingView';
 import { DataAgungView } from './components/online/DataAgungView';
+import { ScanResiView } from './components/ScanResiView';
 
 // --- NEW SPLIT COMPONENTS ---
 import { Toast } from './components/common/Toast';
@@ -393,6 +394,7 @@ const AppContent: React.FC = () => {
         {activeView === 'barang_kosong' && isAdmin && <BarangKosongView />}
         {activeView === 'closing' && isAdmin && <ClosingView />}
         {activeView === 'data_agung' && isAdmin && <DataAgungView items={items} onRefresh={refreshData} showToast={showToast} />}
+        {activeView === 'scan_resi' && isAdmin && <ScanResiView onRefresh={refreshData} showToast={showToast} />}
         {activeView === 'orders' && isAdmin && <OrderManagement orders={orders} isLoading={loading} onUpdateStatus={handleUpdateStatus} onProcessReturn={handleProcessReturn} onRefresh={refreshData} />}
         {activeView === 'orders' && !isAdmin && <CustomerOrderView orders={orders.filter(o => o.customerName === loginName)} />}
         

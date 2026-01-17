@@ -14,6 +14,7 @@
     "lucide-react": "^0.556.0",
     "react": "^19.2.1",
     "react-dom": "^19.2.1",
+    "react-qr-barcode-scanner": "^2.1.20",
     "react-router-dom": "^7.10.1"
   },
   "devDependencies": {
