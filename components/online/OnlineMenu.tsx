@@ -1,6 +1,6 @@
 // FILE: src/components/online/OnlineMenu.tsx
 import React, { useState } from 'react';
-import { Globe, ChevronDown, ChevronUp } from 'lucide-react';
+import { Globe, ChevronDown, ChevronUp, Database, Camera, Package } from 'lucide-react';
 import { ActiveView } from '../../types/ui';
 
 interface OnlineMenuProps {
@@ -16,7 +16,7 @@ export const OnlineMenu: React.FC<OnlineMenuProps> = ({
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   
-  const isOnlineActive = activeView === 'data_agung';
+  const isOnlineActive = activeView === 'data_agung' || activeView === 'scan_resi' || activeView === 'packing_confirm';
 
   const handleMainClick = () => {
     setIsOpen(!isOpen);
@@ -39,7 +39,7 @@ export const OnlineMenu: React.FC<OnlineMenuProps> = ({
         </button>
 
         {isOpen && (
-          <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-3 bg-gray-800/95 backdrop-blur-sm border border-gray-700 rounded-2xl shadow-2xl overflow-hidden min-w-[200px] animate-in slide-in-from-bottom-2 fade-in duration-200">
+          <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-3 bg-gray-800/95 backdrop-blur-sm border border-gray-700 rounded-2xl shadow-2xl overflow-hidden min-w-[220px] animate-in slide-in-from-bottom-2 fade-in duration-200">
             <button
               onClick={() => {
                 setActiveView('data_agung');
@@ -50,9 +50,39 @@ export const OnlineMenu: React.FC<OnlineMenuProps> = ({
               }`}
             >
               <div className={`p-1.5 rounded-lg ${activeView === 'data_agung' ? 'bg-cyan-900/40' : 'bg-gray-700/50'}`}>
-                <Globe size={18} />
+                <Database size={18} />
               </div>
               <span className="text-sm font-semibold">Data Agung</span>
+            </button>
+            
+            <button
+              onClick={() => {
+                setActiveView('scan_resi');
+                setIsOpen(false);
+              }}
+              className={`w-full px-4 py-3.5 text-left hover:bg-gray-700/80 transition-all duration-150 flex items-center gap-3 active:scale-[0.98] ${
+                activeView === 'scan_resi' ? 'bg-gradient-to-r from-cyan-900/30 to-transparent text-cyan-400 shadow-inner' : 'text-gray-300'
+              }`}
+            >
+              <div className={`p-1.5 rounded-lg ${activeView === 'scan_resi' ? 'bg-cyan-900/40' : 'bg-gray-700/50'}`}>
+                <Camera size={18} />
+              </div>
+              <span className="text-sm font-semibold">Scan Resi</span>
+            </button>
+            
+            <button
+              onClick={() => {
+                setActiveView('packing_confirm');
+                setIsOpen(false);
+              }}
+              className={`w-full px-4 py-3.5 text-left hover:bg-gray-700/80 transition-all duration-150 flex items-center gap-3 active:scale-[0.98] ${
+                activeView === 'packing_confirm' ? 'bg-gradient-to-r from-cyan-900/30 to-transparent text-cyan-400 shadow-inner' : 'text-gray-300'
+              }`}
+            >
+              <div className={`p-1.5 rounded-lg ${activeView === 'packing_confirm' ? 'bg-cyan-900/40' : 'bg-gray-700/50'}`}>
+                <Package size={18} />
+              </div>
+              <span className="text-sm font-semibold">Packing</span>
             </button>
           </div>
         )}
@@ -77,7 +107,7 @@ export const OnlineMenu: React.FC<OnlineMenuProps> = ({
       </button>
 
       {isOpen && (
-        <div className="absolute top-full mt-2 right-0 bg-gray-800 border border-gray-700 rounded-xl shadow-xl overflow-hidden min-w-[200px] z-50">
+        <div className="absolute top-full mt-2 right-0 bg-gray-800 border border-gray-700 rounded-xl shadow-xl overflow-hidden min-w-[220px] z-50">
           <button
             onClick={() => {
               setActiveView('data_agung');
@@ -87,8 +117,47 @@ export const OnlineMenu: React.FC<OnlineMenuProps> = ({
               activeView === 'data_agung' ? 'bg-gray-700 text-cyan-400' : 'text-gray-300'
             }`}
           >
-            <Globe size={16} />
-            <span className="text-sm font-medium">Data Agung</span>
+            <Database size={16} />
+            <div>
+              <div className="text-sm font-medium">Data Agung</div>
+              <div className="text-xs text-gray-500">Produk online</div>
+            </div>
+          </button>
+          
+          <div className="h-px bg-gray-700"></div>
+          
+          <button
+            onClick={() => {
+              setActiveView('scan_resi');
+              setIsOpen(false);
+            }}
+            className={`w-full px-4 py-3 text-left hover:bg-gray-700 transition-colors flex items-center gap-2 ${
+              activeView === 'scan_resi' ? 'bg-gray-700 text-cyan-400' : 'text-gray-300'
+            }`}
+          >
+            <Camera size={16} />
+            <div>
+              <div className="text-sm font-medium">Scan Resi</div>
+              <div className="text-xs text-gray-500">Input pesanan</div>
+            </div>
+          </button>
+          
+          <div className="h-px bg-gray-700"></div>
+          
+          <button
+            onClick={() => {
+              setActiveView('packing_confirm');
+              setIsOpen(false);
+            }}
+            className={`w-full px-4 py-3 text-left hover:bg-gray-700 transition-colors flex items-center gap-2 ${
+              activeView === 'packing_confirm' ? 'bg-gray-700 text-cyan-400' : 'text-gray-300'
+            }`}
+          >
+            <Package size={16} />
+            <div>
+              <div className="text-sm font-medium">Konfirmasi Packing</div>
+              <div className="text-xs text-gray-500">Scan untuk packing</div>
+            </div>
           </button>
         </div>
       )}

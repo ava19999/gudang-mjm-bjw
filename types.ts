@@ -22,15 +22,64 @@ export interface OnlineOrderRow {
   tanggal: string;
   resi: string;
   toko: string; // MJM, BJW, LARIS
-  ecommerce: string; // SHOPEE, TIKTOK
+  ecommerce: string; // SHOPEE, TIKTOK, KILAT, RESELLER, EKSPOR
   customer: string;
   part_number: string;
   nama_barang: string;
   quantity: number;
   harga_satuan: number;
   harga_total: number;
-  status: string; // 'Pending', 'Proses'
+  status: string; // 'Pending', 'Proses', 'Packed'
+  negara?: string; // For EKSPOR: PH/MY/SG/HK
+  brand?: string;
+  application?: string;
 }
+
+// Extended types for resi scanning system
+export interface ResiScanEntry {
+  id?: number;
+  tanggal: string;
+  resi: string;
+  toko: string;
+  ecommerce: string;
+  customer: string;
+  items: ResiItemEntry[];
+  status: 'scanned' | 'packed' | 'completed';
+  negara?: string;
+}
+
+export interface ResiItemEntry {
+  part_number: string;
+  nama_barang: string;
+  brand?: string;
+  application?: string;
+  quantity: number;
+  harga_satuan: number;
+  harga_total: number;
+  qty_n?: number; // Original quantity before split
+}
+
+export interface ProductAlias {
+  id?: number;
+  part_number_alias: string;
+  part_number_actual: string;
+  created_at?: string;
+}
+
+export interface CSVImportRow {
+  resi: string;
+  customer: string;
+  sku: string;
+  product_name: string;
+  quantity: number;
+  price: number;
+  total: number;
+  [key: string]: any; // For additional columns
+}
+
+export type EcommerceType = 'TIKTOK' | 'SHOPEE' | 'KILAT' | 'RESELLER' | 'EKSPOR';
+export type SubTokoType = 'MJM' | 'BJW' | 'LARIS';
+export type NegaraEksporType = 'PH' | 'MY' | 'SG' | 'HK';
 
 // 3. SUDAH TERJUAL (Table: barang_keluar_mjm / barang_keluar_bjw)
 export interface SoldItemRow {

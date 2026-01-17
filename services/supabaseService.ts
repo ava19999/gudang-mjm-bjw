@@ -716,6 +716,245 @@ export const deleteBarangLog = async (
     }
 };
 
+// --- RESI SCAN SYSTEM FUNCTIONS ---
+
+// Fetch product aliases for part number mapping
+export const fetchProductAliases = async (store: string | null): Promise<Record<string, string>> => {
+  try {
+    const { data, error } = await supabase
+      .from('product_alias')
+      .select('part_number_alias, part_number_actual');
+    
+    if (error) throw error;
+    
+    const aliasMap: Record<string, string> = {};
+    (data || []).forEach((row: any) => {
+      aliasMap[row.part_number_alias.toLowerCase()] = row.part_number_actual;
+    });
+    
+    return aliasMap;
+  } catch (e) {
+    console.error('Error fetching product aliases:', e);
+    return {};
+  }
+};
+
+// Resolve part number using alias table
+export const resolvePartNumber = async (partNumber: string, store: string | null): Promise<string> => {
+  const aliases = await fetchProductAliases(store);
+  const normalized = partNumber.toLowerCase().trim();
+  return aliases[normalized] || partNumber;
+};
+
+// Fetch scanned resi entries
+export const fetchScanResiEntries = async (store: string | null, status?: string): Promise<OnlineOrderRow[]> => {
+  const table = store === 'mjm' ? 'scan_resi_mjm' : (store === 'bjw' ? 'scan_resi_bjw' : null);
+  if (!table) return [];
+  
+  try {
+    let query = supabase.from(table).select('*').order('tanggal', { ascending: false });
+    
+    if (status) {
+      query = query.eq('status', status);
+    }
+    
+    const { data, error } = await query;
+    if (error) throw error;
+    
+    return data || [];
+  } catch (e) {
+    console.error('Error fetching scan resi entries:', e);
+    return [];
+  }
+};
+
+// Save new resi scan entry
+export const saveScanResiEntry = async (entry: Partial<OnlineOrderRow>, store: string | null): Promise<boolean> => {
+  const table = store === 'mjm' ? 'scan_resi_mjm' : (store === 'bjw' ? 'scan_resi_bjw' : null);
+  if (!table) return false;
+  
+  try {
+    const { error } = await supabase.from(table).insert([entry]);
+    if (error) throw error;
+    return true;
+  } catch (e) {
+    console.error('Error saving scan resi entry:', e);
+    return false;
+  }
+};
+
+// Batch save multiple resi items (for CSV import)
+export const batchSaveScanResiEntries = async (entries: Partial<OnlineOrderRow>[], store: string | null): Promise<{ success: boolean; insertedCount: number }> => {
+  const table = store === 'mjm' ? 'scan_resi_mjm' : (store === 'bjw' ? 'scan_resi_bjw' : null);
+  if (!table) return { success: false, insertedCount: 0 };
+  
+  try {
+    const { data, error } = await supabase.from(table).insert(entries).select();
+    if (error) throw error;
+    return { success: true, insertedCount: data?.length || 0 };
+  } catch (e) {
+    console.error('Error batch saving scan resi entries:', e);
+    return { success: false, insertedCount: 0 };
+  }
+};
+
+// Update resi scan entry status
+export const updateScanResiStatus = async (id: number, status: string, store: string | null): Promise<boolean> => {
+  const table = store === 'mjm' ? 'scan_resi_mjm' : (store === 'bjw' ? 'scan_resi_bjw' : null);
+  if (!table) return false;
+  
+  try {
+    const { error } = await supabase.from(table).update({ status }).eq('id', id);
+    if (error) throw error;
+    return true;
+  } catch (e) {
+    console.error('Error updating scan resi status:', e);
+    return false;
+  }
+};
+
+// Delete resi scan entry
+export const deleteScanResiEntry = async (id: number, store: string | null): Promise<boolean> => {
+  const table = store === 'mjm' ? 'scan_resi_mjm' : (store === 'bjw' ? 'scan_resi_bjw' : null);
+  if (!table) return false;
+  
+  try {
+    const { error } = await supabase.from(table).delete().eq('id', id);
+    if (error) throw error;
+    return true;
+  } catch (e) {
+    console.error('Error deleting scan resi entry:', e);
+    return false;
+  }
+};
+
+// Check for duplicate resi
+export const checkDuplicateResi = async (resi: string, store: string | null): Promise<OnlineOrderRow[]> => {
+  const table = store === 'mjm' ? 'scan_resi_mjm' : (store === 'bjw' ? 'scan_resi_bjw' : null);
+  if (!table) return [];
+  
+  try {
+    const { data, error } = await supabase
+      .from(table)
+      .select('*')
+      .eq('resi', resi);
+    
+    if (error) throw error;
+    return data || [];
+  } catch (e) {
+    console.error('Error checking duplicate resi:', e);
+    return [];
+  }
+};
+
+// Get product details by part number with alias resolution
+export const getProductByPartNumber = async (partNumber: string, store: string | null): Promise<any | null> => {
+  const table = getTableName(store);
+  
+  try {
+    // First try with original part number
+    let { data, error } = await supabase
+      .from(table)
+      .select('*')
+      .eq('part_number', partNumber)
+      .single();
+    
+    // If not found, try with alias resolution
+    if (error || !data) {
+      const resolvedPartNumber = await resolvePartNumber(partNumber, store);
+      if (resolvedPartNumber !== partNumber) {
+        const result = await supabase
+          .from(table)
+          .select('*')
+          .eq('part_number', resolvedPartNumber)
+          .single();
+        data = result.data;
+        error = result.error;
+      }
+    }
+    
+    if (error) throw error;
+    return data;
+  } catch (e) {
+    console.error('Error fetching product by part number:', e);
+    return null;
+  }
+};
+
+// Move scanned resi to barang_keluar (final approval by Person 3)
+export const approveResiToBarangKeluar = async (resiEntry: OnlineOrderRow, store: string | null): Promise<boolean> => {
+  const outTable = getLogTableName('barang_keluar', store);
+  const stockTable = getTableName(store);
+  const scanTable = store === 'mjm' ? 'scan_resi_mjm' : (store === 'bjw' ? 'scan_resi_bjw' : null);
+  
+  if (!outTable || !stockTable || !scanTable) return false;
+  
+  try {
+    // 1. Get current stock
+    const { data: stockItem, error: fetchError } = await supabase
+      .from(stockTable)
+      .select('*')
+      .eq('part_number', resiEntry.part_number)
+      .single();
+    
+    if (fetchError || !stockItem) {
+      console.error('Stock item not found for:', resiEntry.part_number);
+      return false;
+    }
+    
+    // 2. Check if enough stock
+    if (stockItem.quantity < resiEntry.quantity) {
+      console.error('Not enough stock for:', resiEntry.part_number);
+      return false;
+    }
+    
+    // 3. Update stock
+    const newQty = stockItem.quantity - resiEntry.quantity;
+    const { error: updateError } = await supabase
+      .from(stockTable)
+      .update({ quantity: newQty })
+      .eq('part_number', resiEntry.part_number);
+    
+    if (updateError) throw updateError;
+    
+    // 4. Insert to barang_keluar
+    const barangKeluarEntry = {
+      tanggal: resiEntry.tanggal,
+      kode_toko: resiEntry.toko,
+      tempo: resiEntry.ecommerce,
+      ecommerce: resiEntry.ecommerce,
+      customer: resiEntry.customer,
+      part_number: resiEntry.part_number,
+      name: resiEntry.nama_barang,
+      brand: resiEntry.brand || stockItem.brand,
+      application: resiEntry.application || stockItem.application,
+      rak: stockItem.shelf,
+      stock_ahir: newQty,
+      qty_keluar: resiEntry.quantity,
+      harga_satuan: resiEntry.harga_satuan,
+      harga_total: resiEntry.harga_total,
+      resi: resiEntry.resi,
+      created_at: new Date().toISOString()
+    };
+    
+    const { error: insertError } = await supabase.from(outTable).insert([barangKeluarEntry]);
+    if (insertError) throw insertError;
+    
+    // 5. Update scan_resi status
+    const { error: statusError } = await supabase
+      .from(scanTable)
+      .update({ status: 'Proses' })
+      .eq('id', resiEntry.id);
+    
+    if (statusError) throw statusError;
+    
+    return true;
+  } catch (e) {
+    console.error('Error approving resi to barang keluar:', e);
+    return false;
+  }
+};
+
 // ... (sisa kode lainnya)
 // Placeholder Functions (Safe defaults)
 export const fetchHistory = async () => [];
