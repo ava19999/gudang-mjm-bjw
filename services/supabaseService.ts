@@ -943,7 +943,7 @@ export const approveResiToBarangKeluar = async (resiEntry: OnlineOrderRow, store
     // 5. Update scan_resi status
     const { error: statusError } = await supabase
       .from(scanTable)
-      .update({ status: 'Proses' })
+      .update({ status: 'completed' })
       .eq('id', resiEntry.id);
     
     if (statusError) throw statusError;

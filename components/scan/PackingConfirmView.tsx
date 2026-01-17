@@ -54,11 +54,16 @@ export const PackingConfirmView: React.FC<PackingConfirmViewProps> = ({ showToas
       }
 
       // Update all items with this resi to "packed" status
-      const updatePromises = existingResi.map(item => 
-        updateScanResiStatus(item.id, 'packed', selectedStore)
-      );
+      const updatePromises = existingResi.map(item => {
+        if (!item.id) {
+          console.error('Item missing id:', item);
+          return Promise.resolve(false);
+        }
+        return updateScanResiStatus(item.id, 'packed', selectedStore);
+      });
       
-      await Promise.all(updatePromises);
+      const results = await Promise.all(updatePromises);
+      const successCount = results.filter(r => r).length;
       
       showToast(`Resi ${trimmedResi} dikonfirmasi PACKED! ✓`, 'success');
       setResiToScan('');

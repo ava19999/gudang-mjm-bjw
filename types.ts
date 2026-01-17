@@ -29,7 +29,7 @@ export interface OnlineOrderRow {
   quantity: number;
   harga_satuan: number;
   harga_total: number;
-  status: string; // 'Pending', 'Proses', 'Packed'
+  status: string; // 'scanned', 'packed', 'completed'
   negara?: string; // For EKSPOR: PH/MY/SG/HK
   brand?: string;
   application?: string;

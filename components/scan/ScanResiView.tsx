@@ -184,10 +184,10 @@ export const ScanResiView: React.FC<ScanResiViewProps> = ({ showToast, onRefresh
       // Determine toko based on ecommerce type
       let finalToko = subToko;
       if (ecommerce === 'RESELLER') {
-        finalToko = selectedStore === 'mjm' ? 'MJM' : 'BJW';
+        finalToko = (selectedStore === 'mjm' ? 'MJM' : selectedStore === 'bjw' ? 'BJW' : 'MJM') as SubTokoType;
       } else if (ecommerce === 'EKSPOR') {
         // For export, could map based on negara or use selectedStore
-        finalToko = selectedStore === 'mjm' ? 'MJM' : 'BJW';
+        finalToko = (selectedStore === 'mjm' ? 'MJM' : selectedStore === 'bjw' ? 'BJW' : 'MJM') as SubTokoType;
       }
 
       // Remove duplicates by part_number (keep first occurrence)

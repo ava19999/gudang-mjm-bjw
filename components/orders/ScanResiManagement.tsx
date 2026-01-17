@@ -98,6 +98,12 @@ export const ScanResiManagement: React.FC<ScanResiManagementProps> = ({ showToas
   const handleSaveEdit = async () => {
     if (!editingItem) return;
     
+    if (!editingItem.id) {
+      showToast('Error: Item ID tidak valid', 'error');
+      setEditingItem(null);
+      return;
+    }
+    
     setLoading(true);
     const success = await updateScanResiEntry(editingItem.id, {
       quantity: editingItem.quantity,
