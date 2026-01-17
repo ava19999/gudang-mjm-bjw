@@ -686,11 +686,15 @@ export const deleteBarangLog = async (
             .update({ quantity: newQty, last_updated: new Date().toISOString() })
             .eq('part_number', partNumber);
 
-        if (updateError) throw updateError;
+        if (updateError) {
+            throw new Error(updateError.message || 'Gagal update stok');
+        }
 
         // 4. Hapus Log
         // Pastikan tipe id sesuai (DB mungkin number)
-        const idToUse = (typeof id === 'string' && /^\d+$/.test(id)) ? Number(id) : id;
+        const idToUse = typeof id === 'string' ? 
+            (/^\d+$/.test(id) ? Number(id) : (() => { throw new Error('ID tidak valid: harus berupa angka'); })()) 
+            : id;
         const { error: deleteError } = await supabase
             .from(logTable)
             .delete()
@@ -704,6 +708,10 @@ export const deleteBarangLog = async (
                 .eq('part_number', partNumber);
 
             console.error('Gagal menghapus log, mencoba revert stok', { deleteError, revertError });
+            
+            if (revertError) {
+                throw new Error(`Gagal menghapus log DAN gagal rollback stok: ${deleteError.message}. Rollback error: ${revertError.message}`);
+            }
             throw new Error(deleteError.message || 'Gagal menghapus log');
         }
 
