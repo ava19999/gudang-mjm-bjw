@@ -259,7 +259,9 @@ const AppContent: React.FC = () => {
       const order = orders.find(o => o.id === orderId);
       if (!order) return;
       setLoading(true);
-      const today = new Date().toISOString().split('T')[0];
+      const today = new Intl.DateTimeFormat('sv-SE', {
+        timeZone: 'Asia/Jakarta'
+      }).format(new Date());
       let pureName = order.customerName;
       let resiVal = '-'; let shopVal = ''; let ecommerceVal = 'APLIKASI';
 
@@ -304,7 +306,9 @@ const AppContent: React.FC = () => {
       const shopMatch = pureName.match(/\(Toko: (.*?)\)/); if (shopMatch) { shopVal = shopMatch[1]; pureName = pureName.replace(/\(Toko:.*?\)/, ''); }
       const viaMatch = pureName.match(/\(Via: (.*?)\)/); if (viaMatch) { ecommerceVal = viaMatch[1]; pureName = pureName.replace(/\(Via:.*?\)/, ''); }
       pureName = pureName.trim() || "Pelanggan";
-      const today = new Date().toISOString().split('T')[0];
+      const today = new Intl.DateTimeFormat('sv-SE', {
+        timeZone: 'Asia/Jakarta'
+      }).format(new Date());
       let updateTime = (newStatus === 'completed' || newStatus === 'cancelled') ? Date.now() : undefined;
 
       if (order.status === 'pending' && newStatus === 'processing') {

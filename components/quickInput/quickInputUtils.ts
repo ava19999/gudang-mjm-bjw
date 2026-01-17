@@ -1,10 +1,11 @@
 // FILE: src/components/quickInput/quickInputUtils.ts
 import { QuickInputRow } from './types';
 
-// Helper to get today's date in YYYY-MM-DD format
+// Helper to get today's date in YYYY-MM-DD format (WIB)
 const getTodayDate = (): string => {
-    const today = new Date();
-    return today.toISOString().split('T')[0];
+    return new Intl.DateTimeFormat('sv-SE', {
+        timeZone: 'Asia/Jakarta'
+    }).format(new Date());
 };
 
 export const createEmptyRow = (id: number): QuickInputRow => ({

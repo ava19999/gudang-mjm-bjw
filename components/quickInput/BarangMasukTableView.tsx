@@ -36,11 +36,15 @@ export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger, onRefres
                 filteredLogs = logs.filter((item: any) => {
                     // Date filtering
                     if (filterDateFrom) {
-                        const itemDate = new Date(item.created_at).toISOString().split('T')[0];
+                        const itemDate = new Intl.DateTimeFormat('sv-SE', {
+                            timeZone: 'Asia/Jakarta'
+                        }).format(new Date(item.created_at));
                         if (itemDate < filterDateFrom) return false;
                     }
                     if (filterDateTo) {
-                        const itemDate = new Date(item.created_at).toISOString().split('T')[0];
+                        const itemDate = new Intl.DateTimeFormat('sv-SE', {
+                            timeZone: 'Asia/Jakarta'
+                        }).format(new Date(item.created_at));
                         if (itemDate > filterDateTo) return false;
                     }
                     

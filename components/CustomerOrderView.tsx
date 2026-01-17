@@ -14,7 +14,11 @@ export const CustomerOrderView: React.FC<CustomerOrderViewProps> = ({ orders, cu
 
   // Helper date formatter
   const formatDate = (ts: number) => new Date(ts).toLocaleDateString('id-ID', { 
-    day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' 
+    timeZone: 'Asia/Jakarta',
+    day: 'numeric', 
+    month: 'short', 
+    hour: '2-digit', 
+    minute: '2-digit' 
   });
 
   const myOrders = useMemo(() => {
