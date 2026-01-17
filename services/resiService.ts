@@ -352,6 +352,9 @@ export async function fetchKilatEntries(
 // PRODUCT ALIAS OPERATIONS
 // ============================================
 
+// PostgreSQL error codes
+const PG_UNIQUE_VIOLATION = '23505';
+
 /**
  * Add product alias
  */
@@ -366,7 +369,7 @@ export async function addProductAlias(
 
     if (error) {
       // Ignore duplicate constraint errors
-      if (error.code === '23505') return true;
+      if (error.code === PG_UNIQUE_VIOLATION) return true;
       throw error;
     }
     return true;

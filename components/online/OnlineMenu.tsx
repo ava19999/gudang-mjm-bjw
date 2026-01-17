@@ -10,13 +10,48 @@ interface OnlineMenuProps {
 }
 
 const ONLINE_MENU_ITEMS = [
-  { view: 'scan_resi' as ActiveView, label: 'Scan Resi', icon: Scan, color: 'cyan' },
-  { view: 'kilat' as ActiveView, label: 'KILAT', icon: Zap, color: 'yellow' },
-  { view: 'reseller' as ActiveView, label: 'Reseller', icon: Users, color: 'purple' },
-  { view: 'import_export' as ActiveView, label: 'Import Export', icon: Upload, color: 'blue' },
-  { view: 'scan_correction' as ActiveView, label: 'Koreksi Scan', icon: Trash2, color: 'red' },
-  { view: 'data_agung' as ActiveView, label: 'Data Agung', icon: Globe, color: 'cyan' },
+  { view: 'scan_resi' as ActiveView, label: 'Scan Resi', icon: Scan, colorClass: 'cyan' },
+  { view: 'kilat' as ActiveView, label: 'KILAT', icon: Zap, colorClass: 'yellow' },
+  { view: 'reseller' as ActiveView, label: 'Reseller', icon: Users, colorClass: 'purple' },
+  { view: 'import_export' as ActiveView, label: 'Import Export', icon: Upload, colorClass: 'blue' },
+  { view: 'scan_correction' as ActiveView, label: 'Koreksi Scan', icon: Trash2, colorClass: 'red' },
+  { view: 'data_agung' as ActiveView, label: 'Data Agung', icon: Globe, colorClass: 'cyan' },
 ];
+
+// Color mapping for Tailwind classes
+const getColorClasses = (color: string, isActive: boolean) => {
+  if (!isActive) {
+    return {
+      container: 'text-gray-300',
+      icon: 'bg-gray-700/50'
+    };
+  }
+  
+  const colorMap: Record<string, { container: string; icon: string }> = {
+    cyan: {
+      container: 'bg-gradient-to-r from-cyan-900/30 to-transparent text-cyan-400 shadow-inner',
+      icon: 'bg-cyan-900/40'
+    },
+    yellow: {
+      container: 'bg-gradient-to-r from-yellow-900/30 to-transparent text-yellow-400 shadow-inner',
+      icon: 'bg-yellow-900/40'
+    },
+    purple: {
+      container: 'bg-gradient-to-r from-purple-900/30 to-transparent text-purple-400 shadow-inner',
+      icon: 'bg-purple-900/40'
+    },
+    blue: {
+      container: 'bg-gradient-to-r from-blue-900/30 to-transparent text-blue-400 shadow-inner',
+      icon: 'bg-blue-900/40'
+    },
+    red: {
+      container: 'bg-gradient-to-r from-red-900/30 to-transparent text-red-400 shadow-inner',
+      icon: 'bg-red-900/40'
+    }
+  };
+  
+  return colorMap[color] || colorMap.cyan;
+};
 
 export const OnlineMenu: React.FC<OnlineMenuProps> = ({ 
   activeView, 
@@ -52,6 +87,7 @@ export const OnlineMenu: React.FC<OnlineMenuProps> = ({
             {ONLINE_MENU_ITEMS.map((item) => {
               const Icon = item.icon;
               const isActive = activeView === item.view;
+              const colors = getColorClasses(item.colorClass, isActive);
               
               return (
                 <button
@@ -60,11 +96,9 @@ export const OnlineMenu: React.FC<OnlineMenuProps> = ({
                     setActiveView(item.view);
                     setIsOpen(false);
                   }}
-                  className={`w-full px-4 py-3.5 text-left hover:bg-gray-700/80 transition-all duration-150 flex items-center gap-3 active:scale-[0.98] ${
-                    isActive ? `bg-gradient-to-r from-${item.color}-900/30 to-transparent text-${item.color}-400 shadow-inner` : 'text-gray-300'
-                  }`}
+                  className={`w-full px-4 py-3.5 text-left hover:bg-gray-700/80 transition-all duration-150 flex items-center gap-3 active:scale-[0.98] ${colors.container}`}
                 >
-                  <div className={`p-1.5 rounded-lg ${isActive ? `bg-${item.color}-900/40` : 'bg-gray-700/50'}`}>
+                  <div className={`p-1.5 rounded-lg ${colors.icon}`}>
                     <Icon size={18} />
                   </div>
                   <span className="text-sm font-semibold">{item.label}</span>
@@ -98,6 +132,7 @@ export const OnlineMenu: React.FC<OnlineMenuProps> = ({
           {ONLINE_MENU_ITEMS.map((item) => {
             const Icon = item.icon;
             const isActive = activeView === item.view;
+            const colors = getColorClasses(item.colorClass, isActive);
             
             return (
               <button
@@ -106,9 +141,7 @@ export const OnlineMenu: React.FC<OnlineMenuProps> = ({
                   setActiveView(item.view);
                   setIsOpen(false);
                 }}
-                className={`w-full px-4 py-3 text-left hover:bg-gray-700 transition-colors flex items-center gap-2 ${
-                  isActive ? `bg-gray-700 text-${item.color}-400` : 'text-gray-300'
-                }`}
+                className={`w-full px-4 py-3 text-left hover:bg-gray-700 transition-colors flex items-center gap-2 ${colors.container}`}
               >
                 <Icon size={16} />
                 <span className="text-sm font-medium">{item.label}</span>

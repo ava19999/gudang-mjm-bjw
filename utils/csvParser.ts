@@ -221,14 +221,66 @@ export function parseMarketplaceExport(csvText: string): ParsedOrderData[] {
 
 /**
  * Parse price string to number
+ * Handles both formats: 1.234,56 (EU) and 1,234.56 (US)
  */
 function parsePrice(priceStr: string): number {
   if (!priceStr) return 0;
-  // Remove currency symbols, spaces, and non-numeric except decimal point
+  // Remove currency symbols and spaces
   const cleaned = priceStr.replace(/[^\d.,]/g, '');
-  // Handle different decimal separators (comma vs dot)
-  const normalized = cleaned.replace(/\./g, '').replace(',', '.');
-  return parseFloat(normalized) || 0;
+  
+  // Detect format: if last dot/comma is followed by exactly 2 digits, it's decimal separator
+  // Otherwise, it's thousands separator
+  const lastDot = cleaned.lastIndexOf('.');
+  const lastComma = cleaned.lastIndexOf(',');
+  
+  // No separators
+  if (lastDot === -1 && lastComma === -1) {
+    return parseFloat(cleaned) || 0;
+  }
+  
+  // Only one type of separator
+  if (lastDot === -1) {
+    // Only commas - check if last is decimal
+    const afterLastComma = cleaned.substring(lastComma + 1);
+    if (afterLastComma.length === 2) {
+      // Comma is decimal: 1234,56
+      return parseFloat(cleaned.replace(/\./g, '').replace(',', '.')) || 0;
+    }
+    // Comma is thousands: 1,234
+    return parseFloat(cleaned.replace(/,/g, '')) || 0;
+  }
+  
+  if (lastComma === -1) {
+    // Only dots - check if last is decimal
+    const afterLastDot = cleaned.substring(lastDot + 1);
+    if (afterLastDot.length === 2) {
+      // Dot is decimal: 1234.56
+      return parseFloat(cleaned.replace(/,/g, '')) || 0;
+    }
+    // Dot is thousands: 1.234
+    return parseFloat(cleaned.replace(/\./g, '')) || 0;
+  }
+  
+  // Both separators present: use position to determine which is decimal
+  if (lastDot > lastComma) {
+    // Format: 1.234,56 or 1,234.56 - last one is decimal
+    const afterLastDot = cleaned.substring(lastDot + 1);
+    if (afterLastDot.length <= 3 && lastDot > lastComma) {
+      // 1,234.56 (US format)
+      return parseFloat(cleaned.replace(/,/g, '')) || 0;
+    }
+    // 1.234,56 (EU format)
+    return parseFloat(cleaned.replace(/\./g, '').replace(',', '.')) || 0;
+  } else {
+    // Last comma after last dot
+    const afterLastComma = cleaned.substring(lastComma + 1);
+    if (afterLastComma.length <= 2) {
+      // 1.234,56 (EU format)
+      return parseFloat(cleaned.replace(/\./g, '').replace(',', '.')) || 0;
+    }
+    // 1,234.56 (US format)
+    return parseFloat(cleaned.replace(/,/g, '')) || 0;
+  }
 }
 
 /**
