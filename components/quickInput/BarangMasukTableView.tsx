@@ -74,21 +74,35 @@ export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger, onRefres
         if (!confirm(`Hapus log barang masuk "${item.part_number}"?\nStok akan dikembalikan (dikurangi ${item.quantity || item.qty_masuk}).`)) return;
         
         setDeletingId(item.id);
-        const success = await deleteBarangLog(
-            item.id, 
-            'in', 
-            item.part_number, 
-            item.quantity || item.qty_masuk, 
-            selectedStore
-        );
-        
-        if (success) {
-            loadData();
-            if (onRefresh) onRefresh();
-        } else {
-            alert('Gagal menghapus log. Silakan coba lagi.');
+        try {
+            const success = await deleteBarangLog(
+                item.id, 
+                'in', 
+                item.part_number, 
+                item.quantity || item.qty_masuk || 0, 
+                selectedStore
+            );
+            
+            if (success) {
+                // Hapus dari state lokal terlebih dahulu untuk UX yang lebih responsif
+                setData(prevData => prevData.filter(d => d.id !== item.id));
+                setTotalRows(prev => Math.max(0, prev - 1));
+                
+                // Kemudian refresh data dari server untuk memastikan sinkronisasi
+                setTimeout(() => {
+                    loadData();
+                }, 300);
+                
+                if (onRefresh) onRefresh();
+            } else {
+                alert('Gagal menghapus log. Silakan coba lagi.');
+            }
+        } catch (error) {
+            console.error('Error deleting log:', error);
+            alert('Terjadi error saat menghapus log.');
+        } finally {
+            setDeletingId(null);
         }
-        setDeletingId(null);
     };
 
     const resetFilters = () => {
