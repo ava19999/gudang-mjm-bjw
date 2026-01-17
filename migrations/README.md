@@ -29,6 +29,12 @@ We've created SQL migration scripts and updated the application code to:
 - Used as a guide for implementing the TypeScript functions
 - Not meant to be executed directly (reference only)
 
+### 3. `003_scan_resi_packing_schema.sql` ✨ NEW
+- Adds packing and order management columns to scan_resi tables
+- Creates indexes for better performance on scan_resi queries
+- Supports the new Scan Resi & Packing mobile interface
+- **IMPORTANT**: Run this migration to enable Scan Resi features
+
 ## How to Run Migrations
 
 ### Option 1: Using Supabase Dashboard (Recommended)
