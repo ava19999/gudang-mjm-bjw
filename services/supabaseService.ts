@@ -660,6 +660,12 @@ export const deleteBarangLog = async (
     const stockTable = getTableName(store);
 
     try {
+        // Validasi input
+        if (!id || !partNumber || qty < 0) {
+            console.error("Invalid parameters for deleteBarangLog:", { id, partNumber, qty });
+            return false;
+        }
+
         // 1. Ambil Data Stok Saat Ini
         const { data: currentItem, error: fetchError } = await supabase
             .from(stockTable)
@@ -667,32 +673,41 @@ export const deleteBarangLog = async (
             .eq('part_number', partNumber)
             .single();
 
-        if (fetchError || !currentItem) throw new Error("Item tidak ditemukan untuk rollback stok");
-
-        // 2. Hitung Stok Rollback
-        // Jika hapus Log Masuk -> Stok Kurang. Jika hapus Log Keluar -> Stok Tambah.
-        let newQty = currentItem.quantity;
-        if (type === 'in') {
-            newQty = currentItem.quantity - qty;
-        } else {
-            newQty = currentItem.quantity + qty;
+        if (fetchError || !currentItem) {
+            console.error("Fetch error:", fetchError);
+            throw new Error("Item tidak ditemukan untuk rollback stok");
         }
 
-        // 3. Update Stok
-        const { error: updateError } = await supabase
-            .from(stockTable)
-            .update({ quantity: newQty, last_updated: new Date().toISOString() })
-            .eq('part_number', partNumber);
+        // 2. Hitung Stok Rollback
+        let newQty = currentItem.quantity;
+        if (type === 'in') {
+            newQty = Math.max(0, newQty - qty); // Hindari stok negatif
+        } else {
+            newQty = newQty + qty;
+        }
 
-        if (updateError) throw new Error("Gagal mengembalikan stok");
-
-        // 4. Hapus Log
+        // 3. Hapus Log TERLEBIH DAHULU (prioritas utama)
         const { error: deleteError } = await supabase
             .from(logTable)
             .delete()
             .eq('id', id);
 
-        if (deleteError) throw new Error("Gagal menghapus log");
+        if (deleteError) {
+            console.error("Delete error:", deleteError);
+            throw new Error("Gagal menghapus log: " + deleteError.message);
+        }
+
+        // 4. Update Stok SETELAH log terhapus
+        const { error: updateError } = await supabase
+            .from(stockTable)
+            .update({ quantity: newQty, last_updated: new Date().toISOString() })
+            .eq('part_number', partNumber);
+
+        if (updateError) {
+            console.error("Update stock error:", updateError);
+            // Log sudah terhapus, tapi stok gagal update - log warning
+            console.warn("WARNING: Log terhapus tapi stok gagal diupdate untuk part_number:", partNumber);
+        }
 
         return true;
     } catch (e) {
