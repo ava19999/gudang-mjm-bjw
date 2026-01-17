@@ -692,9 +692,16 @@ export const deleteBarangLog = async (
 
         // 4. Hapus Log
         // Pastikan tipe id sesuai (DB mungkin number)
-        const idToUse = typeof id === 'string' ? 
-            (/^\d+$/.test(id) ? Number(id) : (() => { throw new Error('ID tidak valid: harus berupa angka'); })()) 
-            : id;
+        let idToUse: number;
+        if (typeof id === 'string') {
+            if (!/^\d+$/.test(id)) {
+                throw new Error('ID tidak valid: harus berupa angka');
+            }
+            idToUse = Number(id);
+        } else {
+            idToUse = id;
+        }
+        
         const { error: deleteError } = await supabase
             .from(logTable)
             .delete()
@@ -702,6 +709,8 @@ export const deleteBarangLog = async (
 
         if (deleteError) {
             // Jika delete gagal, kembalikan stok ke nilai semula
+            // NOTE: Rollback ini tidak menggunakan transaction dan bisa gagal jika ada operasi concurrent.
+            // Untuk production dengan high concurrency, pertimbangkan implementasi database transaction atau optimistic locking.
             const { error: revertError } = await supabase
                 .from(stockTable)
                 .update({ quantity: prevQty, last_updated: new Date().toISOString() })
