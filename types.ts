@@ -32,6 +32,59 @@ export interface OnlineOrderRow {
   status: string; // 'Pending', 'Proses'
 }
 
+// NEW: Extended interface for Scan Resi System
+export interface ScanResiEntry {
+  id?: number;
+  tanggal: string;
+  type_toko: string; // TIKTOK, SHOPEE, KILAT, RESELLER, EKSPOR
+  toko: string; // Sub-options: LARIS, MJM, BJW, etc.
+  resi: string;
+  customer: string;
+  part_number: string;
+  barang: string;
+  brand: string;
+  application: string;
+  stok_saatini: number;
+  qty_out: number;
+  harga_satuan: number;
+  total_harga: number;
+  no_pesanan?: string;
+  negara_ekspor?: string; // For EKSPOR: PH, MY, SG, HK
+  status_packing: string; // SCANNED, MATCHED
+  is_split: boolean;
+  split_group_id?: string;
+  split_count: number;
+  original_product_name?: string;
+  original_price?: number;
+}
+
+// Product Alias for Search
+export interface ProductAlias {
+  id?: number;
+  part_number: string;
+  alias_name: string;
+  source: string; // SHOPEE, TIKTOK, MANUAL
+  created_at?: string;
+}
+
+// KILAT specific entry
+export interface KilatEntry {
+  id?: number;
+  tanggal: string;
+  type_toko: 'KILAT';
+  toko: string; // MJM, BJW, LARIS
+  resi: string;
+  part_number: string;
+  barang: string;
+  brand: string;
+  application: string;
+  qty_out: number;
+  is_sold: boolean; // Track if matched with export file
+  customer?: string; // Filled after matching
+  harga_satuan?: number; // Filled after matching
+  total_harga?: number; // Filled after matching
+}
+
 // 3. SUDAH TERJUAL (Table: barang_keluar_mjm / barang_keluar_bjw)
 export interface SoldItemRow {
   id: string;
