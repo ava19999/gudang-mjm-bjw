@@ -30,6 +30,15 @@ export interface OnlineOrderRow {
   harga_satuan: number;
   harga_total: number;
   status: string; // 'Pending', 'Proses'
+  // New packing fields
+  date_time?: string;
+  user_name?: string;
+  status_packing?: 'unpacked' | 'packed' | 'shipped';
+  notes?: string;
+  target_country?: string;
+  order_type?: 'shopee' | 'tiktok' | 'reseller' | 'export' | 'online';
+  is_variation?: boolean;
+  parent_resi?: string;
 }
 
 // 3. SUDAH TERJUAL (Table: barang_keluar_mjm / barang_keluar_bjw)

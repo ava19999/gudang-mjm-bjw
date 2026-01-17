@@ -735,11 +735,224 @@ export const saveReturRecord = async () => {};
 export const fetchReturRecords = fetchRetur;
 export const addReturTransaction = saveReturRecord;
 export const updateReturKeterangan = async () => {};
-export const fetchScanResiLogs = async () => [];
-export const addScanResiLog = async () => {};
+
+// --- SCAN RESI SERVICE FUNCTIONS ---
+
+export const fetchScanResiData = async (store: string | null): Promise<OnlineOrderRow[]> => {
+  const table = store === 'mjm' ? 'scan_resi_mjm' : (store === 'bjw' ? 'scan_resi_bjw' : null);
+  if (!table) return [];
+
+  const { data, error } = await supabase
+    .from(table)
+    .select('*')
+    .order('date_time', { ascending: false });
+
+  if (error) { 
+    console.error('Fetch Scan Resi Error:', error); 
+    return []; 
+  }
+  return data || [];
+};
+
+export const addScanResiEntry = async (
+  entry: Partial<OnlineOrderRow>, 
+  store: string | null,
+  userName: string
+): Promise<{ success: boolean; msg: string; data?: OnlineOrderRow }> => {
+  const table = store === 'mjm' ? 'scan_resi_mjm' : (store === 'bjw' ? 'scan_resi_bjw' : null);
+  if (!table) return { success: false, msg: 'Store tidak valid' };
+
+  // Check for duplicate resi
+  const { data: existing } = await supabase
+    .from(table)
+    .select('*')
+    .eq('resi', entry.resi)
+    .maybeSingle();
+
+  if (existing) {
+    return { success: false, msg: `Resi ${entry.resi} sudah ada di database` };
+  }
+
+  const payload = {
+    tanggal: entry.tanggal || new Date().toISOString().split('T')[0],
+    date_time: new Date().toISOString(),
+    resi: entry.resi,
+    toko: entry.toko || store?.toUpperCase() || 'MJM',
+    ecommerce: entry.ecommerce || entry.order_type?.toUpperCase() || 'SHOPEE',
+    customer: entry.customer || '',
+    part_number: entry.part_number || '',
+    nama_barang: entry.nama_barang || '',
+    quantity: entry.quantity || 1,
+    harga_satuan: entry.harga_satuan || 0,
+    harga_total: entry.harga_total || 0,
+    status: entry.status || 'Pending',
+    status_packing: entry.status_packing || 'unpacked',
+    user_name: userName,
+    notes: entry.notes || '',
+    target_country: entry.target_country || '',
+    order_type: entry.order_type || 'shopee',
+    is_variation: entry.is_variation || false,
+    parent_resi: entry.parent_resi || null
+  };
+
+  try {
+    const { data, error } = await supabase.from(table).insert([payload]).select().single();
+    if (error) throw error;
+    return { success: true, msg: 'Resi berhasil ditambahkan', data };
+  } catch (e: any) {
+    console.error('Add Scan Resi Error:', e);
+    return { success: false, msg: `Error: ${e.message}` };
+  }
+};
+
+export const updateScanResiEntry = async (
+  id: number,
+  updates: Partial<OnlineOrderRow>,
+  store: string | null
+): Promise<{ success: boolean; msg: string }> => {
+  const table = store === 'mjm' ? 'scan_resi_mjm' : (store === 'bjw' ? 'scan_resi_bjw' : null);
+  if (!table) return { success: false, msg: 'Store tidak valid' };
+
+  try {
+    const { error } = await supabase.from(table).update(updates).eq('id', id);
+    if (error) throw error;
+    return { success: true, msg: 'Data berhasil diupdate' };
+  } catch (e: any) {
+    console.error('Update Scan Resi Error:', e);
+    return { success: false, msg: `Error: ${e.message}` };
+  }
+};
+
+export const deleteScanResiEntry = async (
+  id: number,
+  store: string | null
+): Promise<{ success: boolean; msg: string }> => {
+  const table = store === 'mjm' ? 'scan_resi_mjm' : (store === 'bjw' ? 'scan_resi_bjw' : null);
+  if (!table) return { success: false, msg: 'Store tidak valid' };
+
+  try {
+    const { error } = await supabase.from(table).delete().eq('id', id);
+    if (error) throw error;
+    return { success: true, msg: 'Data berhasil dihapus' };
+  } catch (e: any) {
+    console.error('Delete Scan Resi Error:', e);
+    return { success: false, msg: `Error: ${e.message}` };
+  }
+};
+
+export const addProductVariation = async (
+  parentEntry: OnlineOrderRow,
+  store: string | null,
+  userName: string
+): Promise<{ success: boolean; msg: string; data?: OnlineOrderRow }> => {
+  const table = store === 'mjm' ? 'scan_resi_mjm' : (store === 'bjw' ? 'scan_resi_bjw' : null);
+  if (!table) return { success: false, msg: 'Store tidak valid' };
+
+  // Create variation entry
+  const payload = {
+    tanggal: parentEntry.tanggal,
+    date_time: new Date().toISOString(),
+    resi: `${parentEntry.resi}-VAR${Date.now()}`,
+    toko: parentEntry.toko,
+    ecommerce: parentEntry.ecommerce,
+    customer: parentEntry.customer,
+    part_number: parentEntry.part_number,
+    nama_barang: parentEntry.nama_barang + ' (Variasi)',
+    quantity: 1,
+    harga_satuan: Math.round(parentEntry.harga_satuan / 2),
+    harga_total: Math.round(parentEntry.harga_satuan / 2),
+    status: parentEntry.status,
+    status_packing: 'unpacked',
+    user_name: userName,
+    notes: 'Product variation',
+    target_country: parentEntry.target_country,
+    order_type: parentEntry.order_type,
+    is_variation: true,
+    parent_resi: parentEntry.resi
+  };
+
+  try {
+    const { data, error } = await supabase.from(table).insert([payload]).select().single();
+    if (error) throw error;
+    return { success: true, msg: 'Variasi produk berhasil ditambahkan', data };
+  } catch (e: any) {
+    console.error('Add Variation Error:', e);
+    return { success: false, msg: `Error: ${e.message}` };
+  }
+};
+
+export const exportScanResiData = async (
+  store: string | null,
+  format: 'shopee' | 'tiktok',
+  filters?: {
+    startDate?: string;
+    endDate?: string;
+    status_packing?: string;
+    order_type?: string;
+  }
+): Promise<{ success: boolean; data?: any[]; msg: string }> => {
+  const table = store === 'mjm' ? 'scan_resi_mjm' : (store === 'bjw' ? 'scan_resi_bjw' : null);
+  if (!table) return { success: false, msg: 'Store tidak valid' };
+
+  try {
+    let query = supabase.from(table).select('*');
+
+    if (filters?.startDate) {
+      query = query.gte('tanggal', filters.startDate);
+    }
+    if (filters?.endDate) {
+      query = query.lte('tanggal', filters.endDate);
+    }
+    if (filters?.status_packing) {
+      query = query.eq('status_packing', filters.status_packing);
+    }
+    if (filters?.order_type) {
+      query = query.eq('order_type', filters.order_type);
+    }
+
+    const { data, error } = await query.order('date_time', { ascending: false });
+    if (error) throw error;
+
+    // Format data based on platform
+    const formattedData = data?.map((item: OnlineOrderRow) => {
+      if (format === 'shopee') {
+        return {
+          'Order ID': item.resi,
+          'Customer Name': item.customer,
+          'Product Name': item.nama_barang,
+          'Quantity': item.quantity,
+          'Price': item.harga_satuan,
+          'Total': item.harga_total,
+          'Status': item.status_packing,
+          'Date': item.tanggal
+        };
+      } else { // tiktok
+        return {
+          'Tracking Number': item.resi,
+          'Buyer Name': item.customer,
+          'Item Name': item.nama_barang,
+          'Qty': item.quantity,
+          'Unit Price': item.harga_satuan,
+          'Order Amount': item.harga_total,
+          'Packing Status': item.status_packing,
+          'Order Date': item.tanggal
+        };
+      }
+    });
+
+    return { success: true, data: formattedData, msg: 'Export berhasil' };
+  } catch (e: any) {
+    console.error('Export Error:', e);
+    return { success: false, msg: `Error: ${e.message}` };
+  }
+};
+
+// Legacy placeholder functions for compatibility
+export const fetchScanResiLogs = fetchScanResiData;
+export const addScanResiLog = addScanResiEntry;
 export const saveScanResiLog = addScanResiLog;
-export const updateScanResiLogField = async () => {};
-export const deleteScanResiLog = async () => {};
+export const updateScanResiLogField = updateScanResiEntry;
+export const deleteScanResiLog = deleteScanResiEntry;
 export const duplicateScanResiLog = async () => {};
 export const processShipmentToOrders = async () => {};
 export const importScanResiFromExcel = async () => ({ success: true, skippedCount: 0 });
