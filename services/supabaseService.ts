@@ -955,6 +955,60 @@ export const approveResiToBarangKeluar = async (resiEntry: OnlineOrderRow, store
   }
 };
 
+// Approve multiple resi entries in batch (for Person 3)
+export const batchApproveResiEntries = async (resiNumbers: string[], store: string | null): Promise<{ success: number; failed: number }> => {
+  const scanTable = store === 'mjm' ? 'scan_resi_mjm' : (store === 'bjw' ? 'scan_resi_bjw' : null);
+  if (!scanTable) return { success: 0, failed: 0 };
+  
+  let successCount = 0;
+  let failedCount = 0;
+  
+  try {
+    // Get all entries for these resi numbers
+    const { data: entries, error } = await supabase
+      .from(scanTable)
+      .select('*')
+      .in('resi', resiNumbers)
+      .in('status', ['scanned', 'packed']);
+    
+    if (error) throw error;
+    
+    // Process each entry
+    for (const entry of entries || []) {
+      const success = await approveResiToBarangKeluar(entry, store);
+      if (success) {
+        successCount++;
+      } else {
+        failedCount++;
+      }
+    }
+    
+    return { success: successCount, failed: failedCount };
+  } catch (e) {
+    console.error('Error batch approving resi entries:', e);
+    return { success: successCount, failed: failedCount };
+  }
+};
+
+// Update scanned resi entry
+export const updateScanResiEntry = async (id: number, updates: Partial<OnlineOrderRow>, store: string | null): Promise<boolean> => {
+  const table = store === 'mjm' ? 'scan_resi_mjm' : (store === 'bjw' ? 'scan_resi_bjw' : null);
+  if (!table) return false;
+  
+  try {
+    const { error } = await supabase
+      .from(table)
+      .update(updates)
+      .eq('id', id);
+    
+    if (error) throw error;
+    return true;
+  } catch (e) {
+    console.error('Error updating scan resi entry:', e);
+    return false;
+  }
+};
+
 // ... (sisa kode lainnya)
 // Placeholder Functions (Safe defaults)
 export const fetchHistory = async () => [];
