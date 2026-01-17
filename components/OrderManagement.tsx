@@ -223,7 +223,7 @@ export const OrderManagement: React.FC = () => {
                           {group.tempo}
                         </span>
                         <span className="text-[10px] font-mono bg-gray-700 px-2 py-0.5 rounded text-gray-300">
-                          {new Date(group.date).toLocaleString('id-ID')}
+                          {new Date(group.date).toLocaleString('id-ID', {timeZone: 'Asia/Jakarta'})}
                         </span>
                         <span className="text-[10px] bg-blue-900/30 text-blue-300 px-2 py-0.5 rounded border border-blue-800 flex items-center gap-1">
                           <Layers size={10} /> {group.items.length} Item
@@ -340,7 +340,7 @@ export const OrderManagement: React.FC = () => {
               <div key={item.id} className="bg-gray-800/50 border border-gray-700 p-3 rounded-lg flex justify-between items-center hover:bg-gray-800 transition-colors">
                 <div className="flex-1">
                   <div className="flex items-center gap-2 mb-1">
-                    <span className="text-[10px] text-gray-500">{new Date(item.created_at).toLocaleString('id-ID')}</span>
+                    <span className="text-[10px] text-gray-500">{new Date(item.created_at).toLocaleString('id-ID', {timeZone: 'Asia/Jakarta'})}</span>
                     <span className="text-[10px] bg-gray-700 px-1.5 rounded text-gray-400">{item.ecommerce || 'OFFLINE'}</span>
                   </div>
                   <h4 className="font-bold text-white text-sm">{item.name}</h4>
