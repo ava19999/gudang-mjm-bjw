@@ -23,7 +23,7 @@ ALTER TABLE scan_resi_mjm
 ADD COLUMN IF NOT EXISTS parent_resi TEXT;
 
 -- Add comment for clarity
-COMMENT ON COLUMN scan_resi_mjm.sub_toko IS 'Sub-store for TIKTOK/SHOPEE/KILAT: LARIS, MJM, or BJW';
+COMMENT ON COLUMN scan_resi_mjm.sub_toko IS 'Sub-store for TIKTOK/SHOPEE/KILAT/TOKOPEDIA/LAZADA: LARIS, MJM, or BJW';
 COMMENT ON COLUMN scan_resi_mjm.negara IS 'Country for EKSPOR: PH, MY, SG, or HK';
 COMMENT ON COLUMN scan_resi_mjm.split_item IS 'Split item number: 0=single/original, 1=first split, 2=second split, etc.';
 COMMENT ON COLUMN scan_resi_mjm.parent_resi IS 'Original resi number if this is a split item';
@@ -49,7 +49,7 @@ ALTER TABLE scan_resi_bjw
 ADD COLUMN IF NOT EXISTS parent_resi TEXT;
 
 -- Add comment for clarity
-COMMENT ON COLUMN scan_resi_bjw.sub_toko IS 'Sub-store for TIKTOK/SHOPEE/KILAT: LARIS, MJM, or BJW';
+COMMENT ON COLUMN scan_resi_bjw.sub_toko IS 'Sub-store for TIKTOK/SHOPEE/KILAT/TOKOPEDIA/LAZADA: LARIS, MJM, or BJW';
 COMMENT ON COLUMN scan_resi_bjw.negara IS 'Country for EKSPOR: PH, MY, SG, or HK';
 COMMENT ON COLUMN scan_resi_bjw.split_item IS 'Split item number: 0=single/original, 1=first split, 2=second split, etc.';
 COMMENT ON COLUMN scan_resi_bjw.parent_resi IS 'Original resi number if this is a split item';

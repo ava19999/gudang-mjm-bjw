@@ -85,7 +85,14 @@ export const OrderScanView: React.FC<OrderScanViewProps> = ({ onShowToast, onRef
   // --- EFFECTS ---
   useEffect(() => {
     loadScanLogs();
-    if (inventoryCache.length === 0) fetchInventory(currentStore).then(setInventoryCache);
+    if (inventoryCache.length === 0) {
+      fetchInventory(currentStore)
+        .then(setInventoryCache)
+        .catch(err => {
+          console.error('Failed to fetch inventory:', err);
+          onShowToast('Gagal memuat inventory', 'error');
+        });
+    }
     setTimeout(() => { barcodeInputRef.current?.focus(); }, 100);
   }, [currentStore]);
 
@@ -412,7 +419,7 @@ export const OrderScanView: React.FC<OrderScanViewProps> = ({ onShowToast, onRef
     let inventoryMap = new Map<string, string>(); 
     let allPartNumbers: string[] = [];
     try {
-        const inventoryData = await fetchInventory();
+        const inventoryData = await fetchInventory(currentStore);
         inventoryData.forEach(item => {
             if(item.name) inventoryMap.set(item.name.toLowerCase().trim(), item.partNumber);
             if(item.partNumber) allPartNumbers.push(item.partNumber);

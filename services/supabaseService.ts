@@ -726,27 +726,40 @@ const getScanResiTableName = (store: string | null): string | null => {
   return null;
 };
 
+// Cache for resolved aliases to avoid repeated database lookups
+const aliasCache = new Map<string, string>();
+
 // Helper: Resolve part number aliases
 export const resolvePartNumberAlias = async (partNumber: string): Promise<string> => {
   if (!partNumber || partNumber.trim() === '') return partNumber;
+  
+  const trimmedPN = partNumber.trim();
+  
+  // Check cache first
+  if (aliasCache.has(trimmedPN)) {
+    return aliasCache.get(trimmedPN)!;
+  }
   
   try {
     // Check if this is an alias
     const { data, error } = await supabase
       .from('product_alias')
       .select('part_number')
-      .eq('alias', partNumber.trim())
+      .eq('alias', trimmedPN)
       .maybeSingle();
     
     if (!error && data) {
+      // Cache the resolved alias
+      aliasCache.set(trimmedPN, data.part_number);
       return data.part_number;
     }
     
-    // Return original if no alias found
-    return partNumber;
+    // Cache the original (no alias found)
+    aliasCache.set(trimmedPN, trimmedPN);
+    return trimmedPN;
   } catch (e) {
     console.error('Error resolving alias:', e);
-    return partNumber;
+    return trimmedPN;
   }
 };
 
