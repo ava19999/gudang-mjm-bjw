@@ -35,7 +35,10 @@ export const QuickInputTableRow: React.FC<QuickInputTableRowProps> = ({
     const baseRefIndex = globalIndex * COLS;
 
     // Payment terms options
-    const tempoOptions = ['CASH', '3 BLN', '2 BLN', '1 BLN'];
+    // UPDATE: Menambahkan 'NADIR' jika operation adalah 'in' (Barang Masuk)
+    const tempoOptions = row.operation === 'in' 
+        ? ['CASH', '3 BLN', '2 BLN', '1 BLN', 'NADIR'] 
+        : ['CASH', '3 BLN', '2 BLN', '1 BLN', 'NADIR'];
 
     // --- CALCULATION LOGIC ---
     

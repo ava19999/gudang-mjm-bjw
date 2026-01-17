@@ -1,9 +1,10 @@
 // FILE: src/components/quickInput/BarangMasukTableView.tsx
 import React, { useEffect, useState } from 'react';
 import { useStore } from '../../context/StoreContext';
-import { fetchBarangMasukLog } from '../../services/supabaseService';
+// Pastikan deleteBarangMasukLog diimport
+import { fetchBarangMasukLog, deleteBarangMasukLog } from '../../services/supabaseService'; 
 import { formatRupiah, formatDate } from '../../utils';
-import { Loader2, RefreshCw, ChevronLeft, ChevronRight, PackageOpen } from 'lucide-react';
+import { Loader2, RefreshCw, ChevronLeft, ChevronRight, PackageOpen, Trash2 } from 'lucide-react';
 
 interface Props { refreshTrigger: number; }
 
@@ -11,6 +12,8 @@ export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger }) => {
     const { selectedStore } = useStore();
     const [data, setData] = useState<any[]>([]);
     const [loading, setLoading] = useState(false);
+    // State untuk loading hapus per item
+    const [deletingId, setDeletingId] = useState<number | null>(null); 
     const [page, setPage] = useState(1);
     const [totalRows, setTotalRows] = useState(0);
     const LIMIT = 10;
@@ -25,6 +28,25 @@ export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger }) => {
             console.error("Gagal memuat data barang masuk:", e);
         } finally {
             setLoading(false);
+        }
+    };
+
+    // Fungsi Handle Delete
+    const handleDelete = async (item: any) => {
+        if (!window.confirm(`Yakin hapus riwayat masuk "${item.name}"?\nStok akan dikurangi otomatis sebanyak ${item.quantity || item.qty_masuk} unit.`)) {
+            return;
+        }
+
+        setDeletingId(item.id);
+        try {
+            await deleteBarangMasukLog(item.id, selectedStore);
+            // Refresh data setelah hapus berhasil
+            loadData(); 
+            alert("Data berhasil dihapus dan stok telah disesuaikan.");
+        } catch (e: any) {
+            alert("Gagal menghapus: " + e.message);
+        } finally {
+            setDeletingId(null);
         }
     };
 
@@ -57,13 +79,15 @@ export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger }) => {
                             <th className="px-3 py-2 text-right">Total</th>
                             <th className="px-3 py-2">Customer/Sumber</th>
                             <th className="px-3 py-2">Tempo</th>
+                            {/* Kolom Aksi Baru */}
+                            <th className="px-3 py-2 text-center">Aksi</th>
                         </tr>
                     </thead>
                     <tbody className="text-xs divide-y divide-gray-700/50">
                         {loading ? (
-                            <tr><td colSpan={8} className="py-8 text-center text-gray-500"><Loader2 size={16} className="animate-spin inline mr-2"/>Memuat data...</td></tr>
+                            <tr><td colSpan={9} className="py-8 text-center text-gray-500"><Loader2 size={16} className="animate-spin inline mr-2"/>Memuat data...</td></tr>
                         ) : data.length === 0 ? (
-                            <tr><td colSpan={8} className="py-8 text-center text-gray-600 italic">Belum ada data barang masuk.</td></tr>
+                            <tr><td colSpan={9} className="py-8 text-center text-gray-600 italic">Belum ada data barang masuk.</td></tr>
                         ) : (
                             data.map((item, idx) => (
                                 <tr key={item.id || idx} className="hover:bg-gray-800/50 transition-colors">
@@ -75,6 +99,22 @@ export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger }) => {
                                     <td className="px-3 py-2 text-right text-orange-300 font-mono">{formatRupiah(item.harga_total)}</td>
                                     <td className="px-3 py-2 text-gray-400">{item.customer && item.customer !== '-' ? item.customer : (item.ecommerce || '-')}</td>
                                     <td className="px-3 py-2 text-gray-500">{item.tempo || '-'}</td>
+                                    
+                                    {/* Tombol Hapus */}
+                                    <td className="px-3 py-2 text-center">
+                                        <button 
+                                            onClick={() => handleDelete(item)}
+                                            disabled={deletingId === item.id}
+                                            className="p-1.5 text-red-500 hover:bg-red-900/20 rounded transition-colors disabled:opacity-50"
+                                            title="Hapus dan kurangi stok kembali"
+                                        >
+                                            {deletingId === item.id ? (
+                                                <Loader2 size={14} className="animate-spin" />
+                                            ) : (
+                                                <Trash2 size={14} />
+                                            )}
+                                        </button>
+                                    </td>
                                 </tr>
                             ))
                         )}
