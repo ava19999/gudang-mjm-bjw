@@ -41,6 +41,12 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
   const [loadingPrice, setLoadingPrice] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Product Variation State
+  const [isProductSet, setIsProductSet] = useState(false);
+  const [variations, setVariations] = useState<Array<{ id: string, name: string, sku: string, price: number }>>([
+    { id: '1', name: 'Item 1', sku: '', price: 0 }
+  ]);
+
   useEffect(() => {
     if (initialData) {
       setFormData({
@@ -128,7 +134,49 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
 
   const selectPrice = (unitPrice: number) => {
       setFormData(prev => ({ ...prev, costPrice: unitPrice }));
+      // Auto-calculate variation prices if product is a set
+      if (isProductSet && variations.length > 0) {
+        const pricePerItem = unitPrice / variations.length;
+        setVariations(prev => prev.map(v => ({ ...v, price: pricePerItem })));
+      }
       setShowPricePopup(false);
+  };
+
+  // Variation handlers
+  const addVariation = () => {
+    const newId = String(Date.now());
+    setVariations(prev => [...prev, { id: newId, name: `Item ${prev.length + 1}`, sku: '', price: 0 }]);
+    // Recalculate prices
+    if (formData.costPrice > 0) {
+      const pricePerItem = formData.costPrice / (variations.length + 1);
+      setVariations(prev => prev.map(v => ({ ...v, price: pricePerItem })));
+    }
+  };
+
+  const removeVariation = (id: string) => {
+    if (variations.length <= 1) {
+      setError("Minimal harus ada 1 item");
+      return;
+    }
+    setVariations(prev => prev.filter(v => v.id !== id));
+    // Recalculate prices
+    if (formData.costPrice > 0) {
+      const pricePerItem = formData.costPrice / (variations.length - 1);
+      setVariations(prev => prev.map(v => ({ ...v, price: pricePerItem })));
+    }
+  };
+
+  const updateVariation = (id: string, field: 'name' | 'sku' | 'price', value: string | number) => {
+    setVariations(prev => prev.map(v => v.id === id ? { ...v, [field]: value } : v));
+  };
+
+  const handleIsProductSetChange = (checked: boolean) => {
+    setIsProductSet(checked);
+    if (checked && formData.costPrice > 0) {
+      // Auto-calculate prices when enabling set mode
+      const pricePerItem = formData.costPrice / variations.length;
+      setVariations(prev => prev.map(v => ({ ...v, price: pricePerItem })));
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -367,6 +415,91 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
                        )}
                    </div>
                )}
+
+               {/* Product Variation Section */}
+               <div className="bg-purple-900/20 p-4 rounded-2xl border border-purple-900/40 space-y-4">
+                 <div className="flex items-center justify-between">
+                   <h3 className="text-xs font-bold text-purple-300 uppercase tracking-wider flex items-center gap-1">
+                     <Layers size={12}/> Variasi Produk
+                   </h3>
+                   <label className="flex items-center gap-2 cursor-pointer">
+                     <input 
+                       type="checkbox" 
+                       checked={isProductSet}
+                       onChange={(e) => handleIsProductSetChange(e.target.checked)}
+                       className="w-4 h-4 text-purple-600 bg-gray-700 border-gray-600 rounded focus:ring-purple-500"
+                     />
+                     <span className="text-xs text-gray-300">Produk Set</span>
+                   </label>
+                 </div>
+                 
+                 {isProductSet && (
+                   <div className="space-y-3 animate-in fade-in slide-in-from-top-2">
+                     <div className="bg-purple-900/10 border border-purple-900/30 rounded-lg p-3">
+                       <p className="text-xs text-purple-200 mb-2">
+                         Produk ini adalah Set dengan beberapa item. Harga akan dibagi otomatis ke setiap item.
+                       </p>
+                       <div className="text-[10px] text-gray-400">
+                         Total Item: <span className="font-bold text-purple-400">{variations.length}</span> | 
+                         Harga Per Item: <span className="font-bold text-purple-400">{formatRupiah(formData.costPrice / variations.length)}</span>
+                       </div>
+                     </div>
+
+                     {variations.map((variation, index) => (
+                       <div key={variation.id} className="bg-gray-800 border border-gray-700 rounded-lg p-3 space-y-2">
+                         <div className="flex items-center justify-between mb-2">
+                           <span className="text-xs font-bold text-gray-400">Item #{index + 1}</span>
+                           {variations.length > 1 && (
+                             <button 
+                               type="button"
+                               onClick={() => removeVariation(variation.id)}
+                               className="text-red-400 hover:text-red-300 p-1"
+                             >
+                               <X size={14} />
+                             </button>
+                           )}
+                         </div>
+                         <div className="grid grid-cols-2 gap-2">
+                           <div>
+                             <label className="text-[10px] font-bold text-gray-400 uppercase block mb-1">Nama Item</label>
+                             <input 
+                               type="text"
+                               value={variation.name}
+                               onChange={(e) => updateVariation(variation.id, 'name', e.target.value)}
+                               placeholder="Contoh: Kiri / Kanan"
+                               className="w-full px-2 py-1.5 bg-gray-900 border border-gray-700 rounded-lg text-xs text-gray-200 focus:border-purple-500 outline-none"
+                             />
+                           </div>
+                           <div>
+                             <label className="text-[10px] font-bold text-gray-400 uppercase block mb-1">SKU</label>
+                             <input 
+                               type="text"
+                               value={variation.sku}
+                               onChange={(e) => updateVariation(variation.id, 'sku', e.target.value)}
+                               placeholder="SKU Item"
+                               className="w-full px-2 py-1.5 bg-gray-900 border border-gray-700 rounded-lg text-xs text-gray-200 font-mono focus:border-purple-500 outline-none"
+                             />
+                           </div>
+                         </div>
+                         <div>
+                           <label className="text-[10px] font-bold text-gray-400 uppercase block mb-1">Harga (Auto)</label>
+                           <div className="px-2 py-1.5 bg-purple-900/20 border border-purple-900/30 rounded-lg text-xs text-purple-300 font-mono font-bold">
+                             {formatRupiah(variation.price)}
+                           </div>
+                         </div>
+                       </div>
+                     ))}
+
+                     <button 
+                       type="button"
+                       onClick={addVariation}
+                       className="w-full py-2 bg-purple-900/30 border border-purple-900/50 text-purple-300 rounded-lg hover:bg-purple-900/50 flex items-center justify-center gap-2 text-xs font-bold transition-colors"
+                     >
+                       <Plus size={14} /> Tambah Item
+                     </button>
+                   </div>
+                 )}
+               </div>
 
                <div className="bg-gray-700 p-4 rounded-2xl border border-gray-600 space-y-4">
                   <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1"><DollarSign size={12}/> Harga</h3>
