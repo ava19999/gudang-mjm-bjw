@@ -230,3 +230,74 @@ export interface ChatSession {
     unreadAdminCount: number;
     unreadUserCount: number;
 }
+
+// --- SCAN RESI SYSTEM ---
+
+export interface ScanResi {
+    id?: number;
+    tanggal: string;
+    type_toko: 'TIKTOK' | 'SHOPEE' | 'KILAT' | 'RESELLER' | 'EKSPOR';
+    toko?: string; // MJM, BJW, LARIS
+    negara_ekspor?: string; // PH, MY, SG, HK (for EKSPOR)
+    resi: string;
+    customer?: string;
+    no_pesanan?: string;
+    status: 'SCANNED' | 'MATCHED' | 'PROCESSED';
+    scanned_at: string;
+    matched_at?: string;
+}
+
+export interface ScanResiItem {
+    id?: number;
+    scan_resi_id: number;
+    part_number?: string;
+    product_name_export?: string;
+    qty: number;
+    harga_satuan: number;
+    harga_total: number;
+    is_split: boolean;
+    split_group_id?: string;
+    split_count: number;
+}
+
+export interface ProductAlias {
+    id?: number;
+    part_number: string;
+    alias_name: string;
+    source: 'SHOPEE' | 'TIKTOK';
+    created_at?: string;
+}
+
+export interface KilatItem {
+    id?: number;
+    tanggal: string;
+    toko: string; // MJM, BJW, LARIS
+    part_number: string;
+    nama_barang?: string;
+    status: 'DIKIRIM' | 'TERJUAL';
+    sold_at?: string;
+    customer?: string;
+    harga?: number;
+}
+
+export interface CSVRowShopee {
+    'No. Pesanan'?: string;
+    'No. Resi'?: string;
+    'Nama Penerima'?: string;
+    'SKU Induk'?: string;
+    'Nama Produk'?: string;
+    'Jumlah'?: string;
+    'Harga Awal (Rp)'?: string;
+    'Total Harga (Rp)'?: string;
+}
+
+export interface CSVRowTikTok {
+    'Order ID'?: string;
+    'Tracking ID'?: string;
+    'Recipient'?: string;
+    'Seller SKU'?: string;
+    'Product Name'?: string;
+    'Quantity'?: string;
+    'Original Price'?: string;
+    'Total Amount'?: string;
+}

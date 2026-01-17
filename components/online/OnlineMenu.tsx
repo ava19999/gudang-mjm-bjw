@@ -1,6 +1,6 @@
 // FILE: src/components/online/OnlineMenu.tsx
 import React, { useState } from 'react';
-import { Globe, ChevronDown, ChevronUp } from 'lucide-react';
+import { Globe, ChevronDown, ChevronUp, Camera, Upload, Package, Users, BarChart } from 'lucide-react';
 import { ActiveView } from '../../types/ui';
 
 interface OnlineMenuProps {
@@ -9,6 +9,8 @@ interface OnlineMenuProps {
   isMobile?: boolean;
 }
 
+const onlineViews: ActiveView[] = ['data_agung', 'scan_resi', 'import_export', 'kilat', 'reseller', 'packing_status'];
+
 export const OnlineMenu: React.FC<OnlineMenuProps> = ({ 
   activeView, 
   setActiveView,
@@ -16,11 +18,20 @@ export const OnlineMenu: React.FC<OnlineMenuProps> = ({
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   
-  const isOnlineActive = activeView === 'data_agung';
+  const isOnlineActive = onlineViews.includes(activeView);
 
   const handleMainClick = () => {
     setIsOpen(!isOpen);
   };
+
+  const menuItems = [
+    { view: 'data_agung' as ActiveView, label: 'Data Agung', icon: Globe },
+    { view: 'scan_resi' as ActiveView, label: 'Scan Resi', icon: Camera },
+    { view: 'import_export' as ActiveView, label: 'Import Data', icon: Upload },
+    { view: 'kilat' as ActiveView, label: 'Kilat', icon: Package },
+    { view: 'reseller' as ActiveView, label: 'Reseller', icon: Users },
+    { view: 'packing_status' as ActiveView, label: 'Status Packing', icon: BarChart },
+  ];
 
   if (isMobile) {
     return (
@@ -39,21 +50,27 @@ export const OnlineMenu: React.FC<OnlineMenuProps> = ({
         </button>
 
         {isOpen && (
-          <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-3 bg-gray-800/95 backdrop-blur-sm border border-gray-700 rounded-2xl shadow-2xl overflow-hidden min-w-[200px] animate-in slide-in-from-bottom-2 fade-in duration-200">
-            <button
-              onClick={() => {
-                setActiveView('data_agung');
-                setIsOpen(false);
-              }}
-              className={`w-full px-4 py-3.5 text-left hover:bg-gray-700/80 transition-all duration-150 flex items-center gap-3 active:scale-[0.98] ${
-                activeView === 'data_agung' ? 'bg-gradient-to-r from-cyan-900/30 to-transparent text-cyan-400 shadow-inner' : 'text-gray-300'
-              }`}
-            >
-              <div className={`p-1.5 rounded-lg ${activeView === 'data_agung' ? 'bg-cyan-900/40' : 'bg-gray-700/50'}`}>
-                <Globe size={18} />
-              </div>
-              <span className="text-sm font-semibold">Data Agung</span>
-            </button>
+          <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-3 bg-gray-800/95 backdrop-blur-sm border border-gray-700 rounded-2xl shadow-2xl overflow-hidden min-w-[200px] animate-in slide-in-from-bottom-2 fade-in duration-200 max-h-[70vh] overflow-y-auto">
+            {menuItems.map((item) => {
+              const Icon = item.icon;
+              return (
+                <button
+                  key={item.view}
+                  onClick={() => {
+                    setActiveView(item.view);
+                    setIsOpen(false);
+                  }}
+                  className={`w-full px-4 py-3.5 text-left hover:bg-gray-700/80 transition-all duration-150 flex items-center gap-3 active:scale-[0.98] ${
+                    activeView === item.view ? 'bg-gradient-to-r from-cyan-900/30 to-transparent text-cyan-400 shadow-inner' : 'text-gray-300'
+                  }`}
+                >
+                  <div className={`p-1.5 rounded-lg ${activeView === item.view ? 'bg-cyan-900/40' : 'bg-gray-700/50'}`}>
+                    <Icon size={18} />
+                  </div>
+                  <span className="text-sm font-semibold">{item.label}</span>
+                </button>
+              );
+            })}
           </div>
         )}
       </div>
@@ -77,19 +94,25 @@ export const OnlineMenu: React.FC<OnlineMenuProps> = ({
       </button>
 
       {isOpen && (
-        <div className="absolute top-full mt-2 right-0 bg-gray-800 border border-gray-700 rounded-xl shadow-xl overflow-hidden min-w-[200px] z-50">
-          <button
-            onClick={() => {
-              setActiveView('data_agung');
-              setIsOpen(false);
-            }}
-            className={`w-full px-4 py-3 text-left hover:bg-gray-700 transition-colors flex items-center gap-2 ${
-              activeView === 'data_agung' ? 'bg-gray-700 text-cyan-400' : 'text-gray-300'
-            }`}
-          >
-            <Globe size={16} />
-            <span className="text-sm font-medium">Data Agung</span>
-          </button>
+        <div className="absolute top-full mt-2 right-0 bg-gray-800 border border-gray-700 rounded-xl shadow-xl overflow-hidden min-w-[200px] z-50 max-h-[70vh] overflow-y-auto">
+          {menuItems.map((item) => {
+            const Icon = item.icon;
+            return (
+              <button
+                key={item.view}
+                onClick={() => {
+                  setActiveView(item.view);
+                  setIsOpen(false);
+                }}
+                className={`w-full px-4 py-3 text-left hover:bg-gray-700 transition-colors flex items-center gap-2 ${
+                  activeView === item.view ? 'bg-gray-700 text-cyan-400' : 'text-gray-300'
+                }`}
+              >
+                <Icon size={16} />
+                <span className="text-sm font-medium">{item.label}</span>
+              </button>
+            );
+          })}
         </div>
       )}
     </div>
