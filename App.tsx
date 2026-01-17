@@ -14,6 +14,11 @@ import { PettyCashView } from './components/finance/PettyCashView';
 import { BarangKosongView } from './components/finance/BarangKosongView';
 import { ClosingView } from './components/finance/ClosingView';
 import { DataAgungView } from './components/online/DataAgungView';
+import { ScanResiView } from './components/online/ScanResiView';
+import { ImportExportView } from './components/online/ImportExportView';
+import { KilatView } from './components/online/KilatView';
+import { ResellerView } from './components/online/ResellerView';
+import { PackingStatusView } from './components/online/PackingStatusView';
 
 // --- NEW SPLIT COMPONENTS ---
 import { Toast } from './components/common/Toast';
@@ -393,6 +398,11 @@ const AppContent: React.FC = () => {
         {activeView === 'barang_kosong' && isAdmin && <BarangKosongView />}
         {activeView === 'closing' && isAdmin && <ClosingView />}
         {activeView === 'data_agung' && isAdmin && <DataAgungView items={items} onRefresh={refreshData} showToast={showToast} />}
+        {activeView === 'scan_resi' && isAdmin && <ScanResiView store={selectedStore} showToast={showToast} />}
+        {activeView === 'import_export' && isAdmin && <ImportExportView store={selectedStore} showToast={showToast} />}
+        {activeView === 'kilat' && isAdmin && <KilatView store={selectedStore} showToast={showToast} />}
+        {activeView === 'reseller' && isAdmin && <ResellerView store={selectedStore} showToast={showToast} />}
+        {activeView === 'packing_status' && isAdmin && <PackingStatusView store={selectedStore} showToast={showToast} />}
         {activeView === 'orders' && isAdmin && <OrderManagement orders={orders} isLoading={loading} onUpdateStatus={handleUpdateStatus} onProcessReturn={handleProcessReturn} onRefresh={refreshData} />}
         {activeView === 'orders' && !isAdmin && <CustomerOrderView orders={orders.filter(o => o.customerName === loginName)} />}
         
