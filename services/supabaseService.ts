@@ -710,7 +710,9 @@ export const deleteBarangLog = async (
         if (deleteError) {
             // Jika delete gagal, kembalikan stok ke nilai semula
             // NOTE: Rollback ini tidak menggunakan transaction dan bisa gagal jika ada operasi concurrent.
-            // Untuk production dengan high concurrency, pertimbangkan implementasi database transaction atau optimistic locking.
+            // Jika rollback gagal, database akan mengalami partial state corruption (stok sudah berubah tapi log masih ada).
+            // Untuk production dengan high concurrency, pertimbangkan implementasi database transaction atau optimistic locking,
+            // dan setup monitoring/alerting untuk rollback failures.
             const { error: revertError } = await supabase
                 .from(stockTable)
                 .update({ quantity: prevQty, last_updated: new Date().toISOString() })
@@ -719,7 +721,9 @@ export const deleteBarangLog = async (
             console.error('Gagal menghapus log, mencoba revert stok', { deleteError, revertError });
             
             if (revertError) {
-                throw new Error(`Gagal menghapus log DAN gagal rollback stok: ${deleteError.message}. Rollback error: ${revertError.message}`);
+                const deleteMsg = deleteError.message || 'Gagal menghapus log';
+                const revertMsg = revertError.message || 'Gagal rollback';
+                throw new Error(`${deleteMsg} DAN ${revertMsg}. Database mungkin tidak konsisten, perlu pengecekan manual.`);
             }
             throw new Error(deleteError.message || 'Gagal menghapus log');
         }
