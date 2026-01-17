@@ -7,8 +7,9 @@ import {
 } from '../services/supabaseService';
 import { OfflineOrderRow, OnlineOrderRow, SoldItemRow, ReturRow } from '../types';
 import { 
-  ClipboardList, Wifi, CheckCircle, RotateCcw, Search, RefreshCw, Box, Check, X, ChevronDown, ChevronUp, Layers, User
+  ClipboardList, Wifi, CheckCircle, RotateCcw, Search, RefreshCw, Box, Check, X, ChevronDown, ChevronUp, Layers, User, Camera
 } from 'lucide-react';
+import { ScanResiManagement } from './orders/ScanResiManagement';
 
 // Toast Component Sederhana
 const Toast = ({ msg, type, onClose }: any) => (
@@ -20,7 +21,7 @@ const Toast = ({ msg, type, onClose }: any) => (
 
 export const OrderManagement: React.FC = () => {
   const { selectedStore } = useStore();
-  const [activeTab, setActiveTab] = useState<'OFFLINE' | 'ONLINE' | 'TERJUAL' | 'RETUR'>('OFFLINE');
+  const [activeTab, setActiveTab] = useState<'OFFLINE' | 'SCAN_RESI' | 'TERJUAL' | 'RETUR'>('SCAN_RESI');
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [toast, setToast] = useState<{msg: string, type: 'success'|'error'} | null>(null);
@@ -43,9 +44,9 @@ export const OrderManagement: React.FC = () => {
     setLoading(true);
     try {
       if (activeTab === 'OFFLINE') setOfflineData(await fetchOfflineOrders(selectedStore));
-      if (activeTab === 'ONLINE') setOnlineData(await fetchOnlineOrders(selectedStore));
       if (activeTab === 'TERJUAL') setSoldData(await fetchSoldItems(selectedStore));
       if (activeTab === 'RETUR') setReturData(await fetchReturItems(selectedStore));
+      // SCAN_RESI is handled by ScanResiManagement component
     } catch (e) {
       console.error("Gagal load data:", e);
     }
@@ -169,8 +170,8 @@ export const OrderManagement: React.FC = () => {
       {/* TABS MENU */}
       <div className="flex border-b border-gray-700 bg-gray-900/50 overflow-x-auto">
         {[
+          { id: 'SCAN_RESI', label: 'SCAN RESI', icon: Camera, color: 'text-cyan-400' },
           { id: 'OFFLINE', label: 'OFFLINE (Kasir)', icon: ClipboardList, color: 'text-amber-400' },
-          { id: 'ONLINE', label: 'ONLINE (Resi)', icon: Wifi, color: 'text-blue-400' },
           { id: 'TERJUAL', label: 'SUDAH TERJUAL', icon: CheckCircle, color: 'text-green-400' },
           { id: 'RETUR', label: 'RETUR', icon: RotateCcw, color: 'text-red-400' },
         ].map((tab: any) => (
@@ -304,32 +305,9 @@ export const OrderManagement: React.FC = () => {
           </div>
         )}
 
-        {/* --- 2. TAB ONLINE (Scan Resi) --- */}
-        {activeTab === 'ONLINE' && (
-          <div className="space-y-3">
-            {filterList(onlineData).length === 0 && <EmptyState msg="Tidak ada scan resi baru." />}
-            {filterList(onlineData).map(item => (
-              <div key={item.id} className="bg-gray-800 border border-gray-700 p-4 rounded-xl flex flex-col md:flex-row justify-between gap-4">
-                <div>
-                  <div className="flex gap-2 mb-2">
-                    <span className="text-[10px] font-bold bg-blue-900/30 text-blue-400 px-2 py-0.5 rounded border border-blue-800">{item.ecommerce}</span>
-                    <span className="text-[10px] font-mono bg-gray-700 px-2 py-0.5 rounded text-gray-300">{item.resi}</span>
-                  </div>
-                  <h3 className="font-bold text-lg text-white">{item.customer}</h3>
-                  <p className="text-blue-300">{item.nama_barang}</p>
-                </div>
-                <div className="flex flex-row md:flex-col items-center md:items-end gap-3 text-right">
-                  <div>
-                    <span className="text-gray-400 text-xs">Qty Keluar</span>
-                    <p className="text-xl font-bold text-white">{item.quantity}</p>
-                  </div>
-                  <button onClick={() => handleAccOnline(item)} className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-500 font-bold flex items-center gap-2 shadow-lg shadow-green-900/30">
-                    <Check size={16}/> Konfirmasi
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
+        {/* --- 2. TAB SCAN RESI (New Management) --- */}
+        {activeTab === 'SCAN_RESI' && (
+          <ScanResiManagement showToast={showToast} onRefresh={loadData} />
         )}
 
         {/* --- 3. TAB TERJUAL (History Barang Keluar) --- */}
