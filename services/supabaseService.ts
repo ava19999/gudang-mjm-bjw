@@ -673,13 +673,13 @@ export const deleteBarangLog = async (
             .eq('part_number', partNumber)
             .single();
 
-        if (fetchError) {
+        if (fetchError || !currentItem) {
             console.error("Fetch error:", fetchError);
             throw new Error("Item tidak ditemukan untuk rollback stok");
         }
 
         // 2. Hitung Stok Rollback
-        let newQty = currentItem?.quantity || 0;
+        let newQty = currentItem.quantity;
         if (type === 'in') {
             newQty = Math.max(0, newQty - qty); // Hindari stok negatif
         } else {
