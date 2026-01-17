@@ -70,7 +70,7 @@ export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger, onRefres
         }
     };
 
-    const handleDelete = async (item: any) => {
+    const handleDelete = async (item: { id: number; part_number: string; quantity?: number; qty_masuk?: number; name?: string }) => {
         if (!confirm(`Hapus log barang masuk "${item.part_number}"?\nStok akan dikembalikan (dikurangi ${item.quantity || item.qty_masuk}).`)) return;
         
         setDeletingId(item.id);
@@ -100,6 +100,7 @@ export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger, onRefres
     };
 
     useEffect(() => { setPage(1); }, [selectedStore]);
+    // Note: Filters trigger immediate reload. For production, consider debouncing filter inputs to reduce API calls.
     useEffect(() => { loadData(); }, [selectedStore, page, refreshTrigger, filterDateFrom, filterDateTo, filterPartNumber, filterCustomer]);
 
     const totalPages = Math.ceil(totalRows / LIMIT);

@@ -292,10 +292,10 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
         return;
       }
       
-      // Group by customer + date
+      // Group by customer + date (using JSON.stringify for safer key generation)
       const groupedOrders: Record<string, QuickInputRow[]> = {};
       rowsToSave.forEach(row => {
-        const key = `${row.customer.trim().toLowerCase()}_${row.tanggal}`;
+        const key = JSON.stringify([row.customer.trim().toLowerCase(), row.tanggal]);
         if (!groupedOrders[key]) groupedOrders[key] = [];
         groupedOrders[key].push(row);
       });
