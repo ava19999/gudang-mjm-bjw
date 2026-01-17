@@ -1,4 +1,4 @@
-// FILE: src/components/quickInput/quickInputUtils.ts
+// FILE: components/quickInput/quickInputUtils.ts
 import { QuickInputRow } from './types';
 
 // Helper to get today's date in YYYY-MM-DD format (WIB)

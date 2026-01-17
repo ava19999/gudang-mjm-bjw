@@ -1,4 +1,4 @@
-// FILE: src/utils/timezone.ts
+// FILE: utils/timezone.ts
 export const WIB_TIMEZONE = 'Asia/Jakarta';
 export const WIB_OFFSET_HOURS = 7;
 export const WIB_OFFSET_MS = WIB_OFFSET_HOURS * 60 * 60 * 1000;
@@ -72,7 +72,8 @@ export const getWIBISOString = (date?: Date | string | number): string => {
   const d = date ? new Date(date) : new Date();
   const utc = d.getTime() + (d.getTimezoneOffset() * 60000);
   const wibDate = new Date(utc + WIB_OFFSET_MS);
-  return wibDate.toISOString().replace('Z', '+07:00');
+  const offsetStr = `+${String(WIB_OFFSET_HOURS).padStart(2, '0')}:00`;
+  return wibDate.toISOString().replace('Z', offsetStr);
 };
 
 // Mendapatkan tanggal hari ini dalam format YYYY-MM-DD (WIB)
