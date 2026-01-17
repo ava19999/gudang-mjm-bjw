@@ -4,6 +4,8 @@ export const WIB_OFFSET_HOURS = 7;
 export const WIB_OFFSET_MS = WIB_OFFSET_HOURS * 60 * 60 * 1000;
 
 // Mendapatkan waktu sekarang dalam WIB
+// Note: Uses manual offset calculation to return a Date object with WIB time
+// This is intentional as Intl.DateTimeFormat only formats strings, not Date objects
 export const getWIBDate = (): Date => {
   const now = new Date();
   const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
@@ -68,6 +70,8 @@ export const formatDateTimeWIB = (date: Date | string | number): string => {
 };
 
 // Mendapatkan ISO string dalam WIB (tanpa Z suffix)
+// Note: Uses manual offset calculation as ISO strings require specific formatting
+// Indonesia doesn't observe DST, so fixed offset is appropriate
 export const getWIBISOString = (date?: Date | string | number): string => {
   const d = date ? new Date(date) : new Date();
   const utc = d.getTime() + (d.getTimezoneOffset() * 60000);

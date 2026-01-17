@@ -1,16 +1,11 @@
 // FILE: utils/orderHelpers.ts
 import { Order, OrderStatus } from '../types';
 import { CheckCircle, XCircle } from 'lucide-react';
-import { WIB_TIMEZONE, WIB_OFFSET_MS, WIB_OFFSET_HOURS } from './timezone';
+import { WIB_TIMEZONE, getWIBISOString as getWIBISOStringUtil } from './timezone';
 
 // --- TIMEZONE HELPERS ---
-export const getWIBISOString = () => {
-    const now = new Date();
-    const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
-    const wibDate = new Date(utc + WIB_OFFSET_MS);
-    const offsetStr = `+${String(WIB_OFFSET_HOURS).padStart(2, '0')}:00`;
-    return wibDate.toISOString().replace('Z', offsetStr);
-};
+// Re-export for backward compatibility
+export const getWIBISOString = () => getWIBISOStringUtil();
 
 export const getLocalISOString = (timestamp: number) => {
     const d = new Date(timestamp);
