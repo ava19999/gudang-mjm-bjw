@@ -717,7 +717,396 @@ export const deleteBarangLog = async (
 };
 
 // ... (sisa kode lainnya)
-// Placeholder Functions (Safe defaults)
+// --- SCAN RESI MANAGEMENT ---
+
+// Helper: Get scan_resi table name based on store
+const getScanResiTableName = (store: string | null): string | null => {
+  if (store === 'mjm') return 'scan_resi_mjm';
+  if (store === 'bjw') return 'scan_resi_bjw';
+  return null;
+};
+
+// Cache for resolved aliases to avoid repeated database lookups
+const aliasCache = new Map<string, string>();
+
+// Helper: Resolve part number aliases
+export const resolvePartNumberAlias = async (partNumber: string): Promise<string> => {
+  if (!partNumber || partNumber.trim() === '') return partNumber;
+  
+  const trimmedPN = partNumber.trim();
+  
+  // Check cache first
+  if (aliasCache.has(trimmedPN)) {
+    return aliasCache.get(trimmedPN)!;
+  }
+  
+  try {
+    // Check if this is an alias
+    const { data, error } = await supabase
+      .from('product_alias')
+      .select('part_number')
+      .eq('alias', trimmedPN)
+      .maybeSingle();
+    
+    if (!error && data) {
+      // Cache the resolved alias
+      aliasCache.set(trimmedPN, data.part_number);
+      return data.part_number;
+    }
+    
+    // Cache the original (no alias found)
+    aliasCache.set(trimmedPN, trimmedPN);
+    return trimmedPN;
+  } catch (e) {
+    console.error('Error resolving alias:', e);
+    return trimmedPN;
+  }
+};
+
+// Fetch all scan resi logs
+export const fetchScanResiLogs = async (store?: string | null): Promise<any[]> => {
+  const table = getScanResiTableName(store);
+  if (!table) return [];
+  
+  try {
+    const { data, error } = await supabase
+      .from(table)
+      .select('*')
+      .order('tanggal', { ascending: false })
+      .order('id', { ascending: false });
+    
+    if (error) {
+      console.error('Error fetching scan resi logs:', error);
+      return [];
+    }
+    
+    return data || [];
+  } catch (e) {
+    console.error('Exception fetching scan resi logs:', e);
+    return [];
+  }
+};
+
+// Add new scan resi log
+export const addScanResiLog = async (
+  resi: string,
+  ecommerce: string,
+  toko: string,
+  store?: string | null,
+  additionalData?: Partial<any>
+): Promise<boolean> => {
+  const table = getScanResiTableName(store);
+  if (!table) return false;
+  
+  try {
+    const logData = {
+      tanggal: new Date().toISOString(),
+      resi: resi.trim(),
+      toko: toko || 'MJM',
+      ecommerce: ecommerce || 'Shopee',
+      customer: additionalData?.customer || '-',
+      part_number: additionalData?.part_number || null,
+      nama_barang: additionalData?.nama_barang || '-',
+      quantity: additionalData?.quantity || 0,
+      harga_satuan: additionalData?.harga_satuan || 0,
+      harga_total: additionalData?.harga_total || 0,
+      status: additionalData?.status || 'Pending',
+      sub_toko: additionalData?.sub_toko || null,
+      negara: additionalData?.negara || null,
+      split_item: additionalData?.split_item || 0,
+      parent_resi: additionalData?.parent_resi || null
+    };
+    
+    const { error } = await supabase.from(table).insert([logData]);
+    
+    if (error) {
+      console.error('Error adding scan resi log:', error);
+      return false;
+    }
+    
+    return true;
+  } catch (e) {
+    console.error('Exception adding scan resi log:', e);
+    return false;
+  }
+};
+
+export const saveScanResiLog = addScanResiLog;
+
+// Update single field in scan resi log
+export const updateScanResiLogField = async (
+  id: number,
+  field: string,
+  value: any,
+  store?: string | null
+): Promise<boolean> => {
+  const table = getScanResiTableName(store);
+  if (!table) return false;
+  
+  try {
+    // Resolve alias if updating part_number
+    let finalValue = value;
+    if (field === 'part_number' && typeof value === 'string') {
+      finalValue = await resolvePartNumberAlias(value);
+    }
+    
+    const { error } = await supabase
+      .from(table)
+      .update({ [field]: finalValue })
+      .eq('id', id);
+    
+    if (error) {
+      console.error(`Error updating ${field}:`, error);
+      return false;
+    }
+    
+    return true;
+  } catch (e) {
+    console.error(`Exception updating ${field}:`, e);
+    return false;
+  }
+};
+
+// Delete scan resi log
+export const deleteScanResiLog = async (id: number, store?: string | null): Promise<boolean> => {
+  const table = getScanResiTableName(store);
+  if (!table) return false;
+  
+  try {
+    const { error } = await supabase.from(table).delete().eq('id', id);
+    
+    if (error) {
+      console.error('Error deleting scan resi log:', error);
+      return false;
+    }
+    
+    return true;
+  } catch (e) {
+    console.error('Exception deleting scan resi log:', e);
+    return false;
+  }
+};
+
+// Duplicate scan resi log (for split items)
+export const duplicateScanResiLog = async (
+  id: number,
+  store?: string | null,
+  splitData?: { split_item?: number; harga_total?: number; harga_satuan?: number }
+): Promise<boolean> => {
+  const table = getScanResiTableName(store);
+  if (!table) return false;
+  
+  try {
+    // Get original log
+    const { data: original, error: fetchError } = await supabase
+      .from(table)
+      .select('*')
+      .eq('id', id)
+      .single();
+    
+    if (fetchError || !original) {
+      console.error('Error fetching original log:', fetchError);
+      return false;
+    }
+    
+    // Create duplicate with split data
+    const duplicate = {
+      ...original,
+      id: undefined, // Let database generate new ID
+      parent_resi: original.parent_resi || original.resi,
+      split_item: splitData?.split_item || (original.split_item || 0) + 1,
+      harga_total: splitData?.harga_total || original.harga_total / 2,
+      harga_satuan: splitData?.harga_satuan || original.harga_satuan
+    };
+    
+    // Update original to have parent_resi if not set
+    if (!original.parent_resi) {
+      await supabase
+        .from(table)
+        .update({ parent_resi: original.resi })
+        .eq('id', id);
+    }
+    
+    const { error: insertError } = await supabase.from(table).insert([duplicate]);
+    
+    if (insertError) {
+      console.error('Error duplicating scan resi log:', insertError);
+      return false;
+    }
+    
+    return true;
+  } catch (e) {
+    console.error('Exception duplicating scan resi log:', e);
+    return false;
+  }
+};
+
+// Process shipment - move from scan_resi to barang_keluar and update stock
+export const processShipmentToOrders = async (
+  logs: any[],
+  store: string | null
+): Promise<{ success: boolean; message?: string }> => {
+  const scanTable = getScanResiTableName(store);
+  const stockTable = getTableName(store);
+  const outTable = getLogTableName('barang_keluar', store);
+  
+  if (!scanTable || !stockTable || !outTable) {
+    return { success: false, message: 'Invalid store configuration' };
+  }
+  
+  try {
+    for (const log of logs) {
+      // Resolve part number alias
+      const resolvedPartNumber = await resolvePartNumberAlias(log.part_number);
+      
+      // Get current stock
+      const { data: stockItem, error: stockError } = await supabase
+        .from(stockTable)
+        .select('*')
+        .eq('part_number', resolvedPartNumber)
+        .maybeSingle();
+      
+      if (stockError || !stockItem) {
+        return { 
+          success: false, 
+          message: `Item ${resolvedPartNumber} not found in inventory` 
+        };
+      }
+      
+      // Check stock availability
+      if (stockItem.quantity < log.quantity) {
+        return { 
+          success: false, 
+          message: `Insufficient stock for ${resolvedPartNumber}. Available: ${stockItem.quantity}, Required: ${log.quantity}` 
+        };
+      }
+      
+      // Update stock
+      const newQty = stockItem.quantity - log.quantity;
+      const { error: updateError } = await supabase
+        .from(stockTable)
+        .update({ quantity: newQty })
+        .eq('part_number', resolvedPartNumber);
+      
+      if (updateError) {
+        console.error('Error updating stock:', updateError);
+        return { success: false, message: 'Failed to update stock' };
+      }
+      
+      // Insert to barang_keluar
+      const keluarData = {
+        tanggal: log.tanggal || new Date().toISOString(),
+        kode_toko: log.toko || 'MJM',
+        tempo: log.sub_toko || '-',
+        ecommerce: log.ecommerce || 'ONLINE',
+        customer: log.customer || '-',
+        part_number: resolvedPartNumber,
+        name: log.nama_barang || '-',
+        brand: stockItem.brand || '-',
+        application: stockItem.application || '-',
+        rak: stockItem.shelf || '-',
+        stock_ahir: newQty,
+        qty_keluar: log.quantity,
+        harga_satuan: log.harga_satuan || 0,
+        harga_total: log.harga_total || 0,
+        resi: log.resi || '-',
+        created_at: new Date().toISOString()
+      };
+      
+      const { error: insertError } = await supabase
+        .from(outTable)
+        .insert([keluarData]);
+      
+      if (insertError) {
+        console.error('Error inserting to barang_keluar:', insertError);
+        return { success: false, message: 'Failed to log transaction' };
+      }
+      
+      // Update scan_resi status to 'Terjual'
+      const { error: statusError } = await supabase
+        .from(scanTable)
+        .update({ status: 'Terjual' })
+        .eq('id', log.id);
+      
+      if (statusError) {
+        console.error('Error updating scan_resi status:', statusError);
+      }
+    }
+    
+    return { success: true };
+  } catch (e: any) {
+    console.error('Exception processing shipment:', e);
+    return { success: false, message: e.message || 'Unknown error' };
+  }
+};
+
+// Import scan resi from Excel
+export const importScanResiFromExcel = async (
+  records: any[],
+  store?: string | null
+): Promise<{ success: boolean; skippedCount: number }> => {
+  const table = getScanResiTableName(store);
+  if (!table) return { success: false, skippedCount: 0 };
+  
+  try {
+    let skippedCount = 0;
+    const recordsToInsert: any[] = [];
+    
+    for (const record of records) {
+      // Check for duplicates
+      const { data: existing } = await supabase
+        .from(table)
+        .select('id, resi, part_number')
+        .eq('resi', record.resi)
+        .eq('part_number', record.part_number || '-');
+      
+      // Skip if exact match exists (same resi + same part_number)
+      if (existing && existing.length > 0) {
+        skippedCount++;
+        continue;
+      }
+      
+      // Resolve part number alias
+      let resolvedPartNumber = record.part_number;
+      if (resolvedPartNumber) {
+        resolvedPartNumber = await resolvePartNumberAlias(resolvedPartNumber);
+      }
+      
+      recordsToInsert.push({
+        tanggal: record.tanggal || new Date().toISOString(),
+        resi: record.resi,
+        toko: record.toko || 'MJM',
+        ecommerce: record.ecommerce || 'Shopee',
+        customer: record.customer || '-',
+        part_number: resolvedPartNumber,
+        nama_barang: record.nama_barang || '-',
+        quantity: record.quantity || 0,
+        harga_satuan: record.harga_satuan || 0,
+        harga_total: record.harga_total || 0,
+        status: record.status || 'Order Masuk',
+        sub_toko: record.sub_toko || null,
+        negara: record.negara || null,
+        split_item: record.split_item || 0,
+        parent_resi: record.parent_resi || null
+      });
+    }
+    
+    if (recordsToInsert.length > 0) {
+      const { error } = await supabase.from(table).insert(recordsToInsert);
+      
+      if (error) {
+        console.error('Error importing records:', error);
+        return { success: false, skippedCount };
+      }
+    }
+    
+    return { success: true, skippedCount };
+  } catch (e) {
+    console.error('Exception importing from Excel:', e);
+    return { success: false, skippedCount: 0 };
+  }
+};
+// Placeholder Functions (Safe defaults for features not yet implemented)
 export const fetchHistory = async () => [];
 export const fetchItemHistory = async () => [];
 export const fetchHistoryLogsPaginated = async () => ({ data: [], total: 0 });
@@ -735,12 +1124,4 @@ export const saveReturRecord = async () => {};
 export const fetchReturRecords = fetchRetur;
 export const addReturTransaction = saveReturRecord;
 export const updateReturKeterangan = async () => {};
-export const fetchScanResiLogs = async () => [];
-export const addScanResiLog = async () => {};
-export const saveScanResiLog = addScanResiLog;
-export const updateScanResiLogField = async () => {};
-export const deleteScanResiLog = async () => {};
-export const duplicateScanResiLog = async () => {};
-export const processShipmentToOrders = async () => {};
-export const importScanResiFromExcel = async () => ({ success: true, skippedCount: 0 });
 export const saveItemImages = async (itemId: string, images: string[], store?: string | null): Promise<void> => { };
