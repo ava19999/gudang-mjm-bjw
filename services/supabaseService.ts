@@ -304,15 +304,22 @@ export const getItemByPartNumber = async (partNumber: string, store?: string | n
 };
 
 // --- FUNGSI BARU: FETCH DATA BARANG MASUK ---
-export const fetchBarangMasukLog = async (store: string | null, page = 1, limit = 20) => {
+export const fetchBarangMasukLog = async (store: string | null, page = 1, limit = 20, search = '') => {
     const table = getLogTableName('barang_masuk', store);
-    
     const from = (page - 1) * limit;
     const to = from + limit - 1;
 
-    const { data, count, error } = await supabase
+    let query = supabase
         .from(table)
-        .select('*', { count: 'exact' })
+        .select('*', { count: 'exact' });
+
+    // Filter Pencarian
+    if (search) {
+        // Mencari di Part Number, Nama Barang, Customer, atau Tanggal (konversi text)
+        query = query.or(`part_number.ilike.%${search}%,nama_barang.ilike.%${search}%,customer.ilike.%${search}%`);
+    }
+
+    const { data, count, error } = await query
         .order('created_at', { ascending: false })
         .range(from, to);
 
@@ -321,7 +328,6 @@ export const fetchBarangMasukLog = async (store: string | null, page = 1, limit 
         return { data: [], total: 0 };
     }
     
-    // Mapping: Ubah nama_barang (DB) menjadi name (UI)
     const mappedData = (data || []).map(row => ({
         ...row,
         name: row.nama_barang || row.name, 
@@ -606,7 +612,96 @@ export const updateOrderData = async (id: string, items: any[], total: number, s
   const { error } = await supabase.from('orders').update({ items: JSON.stringify(items), totalAmount: total, status }).eq('id', id);
   return !error;
 };
+// FILE: services/supabaseService.ts
+// ... (kode yang sudah ada sebelumnya)
 
+// --- FUNGSI BARU: FETCH DATA BARANG KELUAR ---
+export const fetchBarangKeluarLog = async (store: string | null, page = 1, limit = 20, search = '') => {
+    const table = getLogTableName('barang_keluar', store);
+    const from = (page - 1) * limit;
+    const to = from + limit - 1;
+
+    let query = supabase
+        .from(table)
+        .select('*', { count: 'exact' });
+
+    // Filter Pencarian
+    if (search) {
+        query = query.or(`part_number.ilike.%${search}%,name.ilike.%${search}%,customer.ilike.%${search}%`);
+    }
+
+    const { data, count, error } = await query
+        .order('created_at', { ascending: false })
+        .range(from, to);
+
+    if (error) {
+        console.error("Error fetching barang keluar:", error);
+        return { data: [], total: 0 };
+    }
+    
+    const mappedData = (data || []).map(row => ({
+        ...row,
+        name: row.name || row.nama_barang, 
+        quantity: row.qty_keluar,
+        customer: row.customer || '-',
+        tempo: row.tempo || 'CASH'
+    }));
+
+    return { data: mappedData, total: count || 0 };
+};
+export const deleteBarangLog = async (
+    id: number, 
+    type: 'in' | 'out', 
+    partNumber: string, 
+    qty: number, 
+    store: string | null
+): Promise<boolean> => {
+    const logTable = getLogTableName(type === 'in' ? 'barang_masuk' : 'barang_keluar', store);
+    const stockTable = getTableName(store);
+
+    try {
+        // 1. Ambil Data Stok Saat Ini
+        const { data: currentItem, error: fetchError } = await supabase
+            .from(stockTable)
+            .select('quantity')
+            .eq('part_number', partNumber)
+            .single();
+
+        if (fetchError || !currentItem) throw new Error("Item tidak ditemukan untuk rollback stok");
+
+        // 2. Hitung Stok Rollback
+        // Jika hapus Log Masuk -> Stok Kurang. Jika hapus Log Keluar -> Stok Tambah.
+        let newQty = currentItem.quantity;
+        if (type === 'in') {
+            newQty = currentItem.quantity - qty;
+        } else {
+            newQty = currentItem.quantity + qty;
+        }
+
+        // 3. Update Stok
+        const { error: updateError } = await supabase
+            .from(stockTable)
+            .update({ quantity: newQty, last_updated: new Date().toISOString() })
+            .eq('part_number', partNumber);
+
+        if (updateError) throw new Error("Gagal mengembalikan stok");
+
+        // 4. Hapus Log
+        const { error: deleteError } = await supabase
+            .from(logTable)
+            .delete()
+            .eq('id', id);
+
+        if (deleteError) throw new Error("Gagal menghapus log");
+
+        return true;
+    } catch (e) {
+        console.error("Delete Log Error:", e);
+        return false;
+    }
+};
+
+// ... (sisa kode lainnya)
 // Placeholder Functions (Safe defaults)
 export const fetchHistory = async () => [];
 export const fetchItemHistory = async () => [];
