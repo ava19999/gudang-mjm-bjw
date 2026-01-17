@@ -15,7 +15,26 @@ import {
 } from 'lucide-react';
 
 const STORE_LIST = ['MJM', 'LARIS', 'BJW'];
-const MARKETPLACES = ['Shopee', 'Tiktok', 'Tokopedia', 'Lazada', 'Offline'];
+
+// Enhanced marketplace structure with sub-stores
+interface MarketplaceOption {
+  value: string;
+  label: string;
+  subStores?: string[]; // For TIKTOK, SHOPEE, KILAT
+  countries?: string[]; // For EKSPOR
+  directToBarangKeluar?: boolean; // For RESELLER
+}
+
+const MARKETPLACE_OPTIONS: MarketplaceOption[] = [
+  { value: 'TIKTOK', label: 'TikTok', subStores: ['LARIS', 'MJM', 'BJW'] },
+  { value: 'SHOPEE', label: 'Shopee', subStores: ['LARIS', 'MJM', 'BJW'] },
+  { value: 'KILAT', label: 'Kilat', subStores: ['MJM', 'BJW', 'LARIS'] },
+  { value: 'TOKOPEDIA', label: 'Tokopedia', subStores: ['LARIS', 'MJM', 'BJW'] },
+  { value: 'LAZADA', label: 'Lazada', subStores: ['LARIS', 'MJM', 'BJW'] },
+  { value: 'RESELLER', label: 'Reseller', directToBarangKeluar: true },
+  { value: 'EKSPOR', label: 'Ekspor', countries: ['PH', 'MY', 'SG', 'HK'] },
+  { value: 'OFFLINE', label: 'Offline' }
+];
 
 interface OrderScanViewProps {
   onShowToast: (msg: string, type?: 'success' | 'error') => void;
@@ -31,8 +50,12 @@ export const OrderScanView: React.FC<OrderScanViewProps> = ({ onShowToast, onRef
   const [selectedResis, setSelectedResis] = useState<string[]>([]);
   const [barcodeInput, setBarcodeInput] = useState('');
   const [selectedStore, setSelectedStore] = useState(STORE_LIST[0]); // This is for the scanning UI, different from inventory store
-  const [selectedMarketplace, setSelectedMarketplace] = useState('Shopee');
+  const [selectedMarketplace, setSelectedMarketplace] = useState('SHOPEE');
+  const [selectedSubStore, setSelectedSubStore] = useState('MJM'); // For TIKTOK, SHOPEE, KILAT
+  const [selectedCountry, setSelectedCountry] = useState('PH'); // For EKSPOR
   const [showMarketplacePopup, setShowMarketplacePopup] = useState(false);
+  const [showSubStorePopup, setShowSubStorePopup] = useState(false);
+  const [showCountryPopup, setShowCountryPopup] = useState(false);
   const [inventoryCache, setInventoryCache] = useState<InventoryItem[]>([]);
   
   // Loading States
@@ -83,6 +106,10 @@ export const OrderScanView: React.FC<OrderScanViewProps> = ({ onShowToast, onRef
   const loadScanLogs = async () => { setScanLogs(await fetchScanResiLogs(currentStore)); };
 
   // --- HELPER ---
+  const getCurrentMarketplaceOption = (): MarketplaceOption | undefined => {
+    return MARKETPLACE_OPTIONS.find(opt => opt.value === selectedMarketplace);
+  };
+
   const handleNumberChange = (id: number, field: string, value: string) => {
       const cleanValue = value.replace(/[^0-9]/g, '');
       const numValue = cleanValue === '' ? 0 : parseInt(cleanValue, 10);
@@ -139,6 +166,7 @@ export const OrderScanView: React.FC<OrderScanViewProps> = ({ onShowToast, onRef
       setIsSavingLog(true);
 
       const existingLog = scanLogs.find(l => l.resi === scannedCode);
+      const marketplaceOption = getCurrentMarketplaceOption();
 
       if (existingLog) {
           // KUNCI: Status HANYA berubah saat di-SCAN
@@ -170,7 +198,24 @@ export const OrderScanView: React.FC<OrderScanViewProps> = ({ onShowToast, onRef
 
       } else {
           // Barang benar-benar baru (belum ada di CSV)
-          if (await addScanResiLog(scannedCode, selectedMarketplace, selectedStore, currentStore)) {
+          // Prepare additional data based on marketplace type
+          const additionalData: any = {
+            status: 'Pending'
+          };
+          
+          // Add sub-store if applicable
+          if (marketplaceOption?.subStores) {
+            additionalData.sub_toko = selectedSubStore;
+          }
+          
+          // Add country if EKSPOR
+          if (marketplaceOption?.value === 'EKSPOR') {
+            additionalData.negara = selectedCountry;
+            // Map country to store
+            additionalData.sub_toko = selectedStore; // Use selected store for ekspor
+          }
+          
+          if (await addScanResiLog(scannedCode, selectedMarketplace, selectedStore, currentStore, additionalData)) {
               await loadScanLogs();
               onShowToast(`Resi ${scannedCode} Baru (Pending).`, 'success');
           } else {
@@ -432,7 +477,17 @@ export const OrderScanView: React.FC<OrderScanViewProps> = ({ onShowToast, onRef
 
   // --- RENDER HELPERS ---
   const toggleSelect = (resi: string) => setSelectedResis(prev => prev.includes(resi) ? prev.filter(r => r !== resi) : [...prev, resi]);
-  const getMarketplaceColor = (mp: string) => { switch(mp) { case 'Shopee': return 'bg-orange-900/30 text-orange-300 border-orange-800'; case 'Tokopedia': return 'bg-green-900/30 text-green-300 border-green-800'; case 'Tiktok': return 'bg-gray-700 text-white border-gray-600'; default: return 'bg-gray-700 text-gray-300 border-gray-600'; }};
+  const getMarketplaceColor = (mp: string) => { 
+    switch(mp.toUpperCase()) { 
+      case 'SHOPEE': return 'bg-orange-900/30 text-orange-300 border-orange-800'; 
+      case 'TOKOPEDIA': return 'bg-green-900/30 text-green-300 border-green-800'; 
+      case 'TIKTOK': return 'bg-gray-700 text-white border-gray-600';
+      case 'KILAT': return 'bg-purple-900/30 text-purple-300 border-purple-800';
+      case 'RESELLER': return 'bg-yellow-900/30 text-yellow-300 border-yellow-800';
+      case 'EKSPOR': return 'bg-blue-900/30 text-blue-300 border-blue-800';
+      default: return 'bg-gray-700 text-gray-300 border-gray-600'; 
+    }
+  };
 
   const filteredScanLogs = useMemo(() => {
       if (!scanLogs) return [];
@@ -449,27 +504,67 @@ export const OrderScanView: React.FC<OrderScanViewProps> = ({ onShowToast, onRef
         {/* HEADER CONTROL */}
         <div className="bg-gray-800 p-3 shadow-sm border-b border-gray-700 z-20">
             <div className="flex flex-col gap-3">
+                {/* Row 1: Store Selection and Marketplace */}
                 <div className="grid grid-cols-2 gap-2">
                     <select value={selectedStore} onChange={(e) => { setSelectedStore(e.target.value); barcodeInputRef.current?.focus(); }} className="bg-gray-700 border border-gray-600 text-gray-200 text-xs font-bold rounded-lg focus:ring-blue-500 focus:border-blue-500 p-2 outline-none">
                         {STORE_LIST.map(store => <option key={store} value={store}>{store}</option>)}
                     </select>
                     <div className="relative flex">
                         <button onClick={() => setShowMarketplacePopup(!showMarketplacePopup)} className={`flex items-center justify-between w-full gap-2 px-2 py-2 text-xs font-bold border rounded-lg transition-colors ${getMarketplaceColor(selectedMarketplace)}`}>
-                            <span className="truncate">{selectedMarketplace}</span>
+                            <span className="truncate">{MARKETPLACE_OPTIONS.find(m => m.value === selectedMarketplace)?.label || selectedMarketplace}</span>
                             <ChevronDown className="w-3 h-3 text-gray-300 flex-shrink-0" />
                         </button>
                         {showMarketplacePopup && (
                             <div className="absolute top-full right-0 mt-1 w-40 bg-gray-800 rounded-xl shadow-xl border border-gray-700 z-50 animate-in fade-in zoom-in-95 overflow-hidden">
-                                {MARKETPLACES.map((mp) => (
-                                    <button key={mp} onClick={() => { setSelectedMarketplace(mp); setShowMarketplacePopup(false); barcodeInputRef.current?.focus(); }} className={`w-full text-left px-3 py-2 text-xs flex items-center justify-between hover:bg-gray-700 border-b border-gray-700 last:border-0 ${selectedMarketplace === mp ? 'text-blue-400 font-bold bg-blue-900/20' : 'text-gray-300'}`}>
-                                        {mp}
-                                        {selectedMarketplace === mp && <Check className="w-3 h-3"/>}
+                                {MARKETPLACE_OPTIONS.map((mp) => (
+                                    <button key={mp.value} onClick={() => { setSelectedMarketplace(mp.value); setShowMarketplacePopup(false); barcodeInputRef.current?.focus(); }} className={`w-full text-left px-3 py-2 text-xs flex items-center justify-between hover:bg-gray-700 border-b border-gray-700 last:border-0 ${selectedMarketplace === mp.value ? 'text-blue-400 font-bold bg-blue-900/20' : 'text-gray-300'}`}>
+                                        {mp.label}
+                                        {selectedMarketplace === mp.value && <Check className="w-3 h-3"/>}
                                     </button>
                                 ))}
                             </div>
                         )}
                     </div>
                 </div>
+
+                {/* Row 2: Sub-Store or Country (conditional) */}
+                {getCurrentMarketplaceOption()?.subStores && (
+                    <div className="relative">
+                        <button onClick={() => setShowSubStorePopup(!showSubStorePopup)} className="flex items-center justify-between w-full gap-2 px-3 py-2 text-xs font-bold border rounded-lg transition-colors bg-gray-700 border-gray-600 text-gray-200">
+                            <span className="truncate">Sub-Toko: {selectedSubStore}</span>
+                            <ChevronDown className="w-3 h-3 text-gray-300 flex-shrink-0" />
+                        </button>
+                        {showSubStorePopup && (
+                            <div className="absolute top-full left-0 mt-1 w-full bg-gray-800 rounded-xl shadow-xl border border-gray-700 z-50 animate-in fade-in zoom-in-95 overflow-hidden">
+                                {getCurrentMarketplaceOption()?.subStores?.map((sub) => (
+                                    <button key={sub} onClick={() => { setSelectedSubStore(sub); setShowSubStorePopup(false); barcodeInputRef.current?.focus(); }} className={`w-full text-left px-3 py-2 text-xs flex items-center justify-between hover:bg-gray-700 border-b border-gray-700 last:border-0 ${selectedSubStore === sub ? 'text-blue-400 font-bold bg-blue-900/20' : 'text-gray-300'}`}>
+                                        {sub}
+                                        {selectedSubStore === sub && <Check className="w-3 h-3"/>}
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                )}
+
+                {getCurrentMarketplaceOption()?.value === 'EKSPOR' && (
+                    <div className="relative">
+                        <button onClick={() => setShowCountryPopup(!showCountryPopup)} className="flex items-center justify-between w-full gap-2 px-3 py-2 text-xs font-bold border rounded-lg transition-colors bg-blue-900/30 border-blue-800 text-blue-300">
+                            <span className="truncate">Negara: {selectedCountry}</span>
+                            <ChevronDown className="w-3 h-3 text-gray-300 flex-shrink-0" />
+                        </button>
+                        {showCountryPopup && (
+                            <div className="absolute top-full left-0 mt-1 w-full bg-gray-800 rounded-xl shadow-xl border border-gray-700 z-50 animate-in fade-in zoom-in-95 overflow-hidden">
+                                {getCurrentMarketplaceOption()?.countries?.map((country) => (
+                                    <button key={country} onClick={() => { setSelectedCountry(country); setShowCountryPopup(false); barcodeInputRef.current?.focus(); }} className={`w-full text-left px-3 py-2 text-xs flex items-center justify-between hover:bg-gray-700 border-b border-gray-700 last:border-0 ${selectedCountry === country ? 'text-blue-400 font-bold bg-blue-900/20' : 'text-gray-300'}`}>
+                                        {country}
+                                        {selectedCountry === country && <Check className="w-3 h-3"/>}
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                )}
 
                 <div className="flex gap-2">
                     <div className="relative flex-grow">
