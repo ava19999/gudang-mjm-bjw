@@ -650,7 +650,7 @@ export const fetchBarangKeluarLog = async (store: string | null, page = 1, limit
     return { data: mappedData, total: count || 0 };
 };
 export const deleteBarangLog = async (
-    id: number, 
+    id: number | string, 
     type: 'in' | 'out', 
     partNumber: string, 
     qty: number, 
@@ -669,33 +669,68 @@ export const deleteBarangLog = async (
 
         if (fetchError || !currentItem) throw new Error("Item tidak ditemukan untuk rollback stok");
 
+        const prevQty = currentItem.quantity;
+
         // 2. Hitung Stok Rollback
         // Jika hapus Log Masuk -> Stok Kurang. Jika hapus Log Keluar -> Stok Tambah.
-        let newQty = currentItem.quantity;
+        let newQty = prevQty;
         if (type === 'in') {
-            newQty = currentItem.quantity - qty;
+            newQty = prevQty - qty;
         } else {
-            newQty = currentItem.quantity + qty;
+            newQty = prevQty + qty;
         }
 
-        // 3. Update Stok
+        // 3. Update Stok (tentative)
         const { error: updateError } = await supabase
             .from(stockTable)
             .update({ quantity: newQty, last_updated: new Date().toISOString() })
             .eq('part_number', partNumber);
 
-        if (updateError) throw new Error("Gagal mengembalikan stok");
+        if (updateError) {
+            throw new Error(updateError.message || 'Gagal update stok');
+        }
 
         // 4. Hapus Log
+        // Pastikan tipe id sesuai (DB mungkin number)
+        let idToUse: number;
+        if (typeof id === 'string') {
+            if (!/^\d+$/.test(id)) {
+                throw new Error('ID tidak valid: harus berupa angka');
+            }
+            idToUse = Number(id);
+        } else {
+            idToUse = id;
+        }
+        
         const { error: deleteError } = await supabase
             .from(logTable)
             .delete()
-            .eq('id', id);
+            .eq('id', idToUse);
 
-        if (deleteError) throw new Error("Gagal menghapus log");
+        if (deleteError) {
+            // Jika delete gagal, kembalikan stok ke nilai semula
+            // NOTE: Rollback ini tidak menggunakan transaction dan bisa gagal jika ada operasi concurrent.
+            // Jika rollback gagal, database akan mengalami partial state corruption (stok sudah berubah tapi log masih ada).
+            // Untuk production dengan high concurrency, pertimbangkan implementasi database transaction atau optimistic locking,
+            // dan setup monitoring/alerting untuk rollback failures.
+            const { error: revertError } = await supabase
+                .from(stockTable)
+                .update({ quantity: prevQty, last_updated: new Date().toISOString() })
+                .eq('part_number', partNumber);
+
+            console.error('Gagal menghapus log, mencoba revert stok', { deleteError, revertError });
+            
+            if (revertError) {
+                const deleteMsg = deleteError.message || 'Gagal menghapus log';
+                const revertMsg = revertError.message || 'Gagal rollback';
+                throw new Error(`${deleteMsg} DAN ${revertMsg}. Database mungkin tidak konsisten, perlu pengecekan manual.`);
+            }
+            throw new Error(deleteError.message || 'Gagal menghapus log');
+        }
 
         return true;
-    } catch (e) {
+    } catch (e: any) {
+        // Cetak error Supabase agar terlihat di console frontend/backend
         console.error("Delete Log Error:", e);
         return false;
     }
