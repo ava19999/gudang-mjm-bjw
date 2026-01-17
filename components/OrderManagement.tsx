@@ -28,6 +28,12 @@ export const OrderManagement: React.FC = () => {
   // State untuk expand/collapse kartu grup
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
 
+  // Enhanced Filter States
+  const [filterStatus, setFilterStatus] = useState<string>('all'); // all, Belum Diproses, Proses, Tolak, Pending, Siap Kirim, Terjual
+  const [filterMarketplace, setFilterMarketplace] = useState<string>('all'); // all, Shopee, TikTok, Tokopedia, etc.
+  const [filterDateFrom, setFilterDateFrom] = useState<string>('');
+  const [filterDateTo, setFilterDateTo] = useState<string>('');
+
   // Data State
   const [offlineData, setOfflineData] = useState<OfflineOrderRow[]>([]);
   const [onlineData, setOnlineData] = useState<OnlineOrderRow[]>([]);
@@ -134,23 +140,78 @@ export const OrderManagement: React.FC = () => {
 
   const formatRupiah = (val: number) => `Rp ${val.toLocaleString('id-ID')}`;
 
-  // Filter Search Logic (Online, Terjual, Retur)
+  // Enhanced Filter Logic (Online, Terjual, Retur)
   const filterList = (list: any[]) => {
-    if (!searchTerm) return list;
-    const lower = searchTerm.toLowerCase();
-    return list.filter(item => 
-      (item.customer || '').toLowerCase().includes(lower) ||
-      (item.nama_barang || item.name || '').toLowerCase().includes(lower) ||
-      (item.resi || '').toLowerCase().includes(lower) ||
-      (item.part_number || '').toLowerCase().includes(lower)
-    );
+    let filtered = [...list];
+    
+    // Search term filter
+    if (searchTerm) {
+      const lower = searchTerm.toLowerCase();
+      filtered = filtered.filter(item => 
+        (item.customer || '').toLowerCase().includes(lower) ||
+        (item.nama_barang || item.name || '').toLowerCase().includes(lower) ||
+        (item.resi || '').toLowerCase().includes(lower) ||
+        (item.part_number || '').toLowerCase().includes(lower)
+      );
+    }
+    
+    // Marketplace filter
+    if (filterMarketplace !== 'all') {
+      filtered = filtered.filter(item => 
+        (item.ecommerce || '').toLowerCase() === filterMarketplace.toLowerCase()
+      );
+    }
+    
+    // Status filter
+    if (filterStatus !== 'all') {
+      filtered = filtered.filter(item => 
+        (item.status || '').toLowerCase() === filterStatus.toLowerCase()
+      );
+    }
+    
+    // Date range filter
+    if (filterDateFrom) {
+      filtered = filtered.filter(item => {
+        const itemDate = new Date(item.tanggal || item.created_at).toISOString().split('T')[0];
+        return itemDate >= filterDateFrom;
+      });
+    }
+    if (filterDateTo) {
+      filtered = filtered.filter(item => {
+        const itemDate = new Date(item.tanggal || item.created_at).toISOString().split('T')[0];
+        return itemDate <= filterDateTo;
+      });
+    }
+    
+    return filtered;
   };
 
-  // Filter Search Logic (Offline Grouped)
-  const filteredGroupedOffline = groupedOfflineOrders.filter(group => 
-    group.customer.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    group.items.some(i => i.nama_barang.toLowerCase().includes(searchTerm.toLowerCase()))
-  );
+  // Enhanced Filter Logic (Offline Grouped)
+  const filteredGroupedOffline = groupedOfflineOrders.filter(group => {
+    // Search term
+    const matchesSearch = !searchTerm || 
+      group.customer.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      group.items.some(i => i.nama_barang.toLowerCase().includes(searchTerm.toLowerCase()));
+    
+    if (!matchesSearch) return false;
+    
+    // Status filter (check items in group)
+    if (filterStatus !== 'all') {
+      const hasMatchingStatus = group.items.some(item => 
+        item.status.toLowerCase() === filterStatus.toLowerCase()
+      );
+      if (!hasMatchingStatus) return false;
+    }
+    
+    // Date filter
+    if (filterDateFrom || filterDateTo) {
+      const groupDate = new Date(group.date).toISOString().split('T')[0];
+      if (filterDateFrom && groupDate < filterDateFrom) return false;
+      if (filterDateTo && groupDate > filterDateTo) return false;
+    }
+    
+    return true;
+  });
 
   return (
     <div className="bg-gray-800 m-4 rounded-2xl border border-gray-700 shadow-xl min-h-[80vh] flex flex-col text-gray-100">
@@ -185,17 +246,87 @@ export const OrderManagement: React.FC = () => {
         ))}
       </div>
 
-      {/* SEARCH */}
+      {/* ENHANCED SEARCH AND FILTERS */}
       <div className="p-4 bg-gray-900/30 border-b border-gray-700">
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
-          <input 
-            type="text" 
-            placeholder="Cari Customer, Barang, Resi..." 
-            className="w-full pl-10 pr-4 py-3 bg-gray-800 border border-gray-700 rounded-xl text-sm focus:ring-2 focus:ring-purple-500 outline-none text-white placeholder-gray-500"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-          />
+        <div className="space-y-3">
+          {/* Search Bar */}
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
+            <input 
+              type="text" 
+              placeholder="Cari Customer, Barang, Resi..." 
+              className="w-full pl-10 pr-4 py-3 bg-gray-800 border border-gray-700 rounded-xl text-sm focus:ring-2 focus:ring-purple-500 outline-none text-white placeholder-gray-500"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+          </div>
+          
+          {/* Filter Row */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
+            {/* Status Filter */}
+            <select 
+              value={filterStatus}
+              onChange={(e) => setFilterStatus(e.target.value)}
+              className="bg-gray-800 border border-gray-700 text-gray-200 text-xs rounded-lg focus:ring-2 focus:ring-purple-500 px-3 py-2 outline-none"
+            >
+              <option value="all">Semua Status</option>
+              <option value="belum diproses">Belum Diproses</option>
+              <option value="proses">Diproses</option>
+              <option value="tolak">Ditolak</option>
+              <option value="pending">Pending</option>
+              <option value="siap kirim">Siap Kirim</option>
+              <option value="terjual">Terjual</option>
+            </select>
+            
+            {/* Marketplace Filter */}
+            <select 
+              value={filterMarketplace}
+              onChange={(e) => setFilterMarketplace(e.target.value)}
+              className="bg-gray-800 border border-gray-700 text-gray-200 text-xs rounded-lg focus:ring-2 focus:ring-purple-500 px-3 py-2 outline-none"
+            >
+              <option value="all">Semua Marketplace</option>
+              <option value="shopee">Shopee</option>
+              <option value="tiktok">TikTok</option>
+              <option value="tokopedia">Tokopedia</option>
+              <option value="lazada">Lazada</option>
+              <option value="offline">Offline</option>
+              <option value="aplikasi">Aplikasi</option>
+            </select>
+            
+            {/* Date From */}
+            <input 
+              type="date"
+              value={filterDateFrom}
+              onChange={(e) => setFilterDateFrom(e.target.value)}
+              className="bg-gray-800 border border-gray-700 text-gray-200 text-xs rounded-lg focus:ring-2 focus:ring-purple-500 px-3 py-2 outline-none"
+              placeholder="Dari Tanggal"
+            />
+            
+            {/* Date To */}
+            <input 
+              type="date"
+              value={filterDateTo}
+              onChange={(e) => setFilterDateTo(e.target.value)}
+              className="bg-gray-800 border border-gray-700 text-gray-200 text-xs rounded-lg focus:ring-2 focus:ring-purple-500 px-3 py-2 outline-none"
+              placeholder="Sampai Tanggal"
+            />
+          </div>
+          
+          {/* Clear Filters Button */}
+          {(filterStatus !== 'all' || filterMarketplace !== 'all' || filterDateFrom || filterDateTo || searchTerm) && (
+            <button
+              onClick={() => {
+                setSearchTerm('');
+                setFilterStatus('all');
+                setFilterMarketplace('all');
+                setFilterDateFrom('');
+                setFilterDateTo('');
+              }}
+              className="text-xs text-purple-400 hover:text-purple-300 underline"
+            >
+              Reset Semua Filter
+            </button>
+          )}
         </div>
       </div>
 

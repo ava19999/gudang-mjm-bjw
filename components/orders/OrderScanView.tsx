@@ -130,7 +130,7 @@ export const OrderScanView: React.FC<OrderScanViewProps> = ({ onShowToast, onRef
       handleGridKeyDown(e, globalRefIndex);
   };
 
-  // --- HANDLER BARCODE (LOGIKA UTAMA STATUS DI SINI) ---
+  // --- HANDLER BARCODE (LOGIKA UTAMA STATUS DI SINI + VALIDASI DUPLIKASI) ---
   const handleBarcodeInput = async (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
       e.preventDefault();
@@ -141,7 +141,7 @@ export const OrderScanView: React.FC<OrderScanViewProps> = ({ onShowToast, onRef
       const existingLog = scanLogs.find(l => l.resi === scannedCode);
 
       if (existingLog) {
-          // KUNCI: Status HANYA berubah saat di-SCAN
+          // VALIDASI: Resi sudah pernah discan sebelumnya
           
           // Cek kelengkapan data saat ini
           const isComplete = checkIsComplete(existingLog);
@@ -151,9 +151,9 @@ export const OrderScanView: React.FC<OrderScanViewProps> = ({ onShowToast, onRef
               if (existingLog.status !== 'Siap Kirim') {
                   await updateScanResiLogField(existingLog.id!, 'status', 'Siap Kirim');
                   setScanLogs(prev => prev.map(l => l.id === existingLog.id ? { ...l, status: 'Siap Kirim' } : l));
-                  onShowToast(`Resi ${scannedCode} OK -> Siap Kirim`, 'success');
+                  onShowToast(`⚠️ Resi ${scannedCode} sudah pernah discan. Status: Siap Kirim`, 'success');
               } else {
-                  onShowToast(`Resi ${scannedCode} sudah Siap Kirim`, 'info');
+                  onShowToast(`⚠️ DUPLIKASI: Resi ${scannedCode} sudah discan sebelumnya!`, 'error');
               }
           } else {
               // Jika data TIDAK lengkap, Ubah jadi PENDING (Data Kurang)
@@ -162,7 +162,7 @@ export const OrderScanView: React.FC<OrderScanViewProps> = ({ onShowToast, onRef
                    await updateScanResiLogField(existingLog.id!, 'status', 'Pending');
                    setScanLogs(prev => prev.map(l => l.id === existingLog.id ? { ...l, status: 'Pending' } : l));
               }
-              onShowToast(`Resi ${scannedCode} Data Masih Kurang!`, 'error');
+              onShowToast(`⚠️ Resi ${scannedCode} sudah discan. Data Masih Kurang!`, 'error');
           }
 
           // Update timestamp agar ketahuan barusan discan
@@ -172,7 +172,7 @@ export const OrderScanView: React.FC<OrderScanViewProps> = ({ onShowToast, onRef
           // Barang benar-benar baru (belum ada di CSV)
           if (await addScanResiLog(scannedCode, selectedMarketplace, selectedStore)) {
               await loadScanLogs();
-              onShowToast(`Resi ${scannedCode} Baru (Pending).`, 'success');
+              onShowToast(`✓ Resi ${scannedCode} Baru Discan (Pending).`, 'success');
           } else {
               onShowToast("Gagal menyimpan data.", 'error');
           }

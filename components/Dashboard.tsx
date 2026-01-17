@@ -5,11 +5,13 @@ import { InventoryItem, Order, StockHistory } from '../types';
 import { fetchInventoryPaginated, fetchInventoryStats, fetchInventoryAllFiltered } from '../services/supabaseService';
 import { ItemForm } from './ItemForm';
 import { DashboardStats } from './DashboardStats';
+import { DashboardCharts } from './DashboardCharts';
 import { DashboardFilterBar } from './DashboardFilterBar';
 import { InventoryList } from './InventoryList';
 import { GlobalHistoryModal } from './GlobalHistoryModal';
 import { ItemHistoryModal } from './ItemHistoryModal';
 import { useStore } from '../context/StoreContext';
+import { BarChart3 } from 'lucide-react';
 
 interface DashboardProps {
   items: InventoryItem[]; 
@@ -23,7 +25,7 @@ interface DashboardProps {
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({ 
-  history, refreshTrigger, onDelete 
+  orders, history, refreshTrigger, onDelete 
 }) => {
   // --- CONTEXT ---
   const { selectedStore } = useStore();
@@ -45,6 +47,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [filterType, setFilterType] = useState<'all' | 'low' | 'empty'>('all');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [priceSort, setPriceSort] = useState<'none' | 'asc' | 'desc'>('none');
+  
+  // Dashboard View Toggle
+  const [showCharts, setShowCharts] = useState(false);
   
   // Data States
   const [stats, setStats] = useState({ totalItems: 0, totalStock: 0, totalAsset: 0, todayIn: 0, todayOut: 0 });
@@ -184,6 +189,24 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
       {/* 1. STATS SECTION */}
       <DashboardStats stats={stats} onShowDetail={setShowHistoryDetail} />
+
+      {/* Dashboard Charts Toggle */}
+      <div className="px-4 pt-2">
+        <button
+          onClick={() => setShowCharts(!showCharts)}
+          className="flex items-center gap-2 px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm font-bold text-gray-300 hover:bg-gray-700 hover:text-white transition-colors"
+        >
+          <BarChart3 size={16} />
+          {showCharts ? 'Sembunyikan Statistik' : 'Tampilkan Statistik Operasional'}
+        </button>
+      </div>
+
+      {/* Charts Section */}
+      {showCharts && (
+        <div className="p-4 animate-in fade-in slide-in-from-top-2">
+          <DashboardCharts orders={orders} history={history} />
+        </div>
+      )}
 
       {/* 2. FILTER BAR */}
       <DashboardFilterBar 
