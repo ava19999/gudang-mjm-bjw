@@ -661,7 +661,7 @@ export const deleteBarangLog = async (
 
     try {
         // Validasi input
-        if (!id || !partNumber || qty <= 0) {
+        if (!id || !partNumber || qty < 0) {
             console.error("Invalid parameters for deleteBarangLog:", { id, partNumber, qty });
             return false;
         }
