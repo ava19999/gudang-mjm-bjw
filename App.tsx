@@ -34,8 +34,9 @@ import { StoreProvider, useStore } from './context/StoreContext';
 import { InventoryItem, InventoryFormData, CartItem, Order, StockHistory, OrderStatus } from './types';
 import { 
   fetchInventory, addInventory, updateInventory, deleteInventory, getItemByPartNumber, 
-  fetchHistory, addBarangMasuk, addBarangKeluar,
-  saveOfflineOrder
+  fetchOrders, saveOrder, updateOrderStatusService,
+  fetchHistory, addBarangMasuk, addBarangKeluar, updateOrderData,
+  saveOfflineOrder // <--- IMPORT BARU
 } from './services/supabaseService';
 import { generateId } from './utils';
 
@@ -53,6 +54,7 @@ const AppContent: React.FC = () => {
   const currentStoreConfig = getStoreConfig();
 
   const [items, setItems] = useState<InventoryItem[]>([]);
+  const [orders, setOrders] = useState<Order[]>([]);
   const [history, setHistory] = useState<StockHistory[]>([]);
   const [loading, setLoading] = useState(false); 
   const [activeView, setActiveView] = useState<ActiveView>('inventory'); 
@@ -70,6 +72,8 @@ const AppContent: React.FC = () => {
   const showToast = (msg: string, type: 'success'|'error' = 'success') => setToast({msg, type});
 
   const isKingFano = useMemo(() => loginName.trim().toLowerCase() === 'king fano', [loginName]);
+  const pendingOrdersCount = orders.filter(o => o.status === 'pending').length;
+  const myPendingOrdersCount = orders.filter(o => o.customerName === loginName && o.status === 'pending').length;
 
   // --- EFFECTS ---
   useEffect(() => {
@@ -89,6 +93,9 @@ const AppContent: React.FC = () => {
         const bannerItem = inventoryData.find(i => i.partNumber === BANNER_PART_NUMBER);
         if (bannerItem) setBannerUrl(bannerItem.imageUrl);
         setItems(inventoryData.filter(i => i.partNumber !== BANNER_PART_NUMBER));
+
+        const ordersData = await fetchOrders();
+        setOrders(ordersData);
 
         const historyData = await fetchHistory();
         setHistory(historyData);
@@ -375,14 +382,16 @@ const AppContent: React.FC = () => {
           loading={loading} 
           onRefresh={() => { refreshData(); showToast('Data diperbarui'); }} 
           loginName={loginName} 
-          onLogout={handleLogout}
+          onLogout={handleLogout} 
+          pendingOrdersCount={pendingOrdersCount} 
+          myPendingOrdersCount={myPendingOrdersCount}
           storeConfig={currentStoreConfig}
         />
       )}
 
       <div className="flex-1 overflow-y-auto bg-gray-900">
         {activeView === 'shop' && <ShopView items={items} cart={cart} isAdmin={isAdmin} isKingFano={isKingFano} bannerUrl={bannerUrl} onAddToCart={addToCart} onRemoveFromCart={(id) => setCart(prev => prev.filter(c => c.id !== id))} onUpdateCartItem={updateCartItem} onCheckout={doCheckout} onUpdateBanner={handleUpdateBanner} />}
-        {activeView === 'inventory' && isAdmin && <Dashboard items={items} orders={[]} history={history} refreshTrigger={refreshTrigger} onViewOrders={() => setActiveView('orders')} onAddNew={() => { setEditItem(null); setIsEditing(true); }} onEdit={(item) => { setEditItem(item); setIsEditing(true); }} onDelete={handleDelete} />}
+        {activeView === 'inventory' && isAdmin && <Dashboard items={items} orders={orders} history={history} refreshTrigger={refreshTrigger} onViewOrders={() => setActiveView('orders')} onAddNew={() => { setEditItem(null); setIsEditing(true); }} onEdit={(item) => { setEditItem(item); setIsEditing(true); }} onDelete={handleDelete} />}
         {activeView === 'quick_input' && isAdmin && <QuickInputView items={items} onRefresh={refreshData} showToast={showToast} />}
         {activeView === 'petty_cash' && isAdmin && <PettyCashView />}
         {activeView === 'barang_kosong' && isAdmin && <BarangKosongView />}
@@ -392,8 +401,8 @@ const AppContent: React.FC = () => {
         {activeView === 'scan_resi_stage2' && isAdmin && <ScanResiStage2 onRefresh={refreshData} />}
         {activeView === 'scan_resi_stage3' && isAdmin && <ScanResiStage3 onRefresh={refreshData} />}
         {activeView === 'scan_resi_history' && isAdmin && <RiwayatScanResi />}
-        {activeView === 'orders' && isAdmin && <OrderManagement />}
-        {activeView === 'orders' && !isAdmin && <CustomerOrderView orders={[]} />}
+        {activeView === 'orders' && isAdmin && <OrderManagement orders={orders} isLoading={loading} onUpdateStatus={handleUpdateStatus} onProcessReturn={handleProcessReturn} onRefresh={refreshData} />}
+        {activeView === 'orders' && !isAdmin && <CustomerOrderView orders={orders.filter(o => o.customerName === loginName)} />}
         
         {isEditing && isAdmin && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm animate-in fade-in">
@@ -404,7 +413,7 @@ const AppContent: React.FC = () => {
         )}
       </div>
 
-      <MobileNav isAdmin={isAdmin} activeView={activeView} setActiveView={setActiveView} />
+      <MobileNav isAdmin={isAdmin} activeView={activeView} setActiveView={setActiveView} pendingOrdersCount={pendingOrdersCount} myPendingOrdersCount={myPendingOrdersCount} />
     </div>
   );
 };

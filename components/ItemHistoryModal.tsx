@@ -5,6 +5,7 @@ import { fetchItemHistory } from '../services/supabaseService';
 import { parseHistoryReason } from '../utils/dashboardHelpers';
 import { HistoryTable } from './HistoryTable';
 import { Loader2, X, ChevronLeft, ChevronRight, History } from 'lucide-react';
+import { useStore } from '../context/StoreContext';
 
 interface ItemHistoryModalProps {
   item: InventoryItem;
@@ -12,6 +13,7 @@ interface ItemHistoryModalProps {
 }
 
 export const ItemHistoryModal: React.FC<ItemHistoryModalProps> = ({ item, onClose }) => {
+  const { selectedStore } = useStore();
   const [data, setData] = useState<StockHistory[]>([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
@@ -20,12 +22,12 @@ export const ItemHistoryModal: React.FC<ItemHistoryModalProps> = ({ item, onClos
   useEffect(() => {
     if (item.partNumber) {
         setLoading(true);
-        fetchItemHistory(item.partNumber).then((res) => {
+        fetchItemHistory(item.partNumber, selectedStore).then((res) => {
             setData(res);
             setLoading(false);
         }).catch(() => setLoading(false));
     }
-  }, [item]);
+  }, [item, selectedStore]);
 
   // Client-side filtering & pagination (karena API fetchItemHistory mengambil semua log item tersebut)
   const filteredData = useMemo(() => {

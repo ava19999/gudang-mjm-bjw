@@ -58,15 +58,20 @@ export const formatDateTimeWIB = (date: Date | string | number): string => {
   if (!date) return "-";
   const d = new Date(date);
   if (isNaN(d.getTime())) return "-";
-  
-  return new Intl.DateTimeFormat('id-ID', {
+  // Format: 17 Jan 2026, 14:30 WIB
+  const dateStr = new Intl.DateTimeFormat('id-ID', {
     timeZone: WIB_TIMEZONE,
     day: 'numeric',
     month: 'short',
     year: 'numeric',
+  }).format(d);
+  const timeStr = new Intl.DateTimeFormat('id-ID', {
+    timeZone: WIB_TIMEZONE,
     hour: '2-digit',
     minute: '2-digit',
+    hour12: false,
   }).format(d);
+  return `${dateStr}, ${timeStr} WIB`;
 };
 
 // Mendapatkan ISO string dalam WIB (tanpa Z suffix)

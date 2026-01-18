@@ -54,19 +54,30 @@ export const ShopCartModal: React.FC<ShopCartModalProps> = ({
                                 </div>
 
                                 <div className="text-right">
-                                    <div className="flex flex-col items-end">
+                                    <div className="flex flex-col items-end gap-1">
+                                        <span className="text-[9px] text-gray-400 font-semibold">Harga Satuan</span>
                                         <div className="relative">
-                                            <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] text-blue-300 font-bold">Rp</span>
+                                            <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-blue-400 font-bold">Rp</span>
                                             <input 
                                                 type="number"
-                                                className="w-24 pl-6 pr-2 py-1 text-right text-xs font-bold border border-blue-900 rounded focus:ring-2 focus:ring-blue-500 outline-none bg-blue-900/20 text-blue-200 placeholder-blue-500/50"
-                                                placeholder={item.price.toString()}
-                                                value={item.customPrice ?? ''}
-                                                onChange={(e) => onUpdateCartItem(item.id, { customPrice: e.target.value ? Number(e.target.value) : undefined })}
+                                                className="w-28 pl-7 pr-2 py-2 text-right text-sm font-bold border-2 border-blue-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-blue-900/30 text-blue-100 placeholder-blue-400/50"
+                                                placeholder="0"
+                                                value={item.customPrice ?? item.price}
+                                                onChange={(e) => {
+                                                    const val = e.target.value ? Number(e.target.value) : 0;
+                                                    onUpdateCartItem(item.id, { customPrice: val });
+                                                }}
+                                                onFocus={(e) => e.target.select()}
                                             />
                                         </div>
-                                        <span className="text-[9px] text-gray-500 mt-0.5">Harga Tawar</span>
-                                        {item.customPrice && <span className="text-[9px] text-gray-600 line-through mr-1">{formatRupiah(item.price)}</span>}
+                                        {item.customPrice && item.customPrice !== item.price && (
+                                            <span className="text-[9px] text-gray-500 line-through">
+                                                Harga Asli: {formatRupiah(item.price)}
+                                            </span>
+                                        )}
+                                        <span className="text-xs font-bold text-green-400 mt-0.5">
+                                            Subtotal: {formatRupiah((item.customPrice ?? item.price) * item.cartQuantity)}
+                                        </span>
                                     </div>
                                 </div>
                             </div>

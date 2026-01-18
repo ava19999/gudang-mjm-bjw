@@ -20,6 +20,7 @@ import {
   X,
   Check
 } from 'lucide-react';
+import { formatDateShortWIB } from '../../utils/timezone';
 
 interface RiwayatScanResiProps {
   onRefresh?: () => void;
@@ -138,7 +139,7 @@ export const RiwayatScanResi: React.FC<RiwayatScanResiProps> = ({ onRefresh }) =
                     ? 'bg-green-600 text-white'
                     : 'bg-gray-700 text-gray-400'
                 }`}
-                title={stage.date ? `${stage.name}\n${new Date(stage.date).toLocaleString('id-ID')}${stage.by ? `\nBy: ${stage.by}` : ''}` : stage.name}
+                title={stage.date ? `${stage.name}\n${new Date(stage.date).toLocaleString('id-ID', {timeZone: 'Asia/Jakarta'})}${stage.by ? `\nBy: ${stage.by}` : ''}` : stage.name}
               >
                 {stage.completed ? <Check size={14} /> : idx + 1}
               </div>
@@ -408,11 +409,7 @@ export const RiwayatScanResi: React.FC<RiwayatScanResiProps> = ({ onRefresh }) =
                 filteredHistory.map((resi) => (
                   <tr key={resi.id} className="hover:bg-gray-700/50 transition-colors">
                     <td className="px-4 py-3 text-sm">
-                      {new Date(resi.created_at).toLocaleDateString('id-ID', {
-                        day: '2-digit',
-                        month: 'short',
-                        year: 'numeric'
-                      })}
+                      {formatDateShortWIB(resi.created_at)}
                     </td>
                     <td className="px-4 py-3 text-sm font-mono font-semibold text-blue-400">
                       {resi.resi}
