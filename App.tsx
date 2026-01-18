@@ -14,6 +14,10 @@ import { PettyCashView } from './components/finance/PettyCashView';
 import { BarangKosongView } from './components/finance/BarangKosongView';
 import { ClosingView } from './components/finance/ClosingView';
 import { DataAgungView } from './components/online/DataAgungView';
+import { ScanResiStage1 } from './components/scanResi/ScanResiStage1';
+import { ScanResiStage2 } from './components/scanResi/ScanResiStage2';
+import { ScanResiStage3 } from './components/scanResi/ScanResiStage3';
+import { RiwayatScanResi } from './components/scanResi/RiwayatScanResi';
 
 // --- NEW SPLIT COMPONENTS ---
 import { Toast } from './components/common/Toast';
@@ -393,6 +397,10 @@ const AppContent: React.FC = () => {
         {activeView === 'barang_kosong' && isAdmin && <BarangKosongView />}
         {activeView === 'closing' && isAdmin && <ClosingView />}
         {activeView === 'data_agung' && isAdmin && <DataAgungView items={items} onRefresh={refreshData} showToast={showToast} />}
+        {activeView === 'scan_resi_stage1' && isAdmin && <ScanResiStage1 onRefresh={refreshData} />}
+        {activeView === 'scan_resi_stage2' && isAdmin && <ScanResiStage2 onRefresh={refreshData} />}
+        {activeView === 'scan_resi_stage3' && isAdmin && <ScanResiStage3 onRefresh={refreshData} />}
+        {activeView === 'scan_resi_history' && isAdmin && <RiwayatScanResi />}
         {activeView === 'orders' && isAdmin && <OrderManagement orders={orders} isLoading={loading} onUpdateStatus={handleUpdateStatus} onProcessReturn={handleProcessReturn} onRefresh={refreshData} />}
         {activeView === 'orders' && !isAdmin && <CustomerOrderView orders={orders.filter(o => o.customerName === loginName)} />}
         
