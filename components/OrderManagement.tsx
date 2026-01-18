@@ -308,8 +308,8 @@ export const OrderManagement: React.FC = () => {
         {activeTab === 'ONLINE' && (
           <div className="space-y-3">
             {filterList(onlineData).length === 0 && <EmptyState msg="Tidak ada scan resi baru." />}
-            {filterList(onlineData).map((item, idx) => (
-              <div key={`${item.tanggal}-${item.resi}-${idx}`} className="bg-gray-800 border border-gray-700 p-4 rounded-xl flex flex-col md:flex-row justify-between gap-4">
+            {filterList(onlineData).map((item) => (
+              <div key={`${item.tanggal}-${item.resi}-${item.part_number}`} className="bg-gray-800 border border-gray-700 p-4 rounded-xl flex flex-col md:flex-row justify-between gap-4">
                 <div>
                   <div className="flex gap-2 mb-2">
                     <span className="text-[10px] font-bold bg-blue-900/30 text-blue-400 px-2 py-0.5 rounded border border-blue-800">{item.type_toko || item.toko}</span>

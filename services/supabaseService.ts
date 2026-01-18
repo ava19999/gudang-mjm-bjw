@@ -418,6 +418,7 @@ export const fetchOnlineOrders = async (store: string | null): Promise<OnlineOrd
   const { data, error } = await supabase
     .from(table)
     .select('*')
+    .gt('qty_out', 0) // Only fetch items that haven't been processed yet
     .order('tanggal', { ascending: false });
 
   if (error) { console.error('Fetch Online Error:', error); return []; }
