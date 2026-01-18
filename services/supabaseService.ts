@@ -14,12 +14,17 @@ import {
 const getTableName = (store: string | null | undefined) => {
   if (store === 'mjm') return 'base_mjm';
   if (store === 'bjw') return 'base_bjw';
-  return 'base';
+  // Default ke base_mjm jika store tidak valid
+  console.warn(`Store tidak valid (${store}), menggunakan default base_mjm`);
+  return 'base_mjm';
 };
 
 const getLogTableName = (baseName: 'barang_masuk' | 'barang_keluar', store: string | null | undefined) => {
-  const suffix = store === 'mjm' ? '_mjm' : (store === 'bjw' ? '_bjw' : '');
-  return `${baseName}${suffix}`;
+  if (store === 'mjm') return `${baseName}_mjm`;
+  if (store === 'bjw') return `${baseName}_bjw`;
+  // Default ke mjm jika tidak valid
+  console.warn(`Store tidak valid (${store}), menggunakan default ${baseName}_mjm`);
+  return `${baseName}_mjm`;
 };
 
 // --- HELPER: SAFE DATE PARSING ---
@@ -560,20 +565,6 @@ export const processOnlineOrderItem = async (item: OnlineOrderRow, store: string
 };
 
 // --- OTHERS & PLACEHOLDERS (Agar tidak error) ---
-export const fetchOrders = async (store?: string | null): Promise<Order[]> => {
-    try {
-        const { data } = await supabase.from('orders').select('*').order('timestamp', { ascending: false });
-        return (data || []).map((o:any) => ({ ...o, items: typeof o.items === 'string' ? JSON.parse(o.items) : o.items }));
-    } catch (e) { return []; }
-};
-export const saveOrder = async (order: Order, store?: string | null): Promise<boolean> => {
-  try {
-      const payload = { ...order, items: JSON.stringify(order.items) };
-      const { error } = await supabase.from('orders').insert([payload]);
-      if (error) throw error;
-      return true;
-  } catch(e: any) { alert(`Gagal Order: ${e.message}`); return false; }
-};
 
 export const saveOfflineOrder = async (
   cart: any[], 
@@ -603,17 +594,6 @@ export const saveOfflineOrder = async (
     return true;
   } catch (e: any) { alert(`Gagal menyimpan order: ${e.message}`); return false; }
 };
-
-export const updateOrderStatusService = async (id: string, status: string) => {
-  const { error } = await supabase.from('orders').update({ status }).eq('id', id);
-  return !error;
-};
-export const updateOrderData = async (id: string, items: any[], total: number, status: string) => {
-  const { error } = await supabase.from('orders').update({ items: JSON.stringify(items), totalAmount: total, status }).eq('id', id);
-  return !error;
-};
-// FILE: services/supabaseService.ts
-// ... (kode yang sudah ada sebelumnya)
 
 // --- FUNGSI BARU: FETCH DATA BARANG KELUAR ---
 export const fetchBarangKeluarLog = async (store: string | null, page = 1, limit = 20, search = '') => {
