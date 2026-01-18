@@ -418,7 +418,6 @@ export const fetchOnlineOrders = async (store: string | null): Promise<OnlineOrd
   const { data, error } = await supabase
     .from(table)
     .select('*')
-    .neq('status', 'Diproses') 
     .order('tanggal', { ascending: false });
 
   if (error) { console.error('Fetch Online Error:', error); return []; }
@@ -526,32 +525,38 @@ export const processOnlineOrderItem = async (item: OnlineOrderRow, store: string
 
   try {
     const { data: stockItem } = await supabase.from(stockTable).select('*').eq('part_number', item.part_number).single();
-    if (!stockItem || stockItem.quantity < item.quantity) {
-      alert(`Stok ${item.nama_barang} tidak cukup!`);
+    if (!stockItem || stockItem.quantity < item.qty_out) {
+      alert(`Stok ${item.barang} tidak cukup!`);
       return false;
     }
 
-    const newQty = stockItem.quantity - item.quantity;
+    const newQty = stockItem.quantity - item.qty_out;
     await supabase.from(stockTable).update({ quantity: newQty }).eq('part_number', item.part_number);
 
     await supabase.from(outTable).insert([{
       tempo: 'ONLINE',
-      ecommerce: item.ecommerce,
+      ecommerce: item.type_toko || item.toko,
       customer: item.customer,
       part_number: item.part_number,
-      name: item.nama_barang,
-      brand: stockItem.brand,
-      application: stockItem.application,
+      name: item.barang,
+      brand: item.brand || stockItem.brand,
+      application: item.application || stockItem.application,
       rak: stockItem.shelf,
       stock_ahir: newQty,
-      qty_keluar: item.quantity,
+      qty_keluar: item.qty_out,
       harga_satuan: item.harga_satuan,
-      harga_total: item.harga_total,
+      harga_total: item.total_harga,
       resi: item.resi,
+      id_reseller: item.id_reseller,
+      id_customer: item.id_customer,
       created_at: new Date().toISOString()
     }]);
 
-    await supabase.from(scanTable).update({ status: 'Diproses' }).eq('id', item.id);
+    // Update scan_resi table - use tanggal and resi as composite key
+    await supabase.from(scanTable)
+      .update({ qty_out: 0 }) // Mark as processed by setting qty_out to 0
+      .eq('tanggal', item.tanggal)
+      .eq('resi', item.resi);
     return true;
   } catch (e) {
     console.error(e);

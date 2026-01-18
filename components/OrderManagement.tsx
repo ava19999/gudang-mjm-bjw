@@ -140,7 +140,7 @@ export const OrderManagement: React.FC = () => {
     const lower = searchTerm.toLowerCase();
     return list.filter(item => 
       (item.customer || '').toLowerCase().includes(lower) ||
-      (item.nama_barang || item.name || '').toLowerCase().includes(lower) ||
+      (item.nama_barang || item.name || item.barang || '').toLowerCase().includes(lower) ||
       (item.resi || '').toLowerCase().includes(lower) ||
       (item.part_number || '').toLowerCase().includes(lower)
     );
@@ -308,20 +308,20 @@ export const OrderManagement: React.FC = () => {
         {activeTab === 'ONLINE' && (
           <div className="space-y-3">
             {filterList(onlineData).length === 0 && <EmptyState msg="Tidak ada scan resi baru." />}
-            {filterList(onlineData).map(item => (
-              <div key={item.id} className="bg-gray-800 border border-gray-700 p-4 rounded-xl flex flex-col md:flex-row justify-between gap-4">
+            {filterList(onlineData).map((item, idx) => (
+              <div key={`${item.tanggal}-${item.resi}-${idx}`} className="bg-gray-800 border border-gray-700 p-4 rounded-xl flex flex-col md:flex-row justify-between gap-4">
                 <div>
                   <div className="flex gap-2 mb-2">
-                    <span className="text-[10px] font-bold bg-blue-900/30 text-blue-400 px-2 py-0.5 rounded border border-blue-800">{item.ecommerce}</span>
+                    <span className="text-[10px] font-bold bg-blue-900/30 text-blue-400 px-2 py-0.5 rounded border border-blue-800">{item.type_toko || item.toko}</span>
                     <span className="text-[10px] font-mono bg-gray-700 px-2 py-0.5 rounded text-gray-300">{item.resi}</span>
                   </div>
                   <h3 className="font-bold text-lg text-white">{item.customer}</h3>
-                  <p className="text-blue-300">{item.nama_barang}</p>
+                  <p className="text-blue-300">{item.barang}</p>
                 </div>
                 <div className="flex flex-row md:flex-col items-center md:items-end gap-3 text-right">
                   <div>
                     <span className="text-gray-400 text-xs">Qty Keluar</span>
-                    <p className="text-xl font-bold text-white">{item.quantity}</p>
+                    <p className="text-xl font-bold text-white">{item.qty_out}</p>
                   </div>
                   <button onClick={() => handleAccOnline(item)} className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-500 font-bold flex items-center gap-2 shadow-lg shadow-green-900/30">
                     <Check size={16}/> Konfirmasi
