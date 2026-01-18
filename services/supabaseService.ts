@@ -553,11 +553,12 @@ export const processOnlineOrderItem = async (item: OnlineOrderRow, store: string
       created_at: new Date().toISOString()
     }]);
 
-    // Update scan_resi table - use tanggal and resi as composite key
+    // Update scan_resi table - use tanggal, resi, and part_number as composite key
     await supabase.from(scanTable)
       .update({ qty_out: 0 }) // Mark as processed by setting qty_out to 0
       .eq('tanggal', item.tanggal)
-      .eq('resi', item.resi);
+      .eq('resi', item.resi)
+      .eq('part_number', item.part_number);
     return true;
   } catch (e) {
     console.error(e);
