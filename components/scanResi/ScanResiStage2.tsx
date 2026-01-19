@@ -168,8 +168,10 @@ export const ScanResiStage2: React.FC<ScanResiStage2Props> = ({ onRefresh }) => 
       let data: ResiScanStage[] = [];
       if (statusFilter === 'pending') {
         data = await getPendingStage2List(selectedStore);
-      } else {
+      } else if (statusFilter === 'stage2' || statusFilter === 'all') {
         data = await getResiStage1List(selectedStore);
+      } else {
+        data = await getPendingStage2List(selectedStore);
       }
       setPendingList(data);
       setLoading(false);
