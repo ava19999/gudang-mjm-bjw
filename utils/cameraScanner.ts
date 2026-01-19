@@ -1,3 +1,28 @@
+// Patch html5-qrcode instance agar clear() tidak error jika node sudah tidak ada
+function patchHtml5QrCodeInstance(instance: any) {
+  if (!instance || typeof instance.clear !== 'function') return;
+  const origClear = instance.clear;
+  instance.clear = async function(...args: any[]) {
+    try {
+      // Cek node sebelum clear
+      const elId = instance.elementId || (instance._elementId || instance._elementID);
+      if (elId && document.getElementById(elId)) {
+        return await origClear.apply(this, args);
+      } else {
+        // Node sudah tidak ada, skip clear
+        // console.warn('[patchHtml5QrCodeInstance] Node not found, skip clear');
+        return;
+      }
+    } catch (err: any) {
+      if (err?.message && err.message.includes('removeChild')) {
+        // Abaikan error ini
+        // console.warn('[patchHtml5QrCodeInstance] removeChild error ignored', err);
+        return;
+      }
+      throw err;
+    }
+  };
+}
 // FILE: utils/cameraScanner.ts
 // Camera barcode/QR code scanner utility using html5-qrcode
 
@@ -53,6 +78,8 @@ export const initCamera = async (
 
     const finalConfig = { ...defaultConfig, ...config };
 
+    // Patch agar clear() tidak error jika node sudah tidak ada
+    patchHtml5QrCodeInstance(html5QrCode);
     // Start scanning
     await html5QrCode.start(
       { facingMode: "environment" }, // Use back camera

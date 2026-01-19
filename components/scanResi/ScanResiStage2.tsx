@@ -18,10 +18,17 @@ class CameraErrorBoundary extends React.Component<{children: React.ReactNode}, {
   }
   render() {
     if (this.state.hasError) {
+      // Jika error removeChild, tampilkan pesan user-friendly saja
+      const msg = this.state.error?.message || '';
+      const isRemoveChild = msg.includes('removeChild');
       return (
         <div className="flex flex-col items-center justify-center h-full py-16">
           <span className="text-red-400 text-lg font-bold mb-2">Gagal memuat kamera</span>
-          <span className="text-red-300 text-sm mb-2">{this.state.error?.message || 'Terjadi error saat mengaktifkan kamera.'}</span>
+          <span className="text-red-300 text-sm mb-2">
+            {isRemoveChild
+              ? 'Kamera gagal dimuat. Cek izin kamera, pastikan device support, dan refresh halaman.'
+              : (msg || 'Terjadi error saat mengaktifkan kamera.')}
+          </span>
           <span className="text-gray-400 text-xs">Coba refresh halaman atau cek izin kamera.</span>
         </div>
       );
