@@ -222,14 +222,24 @@ export const cleanupScanner = async (): Promise<void> => {
         if (el) {
           await html5QrCode.clear();
         }
-      } catch (err) {
-        // Jika gagal clear karena node sudah tidak ada, abaikan
-        // console.warn('html5QrCode.clear() error:', err);
+      } catch (err: any) {
+        // Abaikan error removeChild yang sering terjadi pada html5-qrcode
+        if (err?.message && err.message.includes("removeChild")) {
+          // error ini aman diabaikan
+        } else {
+          // Log error lain jika perlu
+          // console.warn('html5QrCode.clear() error:', err);
+        }
       }
       html5QrCode = null;
     }
-  } catch (error) {
-    // Jangan crash, hanya log
-    // console.error('Error cleaning up scanner:', error);
+  } catch (error: any) {
+    // Abaikan error removeChild pada root
+    if (error?.message && error.message.includes("removeChild")) {
+      // error ini aman diabaikan
+    } else {
+      // Log error lain jika perlu
+      // console.error('Error cleaning up scanner:', error);
+    }
   }
 };
