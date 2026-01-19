@@ -34,8 +34,8 @@ export const QuickInputTable: React.FC<QuickInputTableProps> = ({
                             <th className="px-2 py-2 w-24">Tempo</th>
                             <th className="px-2 py-2 w-32">Customer</th>
                             <th className="px-2 py-2 w-48">Part Number</th>
-                            <th className="px-2 py-2 w-16 text-right">Qty Masuk</th>
-                            <th className="px-2 py-2 w-32 text-right">Total Harga <span className="text-[8px] text-gray-500 font-normal">(Opsional)</span></th>
+                            <th className="px-2 py-2 w-16 text-right">Qty Keluar</th>
+                            <th className="px-2 py-2 w-32 text-right">Total Harga</th>
                             <th className="px-2 py-2 w-28 text-right">Harga Satuan</th>
                             <th className="px-2 py-2 w-16 text-center">Status</th>
                             <th className="px-2 py-2 w-8 text-center"></th>

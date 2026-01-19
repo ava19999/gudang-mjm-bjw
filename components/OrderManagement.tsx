@@ -2,14 +2,13 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useStore } from '../context/StoreContext';
 import { 
-  fetchOfflineOrders, fetchOnlineOrders, fetchSoldItems, fetchReturItems,
-  processOfflineOrderItem, processOnlineOrderItem, returSoldItem
+  fetchOfflineOrders, fetchSoldItems, fetchReturItems,
+  processOfflineOrderItem
 } from '../services/supabaseService';
-import { OfflineOrderRow, OnlineOrderRow, SoldItemRow, ReturRow } from '../types';
+import { OfflineOrderRow, SoldItemRow, ReturRow } from '../types';
 import { 
-  ClipboardList, Wifi, CheckCircle, RotateCcw, Search, RefreshCw, Box, Check, X, ChevronDown, ChevronUp, Layers, User, Trash2
+  ClipboardList, Wifi, CheckCircle, RotateCcw, Search, RefreshCw, Box, Check, X, ChevronDown, ChevronUp, Layers, User
 } from 'lucide-react';
-import { formatDateTimeWIB } from '../utils/timezone';
 
 // Toast Component Sederhana
 const Toast = ({ msg, type, onClose }: any) => (
@@ -21,26 +20,16 @@ const Toast = ({ msg, type, onClose }: any) => (
 
 export const OrderManagement: React.FC = () => {
   const { selectedStore } = useStore();
-  const [activeTab, setActiveTab] = useState<'OFFLINE' | 'ONLINE' | 'TERJUAL' | 'RETUR'>('OFFLINE');
+  const [activeTab, setActiveTab] = useState<'OFFLINE' | 'TERJUAL' | 'RETUR'>('OFFLINE');
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [toast, setToast] = useState<{msg: string, type: 'success'|'error'} | null>(null);
   
   // State untuk expand/collapse kartu grup
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
-  
-  // State untuk filter TERJUAL
-  const [soldFilter, setSoldFilter] = useState<'ALL' | 'OFFLINE' | 'ONLINE'>('ALL');
-  const [onlineMarketFilter, setOnlineMarketFilter] = useState<'ALL' | 'SHOPEE' | 'TIKTOK' | 'RESELLER' | 'EXPORT'>('ALL');
-  const [onlineStoreFilter, setOnlineStoreFilter] = useState<'ALL' | 'MJM' | 'BJW' | 'LARIS'>('ALL');
-  const [exportCountryFilter, setExportCountryFilter] = useState<'ALL' | 'PH' | 'SG' | 'MY' | 'HK'>('ALL');
-  
-  // State untuk Retur Modal
-  const [returModal, setReturModal] = useState<{ show: boolean, item: SoldItemRow | null, items?: SoldItemRow[] }>({ show: false, item: null, items: undefined });
 
   // Data State
   const [offlineData, setOfflineData] = useState<OfflineOrderRow[]>([]);
-  const [onlineData, setOnlineData] = useState<OnlineOrderRow[]>([]);
   const [soldData, setSoldData] = useState<SoldItemRow[]>([]);
   const [returData, setReturData] = useState<ReturRow[]>([]);
 
@@ -53,7 +42,6 @@ export const OrderManagement: React.FC = () => {
     setLoading(true);
     try {
       if (activeTab === 'OFFLINE') setOfflineData(await fetchOfflineOrders(selectedStore));
-      if (activeTab === 'ONLINE') setOnlineData(await fetchOnlineOrders(selectedStore));
       if (activeTab === 'TERJUAL') setSoldData(await fetchSoldItems(selectedStore));
       if (activeTab === 'RETUR') setReturData(await fetchReturItems(selectedStore));
     } catch (e) {
@@ -94,52 +82,6 @@ export const OrderManagement: React.FC = () => {
     return Object.values(groups).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   }, [offlineData]);
 
-  // --- LOGIC PENGELOMPOKAN SOLD (GROUPING) ---
-  const groupedSoldOrders = useMemo(() => {
-    const groups: Record<string, { 
-      id: string, 
-      customer: string, 
-      tempo: string, 
-      ecommerce: string,
-      kode_toko: string,
-      date: string, 
-      items: SoldItemRow[], 
-      totalQty: number,
-      totalAmount: number 
-    }> = {};
-    
-    soldData.forEach(item => {
-      // Normalisasi untuk grouping
-      const safeCustomer = (item.customer || 'Tanpa Nama').trim();
-      const safeTempo = (item.tempo || 'CASH').trim();
-      const safeEcom = (item.ecommerce || 'OFFLINE').trim();
-      
-      // Kunci Grouping: Customer + Tempo + Ecommerce + Tanggal (untuk memisahkan transaksi berbeda)
-      const dateKey = formatDateTimeWIB(item.created_at);
-      const key = `${safeCustomer}-${safeTempo}-${safeEcom}-${dateKey}`;
-      
-      if (!groups[key]) {
-        groups[key] = {
-          id: key,
-          customer: safeCustomer,
-          tempo: safeTempo,
-          ecommerce: safeEcom,
-          kode_toko: item.kode_toko || '',
-          date: item.created_at,
-          items: [],
-          totalQty: 0,
-          totalAmount: 0
-        };
-      }
-      groups[key].items.push(item);
-      groups[key].totalQty += (Number(item.qty_keluar) || 0);
-      groups[key].totalAmount += (Number(item.harga_total) || 0);
-    });
-
-    // Ubah object ke array & urutkan berdasarkan tanggal terbaru
-    return Object.values(groups).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  }, [soldData]);
-
   // --- HANDLERS ---
 
   // Proses SATUAN (Offline)
@@ -175,57 +117,7 @@ export const OrderManagement: React.FC = () => {
     loadData();
   };
 
-  const handleAccOnline = async (item: OnlineOrderRow) => {
-    if (!confirm('ACC Resi ini? Barang akan keluar.')) return;
-    setLoading(true);
-    const success = await processOnlineOrderItem(item, selectedStore);
-    setLoading(false);
-    if (success) { showToast('Order Online Berhasil Diproses!'); loadData(); }
-    else showToast('Gagal memproses order online', 'error');
-  };
-
-  // Handler Retur - Open Modal (Single Item)
-  const handleOpenReturModal = (item: SoldItemRow) => {
-    setReturModal({ show: true, item, items: undefined });
-  };
-
-  // Handler Retur - Open Modal (Group)
-  const handleOpenReturGroupModal = (items: SoldItemRow[]) => {
-    setReturModal({ show: true, item: null, items });
-  };
-
-  // Handler Retur - Process
-  const handleProcessRetur = async (keterangan: 'KEMBALI KE STOCK' | 'BARANG RUSAK') => {
-    setLoading(true);
-    
-    // Process single item
-    if (returModal.item) {
-      const res = await returSoldItem(returModal.item, selectedStore, keterangan);
-      setLoading(false);
-      
-      if (res.success) {
-        showToast(res.msg);
-        setReturModal({ show: false, item: null, items: undefined });
-        loadData();
-      } else {
-        showToast(res.msg, 'error');
-      }
-    }
-    // Process group items
-    else if (returModal.items && returModal.items.length > 0) {
-      let successCount = 0;
-      
-      for (const item of returModal.items) {
-        const res = await returSoldItem(item, selectedStore, keterangan);
-        if (res.success) successCount++;
-      }
-      
-      setLoading(false);
-      showToast(`Berhasil retur ${successCount} dari ${returModal.items.length} item - ${keterangan}`);
-      setReturModal({ show: false, item: null, items: undefined });
-      loadData();
-    }
-  };
+  // ...existing code...
 
   const toggleExpand = (key: string) => {
     setExpandedGroups(prev => ({ ...prev, [key]: !prev[key] }));
@@ -233,13 +125,13 @@ export const OrderManagement: React.FC = () => {
 
   const formatRupiah = (val: number) => `Rp ${val.toLocaleString('id-ID')}`;
 
-  // Filter Search Logic (Online, Terjual, Retur)
+  // Filter Search Logic (Terjual, Retur)
   const filterList = (list: any[]) => {
     if (!searchTerm) return list;
     const lower = searchTerm.toLowerCase();
     return list.filter(item => 
       (item.customer || '').toLowerCase().includes(lower) ||
-      (item.nama_barang || item.name || item.barang || '').toLowerCase().includes(lower) ||
+      (item.nama_barang || item.name || '').toLowerCase().includes(lower) ||
       (item.resi || '').toLowerCase().includes(lower) ||
       (item.part_number || '').toLowerCase().includes(lower)
     );
@@ -249,12 +141,6 @@ export const OrderManagement: React.FC = () => {
   const filteredGroupedOffline = groupedOfflineOrders.filter(group => 
     group.customer.toLowerCase().includes(searchTerm.toLowerCase()) ||
     group.items.some(i => i.nama_barang.toLowerCase().includes(searchTerm.toLowerCase()))
-  );
-
-  // Filter Search Logic (Sold Grouped)
-  const filteredGroupedSold = groupedSoldOrders.filter(group => 
-    group.customer.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    group.items.some(i => (i.name || '').toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
   return (
@@ -327,7 +213,7 @@ export const OrderManagement: React.FC = () => {
                           {group.tempo}
                         </span>
                         <span className="text-[10px] font-mono bg-gray-700 px-2 py-0.5 rounded text-gray-300">
-                          {formatDateTimeWIB(group.date)}
+                          {new Date(group.date).toLocaleString('id-ID', {timeZone: 'Asia/Jakarta'})}
                         </span>
                         <span className="text-[10px] bg-blue-900/30 text-blue-300 px-2 py-0.5 rounded border border-blue-800 flex items-center gap-1">
                           <Layers size={10} /> {group.items.length} Item
@@ -408,247 +294,29 @@ export const OrderManagement: React.FC = () => {
           </div>
         )}
 
-        {/* --- 2. TAB TERJUAL (History Barang Keluar) --- */}
+        {/* Tab ONLINE (Resi) dihapus, proses scan resi akan langsung ke Barang Keluar */}
+
+        {/* --- 3. TAB TERJUAL (History Barang Keluar) --- */}
         {activeTab === 'TERJUAL' && (
-          <>
-            {/* Filter Section */}
-            <div className="sticky top-0 z-10 bg-gray-800/95 backdrop-blur-sm border-b border-gray-700 p-4 space-y-3">
-              {/* Main Filter: OFFLINE / ONLINE */}
-              <div className="flex gap-2 overflow-x-auto pb-2">
-                {['ALL', 'OFFLINE', 'ONLINE'].map(filter => (
-                  <button
-                    key={filter}
-                    onClick={() => {
-                      setSoldFilter(filter as any);
-                      setOnlineMarketFilter('ALL');
-                      setOnlineStoreFilter('ALL');
-                      setExportCountryFilter('ALL');
-                    }}
-                    className={`px-4 py-2 rounded-lg font-semibold text-sm whitespace-nowrap transition-all ${
-                      soldFilter === filter 
-                        ? 'bg-purple-600 text-white shadow-lg' 
-                        : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                    }`}
-                  >
-                    {filter}
-                  </button>
-                ))}
-              </div>
-
-              {/* Sub-Filter untuk ONLINE */}
-              {soldFilter === 'ONLINE' && (
-                <div className="space-y-2">
-                  {/* Marketplace Type */}
-                  <div className="flex gap-2 overflow-x-auto pb-1">
-                    <span className="text-xs text-gray-400 font-semibold whitespace-nowrap pt-2">Marketplace:</span>
-                    {['ALL', 'SHOPEE', 'TIKTOK', 'RESELLER', 'EXPORT'].map(market => (
-                      <button
-                        key={market}
-                        onClick={() => {
-                          setOnlineMarketFilter(market as any);
-                          if (market !== 'EXPORT') setExportCountryFilter('ALL');
-                          if (market === 'RESELLER') setOnlineStoreFilter('ALL');
-                        }}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all ${
-                          onlineMarketFilter === market 
-                            ? 'bg-blue-600 text-white' 
-                            : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                        }`}
-                      >
-                        {market}
-                      </button>
-                    ))}
+          <div className="space-y-2">
+            {filterList(soldData).length === 0 && <EmptyState msg="Belum ada data penjualan." />}
+            {filterList(soldData).map(item => (
+              <div key={item.id} className="bg-gray-800/50 border border-gray-700 p-3 rounded-lg flex justify-between items-center hover:bg-gray-800 transition-colors">
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-[10px] text-gray-500">{new Date(item.created_at).toLocaleString('id-ID', {timeZone: 'Asia/Jakarta'})}</span>
+                    <span className="text-[10px] bg-gray-700 px-1.5 rounded text-gray-400">{item.ecommerce || 'OFFLINE'}</span>
                   </div>
-
-                  {/* Store Filter (untuk SHOPEE, TIKTOK, EXPORT) */}
-                  {(onlineMarketFilter === 'SHOPEE' || onlineMarketFilter === 'TIKTOK' || onlineMarketFilter === 'EXPORT') && (
-                    <div className="flex gap-2 overflow-x-auto pb-1">
-                      <span className="text-xs text-gray-400 font-semibold whitespace-nowrap pt-2">Toko:</span>
-                      {['ALL', 'MJM', 'BJW', 'LARIS'].map(store => (
-                        <button
-                          key={store}
-                          onClick={() => setOnlineStoreFilter(store as any)}
-                          className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all ${
-                            onlineStoreFilter === store 
-                              ? 'bg-green-600 text-white' 
-                              : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                          }`}
-                        >
-                          {store}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-
-                  {/* Country Filter (untuk EXPORT) */}
-                  {onlineMarketFilter === 'EXPORT' && (
-                    <div className="flex gap-2 overflow-x-auto pb-1">
-                      <span className="text-xs text-gray-400 font-semibold whitespace-nowrap pt-2">Negara:</span>
-                      {['ALL', 'PH', 'SG', 'MY', 'HK'].map(country => (
-                        <button
-                          key={country}
-                          onClick={() => setExportCountryFilter(country as any)}
-                          className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all ${
-                            exportCountryFilter === country 
-                              ? 'bg-yellow-600 text-white' 
-                              : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                          }`}
-                        >
-                          {country}
-                        </button>
-                      ))}
-                    </div>
-                  )}
+                  <h4 className="font-bold text-white text-sm">{item.name}</h4>
+                  <p className="text-xs text-gray-400">{item.customer} • {item.tempo}</p>
                 </div>
-              )}
-            </div>
-
-            {/* Data List */}
-            <div className="space-y-2">
-              {(() => {
-                let filtered = filteredGroupedSold;
-
-                // Filter berdasarkan OFFLINE/ONLINE
-                if (soldFilter === 'OFFLINE') {
-                  filtered = filtered.filter(group => !group.ecommerce || group.ecommerce === 'OFFLINE' || group.ecommerce === '');
-                } else if (soldFilter === 'ONLINE') {
-                  filtered = filtered.filter(group => group.ecommerce && group.ecommerce !== 'OFFLINE' && group.ecommerce !== '');
-
-                  // Sub-filter marketplace
-                  if (onlineMarketFilter !== 'ALL') {
-                    if (onlineMarketFilter === 'SHOPEE') {
-                      filtered = filtered.filter(group => {
-                        const ecom = (group.ecommerce || '').toUpperCase();
-                        const match = ecom.includes('SHOPEE') || ecom.includes('SHOPPE');
-                        if (onlineStoreFilter !== 'ALL') {
-                          return match && ecom.includes(onlineStoreFilter);
-                        }
-                        return match;
-                      });
-                    } else if (onlineMarketFilter === 'TIKTOK') {
-                      filtered = filtered.filter(group => {
-                        const ecom = (group.ecommerce || '').toUpperCase();
-                        const match = ecom.includes('TIKTOK');
-                        if (onlineStoreFilter !== 'ALL') {
-                          return match && ecom.includes(onlineStoreFilter);
-                        }
-                        return match;
-                      });
-                    } else if (onlineMarketFilter === 'RESELLER') {
-                      filtered = filtered.filter(group => {
-                        const ecom = (group.ecommerce || '').toUpperCase();
-                        return ecom.includes('RESELLER');
-                      });
-                    } else if (onlineMarketFilter === 'EXPORT') {
-                      filtered = filtered.filter(group => {
-                        const ecom = (group.ecommerce || '').toUpperCase();
-                        const match = ecom.includes('EXPORT');
-                        if (match) {
-                          if (onlineStoreFilter !== 'ALL' && !ecom.includes(onlineStoreFilter)) {
-                            return false;
-                          }
-                          if (exportCountryFilter !== 'ALL' && !ecom.includes(exportCountryFilter)) {
-                            return false;
-                          }
-                        }
-                        return match;
-                      });
-                    }
-                  }
-                }
-
-                return filtered.length === 0 ? (
-                  <EmptyState msg="Belum ada data penjualan." />
-                ) : (
-                  filtered.map(group => {
-                    const isExpanded = expandedGroups[group.id];
-                    return (
-                      <div key={group.id} className="bg-gray-800 border border-gray-700 rounded-xl overflow-hidden shadow-lg hover:shadow-xl transition-shadow">
-                        {/* HEADER GROUP */}
-                        <div className="p-4 flex flex-col md:flex-row justify-between gap-4">
-                          {/* Info Customer & Date - Clickable */}
-                          <div 
-                            onClick={() => setExpandedGroups(prev => ({...prev, [group.id]: !prev[group.id]}))}
-                            className="flex-1 cursor-pointer hover:bg-gray-750/30 rounded-lg p-2 -m-2 transition-colors"
-                          >
-                            <div className="flex items-start gap-3 mb-2">
-                              {isExpanded ? <ChevronUp size={20} className="text-purple-400 mt-1"/> : <ChevronDown size={20} className="text-gray-400 mt-1"/>}
-                              <div>
-                                <h3 className="font-bold text-lg text-white flex items-center gap-2">
-                                  <User size={18} className="text-gray-400"/> {group.customer}
-                                </h3>
-                                <div className="flex items-center gap-2 mt-1 flex-wrap">
-                                  <span className="text-[10px] text-gray-500">{formatDateTimeWIB(group.date)}</span>
-                                  <span className="text-[10px] bg-gray-700 px-1.5 py-0.5 rounded text-gray-400">{group.ecommerce}</span>
-                                  {group.kode_toko && <span className="text-[10px] bg-purple-900/30 text-purple-400 px-1.5 py-0.5 rounded">{group.kode_toko}</span>}
-                                  <span className="text-[10px] bg-amber-900/30 text-amber-400 px-1.5 py-0.5 rounded font-semibold">{group.tempo}</span>
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* Total Qty & Amount + Retur Button */}
-                          <div className="flex items-center gap-3 border-t md:border-t-0 border-gray-700 pt-3 md:pt-0">
-                            <div className="text-center px-3 border-r border-gray-700">
-                              <p className="text-xs text-gray-400">Total Items</p>
-                              <p className="text-lg font-bold text-blue-400">{group.items.length}</p>
-                            </div>
-                            <div className="text-center px-3 border-r border-gray-700">
-                              <p className="text-xs text-gray-400">Total Qty</p>
-                              <p className="text-lg font-bold text-green-400">{group.totalQty}</p>
-                            </div>
-                            <div className="text-right px-3 border-r border-gray-700">
-                              <p className="text-xs text-gray-400">Total Harga</p>
-                              <p className="text-lg font-bold text-green-400">{formatRupiah(group.totalAmount)}</p>
-                            </div>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleOpenReturGroupModal(group.items);
-                              }}
-                              className="p-3 rounded-lg bg-red-900/20 text-red-400 hover:bg-red-900/50 border border-red-900/50 transition-colors"
-                              title="Retur Semua Item"
-                            >
-                              <Trash2 size={20} />
-                            </button>
-                          </div>
-                        </div>
-
-                        {/* ITEM LIST (EXPANDABLE) */}
-                        {isExpanded && (
-                          <div className="bg-gray-900/80 border-t border-gray-700 p-2 space-y-2 animate-in slide-in-from-top-2 duration-200">
-                            {group.items.map((item, idx) => (
-                              <div key={`${item.id}-${idx}`} className="flex justify-between items-center p-3 bg-gray-800 rounded-lg border border-gray-700 hover:border-gray-600 ml-4 mr-2">
-                                <div className="flex-1">
-                                  <p className="text-sm font-bold text-white">{item.name}</p>
-                                  <p className="text-[10px] text-gray-500 font-mono">Part: {item.part_number}</p>
-                                  {item.resi && <p className="text-[10px] text-gray-500">Resi: {item.resi}</p>}
-                                </div>
-                                <div className="flex items-center gap-3">
-                                  <div className="text-right pl-4 border-l border-gray-700">
-                                    <p className="text-sm font-bold text-white">{item.qty_keluar} pcs</p>
-                                    <p className="text-xs text-gray-400">{formatRupiah(item.harga_satuan)}/pcs</p>
-                                    <p className="text-xs text-green-400 font-mono font-semibold">{formatRupiah(item.harga_total)}</p>
-                                  </div>
-                                  <button
-                                    onClick={() => handleOpenReturModal(item)}
-                                    className="p-2 rounded bg-red-900/20 text-red-400 hover:bg-red-900/50 transition-colors"
-                                    title="Retur Barang"
-                                  >
-                                    <Trash2 size={16} />
-                                  </button>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })
-                );
-              })()}
-            </div>
-          </>
+                <div className="text-right pl-4 border-l border-gray-700">
+                  <p className="text-lg font-bold text-green-400">{item.qty_keluar}</p>
+                  <p className="text-[10px] text-gray-500">Pcs</p>
+                </div>
+              </div>
+            ))}
+          </div>
         )}
 
         {/* --- 4. TAB RETUR --- */}
@@ -673,86 +341,6 @@ export const OrderManagement: React.FC = () => {
         )}
 
       </div>
-
-      {/* MODAL RETUR */}
-      {returModal.show && (returModal.item || returModal.items) && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-gray-800 rounded-2xl border border-gray-700 shadow-2xl max-w-md w-full p-6 animate-in fade-in zoom-in-95 duration-200">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-xl font-bold text-white flex items-center gap-2">
-                <RotateCcw className="text-red-400" size={24} />
-                Retur Barang {returModal.items ? `(${returModal.items.length} Items)` : ''}
-              </h3>
-              <button 
-                onClick={() => setReturModal({ show: false, item: null, items: undefined })}
-                className="p-1 hover:bg-gray-700 rounded transition-colors"
-              >
-                <X size={20} className="text-gray-400" />
-              </button>
-            </div>
-
-            {/* Item Info */}
-            <div className="bg-gray-900/50 border border-gray-700 rounded-lg p-4 mb-6 max-h-64 overflow-y-auto">
-              {returModal.item ? (
-                <>
-                  <p className="text-sm font-bold text-white mb-1">{returModal.item.name}</p>
-                  <p className="text-xs text-gray-400">Part: {returModal.item.part_number}</p>
-                  <p className="text-xs text-gray-400">Customer: {returModal.item.customer}</p>
-                  <p className="text-xs text-gray-400">Qty: {returModal.item.qty_keluar} pcs</p>
-                </>
-              ) : returModal.items ? (
-                <div className="space-y-2">
-                  <p className="text-sm font-bold text-white mb-2">Item yang akan diretur:</p>
-                  {returModal.items.map((item, idx) => (
-                    <div key={idx} className="bg-gray-800 p-2 rounded border border-gray-700">
-                      <p className="text-xs font-semibold text-white">{item.name}</p>
-                      <p className="text-[10px] text-gray-500">Part: {item.part_number} • Qty: {item.qty_keluar} pcs</p>
-                    </div>
-                  ))}
-                </div>
-              ) : null}
-            </div>
-
-            {/* Pilihan Keterangan */}
-            <div className="space-y-3">
-              <p className="text-sm text-gray-400 font-semibold">Pilih Jenis Retur:</p>
-              
-              <button
-                onClick={() => handleProcessRetur('KEMBALI KE STOCK')}
-                className="w-full p-4 bg-green-900/20 border border-green-900/50 rounded-lg hover:bg-green-900/40 transition-colors text-left group"
-              >
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="font-bold text-green-400 text-sm">KEMBALI KE STOCK</p>
-                    <p className="text-xs text-gray-400 mt-1">Barang akan dikembalikan ke stok gudang</p>
-                  </div>
-                  <CheckCircle className="text-green-400 group-hover:scale-110 transition-transform" size={24} />
-                </div>
-              </button>
-
-              <button
-                onClick={() => handleProcessRetur('BARANG RUSAK')}
-                className="w-full p-4 bg-red-900/20 border border-red-900/50 rounded-lg hover:bg-red-900/40 transition-colors text-left group"
-              >
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="font-bold text-red-400 text-sm">BARANG RUSAK</p>
-                    <p className="text-xs text-gray-400 mt-1">Barang rusak, tidak kembali ke stok</p>
-                  </div>
-                  <X className="text-red-400 group-hover:scale-110 transition-transform" size={24} />
-                </div>
-              </button>
-
-              <button
-                onClick={() => setReturModal({ show: false, item: null })}
-                className="w-full p-3 bg-gray-700 hover:bg-gray-600 rounded-lg text-gray-300 font-semibold text-sm transition-colors"
-              >
-                Batal
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

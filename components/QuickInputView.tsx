@@ -148,7 +148,7 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
         hargaJual: item.price || 0, // Tetap simpan harga jual referensi
         error: undefined,
         // Set totalHarga default (qty 1)
-        totalHarga: defaultPrice * (row.qtyMasuk || 1)
+        totalHarga: defaultPrice * (row.qtyKeluar || 1)
     } : row));
     setSuggestions([]);
     setActiveSearchIndex(null);
@@ -208,7 +208,7 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
         }
         
         // Validasi stok (hanya check, tidak kurangi)
-        if (existingItem.quantity < row.qtyMasuk) {
+        if (existingItem.quantity < row.qtyKeluar) {
           updateRow(row.id, 'error', `Stok kurang! Sisa: ${existingItem.quantity}`);
           updateRow(row.id, 'isLoading', false);
           return false;
@@ -231,7 +231,7 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
       // 3. Siapkan Transaction Data
       const transactionData = { 
         type: mode, // 'in' or 'out'
-        qty: row.qtyMasuk, // Field di UI tetap qtyMasuk, tapi backend membacanya sebagai qty transaksi
+        qty: row.qtyKeluar, // Field di UI tetap qtyKeluar, backend membacanya sebagai qty transaksi
         ecommerce: row.via || '-', 
         resiTempo: row.resiTempo || '-', 
         customer: row.customer, 
@@ -241,7 +241,7 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
       };
       
       // 4. Hitung Stok Baru (hanya untuk 'in')
-      const newQuantity = existingItem.quantity + row.qtyMasuk;
+      const newQuantity = existingItem.quantity + row.qtyKeluar;
 
       // 5. Update Database
       const updatedItem = await updateInventory({
@@ -307,7 +307,7 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
         const cartItems = groupRows.map(row => ({
           partNumber: row.partNumber,
           name: row.namaBarang,
-          cartQuantity: row.qtyMasuk,
+          cartQuantity: row.qtyKeluar,
           price: row.hargaSatuan,
           brand: row.brand || '',
           application: row.aplikasi || '',
