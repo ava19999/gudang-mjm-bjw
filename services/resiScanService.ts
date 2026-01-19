@@ -25,14 +25,13 @@ export const scanResiStage1 = async (
   try {
     const table = getTableName(store);
     
-    // FIX: stage1_scanned dikirim sebagai STRING 'true' (sesuai tipe Text di DB)
     const insertData = {
       resi: data.resi,
       ecommerce: data.ecommerce,
       sub_toko: data.sub_toko,
       negara_ekspor: data.negara_ekspor || null,
       tanggal: new Date().toISOString(),
-      stage1_scanned: 'true', 
+      stage1_scanned: 'true',
       stage1_scanned_at: new Date().toISOString(),
       stage1_scanned_by: data.scanned_by,
       status: 'stage1'
@@ -58,7 +57,7 @@ export const getResiStage1List = async (store: string | null) => {
   const { data, error } = await supabase
     .from(table)
     .select('*')
-    .eq('stage1_scanned', 'true') // FIX: Filter pakai string 'true'
+    .eq('stage1_scanned', 'true')
     .order('stage1_scanned_at', { ascending: false })
     .limit(100);
 
@@ -68,11 +67,9 @@ export const getResiStage1List = async (store: string | null) => {
 
 export const deleteResiStage1 = async (id: string, store: string | null) => {
   const table = getTableName(store);
-  
-  // FIX: Cek string 'true' untuk validasi hapus
   const { data } = await supabase.from(table).select('stage2_verified').eq('id', id).single();
   
-  if (data?.stage2_verified === 'true') {
+  if (data?.stage2_verified === 'true' || data?.stage2_verified === true) {
     return { success: false, message: 'Tidak bisa dihapus, sudah masuk Stage 2!' };
   }
 
@@ -110,13 +107,11 @@ export const addReseller = async (nama: string): Promise<{ success: boolean; mes
 
 export const getPendingStage2List = async (store: string | null) => {
   const table = getTableName(store);
-  
-  // FIX: Logic filter text (Stage 1 'true' DAN Stage 2 BUKAN 'true')
   const { data, error } = await supabase
     .from(table)
     .select('*')
     .eq('stage1_scanned', 'true')
-    .or('stage2_verified.is.null,stage2_verified.neq.true')
+    .or('stage2_verified.is.null,stage2_verified.neq.true') 
     .order('stage1_scanned_at', { ascending: false });
     
   if (error) return [];
@@ -130,7 +125,6 @@ export const verifyResiStage2 = async (
   const table = getTableName(store);
   const { resi, verified_by } = data;
 
-  // 1. Cari resi valid (Stage 1 'true', Stage 2 belum)
   const { data: rows } = await supabase
     .from(table)
     .select('id')
@@ -144,7 +138,6 @@ export const verifyResiStage2 = async (
     return { success: false, message: 'Resi sudah terverifikasi sebelumnya.' };
   }
 
-  // 2. Update status (Set ke STRING 'true')
   const ids = rows.map(r => r.id);
   const { error } = await supabase
     .from(table)
@@ -166,11 +159,10 @@ export const verifyResiStage2 = async (
 
 export const getResiHistory = async (store: string | null) => {
   const table = getTableName(store);
-  // Sort by stage1_scanned_at karena created_at mungkin tidak ada di view tertentu
   const { data, error } = await supabase
     .from(table)
     .select('*')
-    .order('stage1_scanned_at', { ascending: false })
+    .order('stage1_scanned_at', { ascending: false, nullsFirst: false })
     .limit(100);
     
   if (error) {
@@ -182,8 +174,6 @@ export const getResiHistory = async (store: string | null) => {
 
 export const getPendingStage3List = async (store: string | null) => {
   const table = getTableName(store);
-  
-  // FIX: Ambil yang Stage 2 'true' DAN status BELUM 'completed'
   const { data, error } = await supabase
     .from(table)
     .select('*')
@@ -218,7 +208,19 @@ export const lookupPartNumberInfo = async (sku: string, store: string | null) =>
   return data;
 };
 
-// --- PROSES INTI: INPUT KE BARANG KELUAR & UPDATE RESI ---
+// --- FIX: REMOVED LIMIT UNTUK DROPDOWN PART NUMBER LENGKAP ---
+export const getAvailableParts = async (store: string | null) => {
+  const table = getStockTable(store);
+  // Menghapus limit agar semua data terambil
+  const { data, error } = await supabase
+    .from(table)
+    .select('part_number')
+    .order('part_number', { ascending: true });
+
+  if (error) return [];
+  return data?.map(d => d.part_number) || [];
+};
+
 export const processBarangKeluarBatch = async (items: any[], store: string | null) => {
   const scanTable = getTableName(store);
   const logTable = getBarangKeluarTable(store);
@@ -229,7 +231,6 @@ export const processBarangKeluarBatch = async (items: any[], store: string | nul
 
   for (const item of items) {
     try {
-      // 1. Cek Stok
       const { data: stock } = await supabase
         .from(stockTable)
         .select('quantity')
@@ -241,7 +242,6 @@ export const processBarangKeluarBatch = async (items: any[], store: string | nul
         continue;
       }
 
-      // 2. Potong Stok
       const newStock = stock.quantity - item.qty_keluar;
       const { error: stockErr } = await supabase
         .from(stockTable)
@@ -253,15 +253,12 @@ export const processBarangKeluarBatch = async (items: any[], store: string | nul
         continue;
       }
 
-      // 3. Log Barang Keluar
-      // FIX: Hapus order_id karena kolom tidak ada di DB
       const logPayload = {
         tanggal: item.tanggal, 
         kode_toko: item.sub_toko, 
         ecommerce: item.ecommerce,
         customer: item.customer,
         resi: item.resi,
-        // order_id: DIHAPUS (Tidak ada kolom)
         part_number: item.part_number,
         name: item.nama_pesanan,
         brand: item.brand,
@@ -276,13 +273,10 @@ export const processBarangKeluarBatch = async (items: any[], store: string | nul
       const { error: logErr } = await supabase.from(logTable).insert([logPayload]);
       if (logErr) {
         errors.push(`Gagal simpan log ${item.resi}: ${logErr.message}`);
-        // Rollback stok manual
         await supabase.from(stockTable).update({ quantity: stock.quantity }).eq('part_number', item.part_number);
         continue;
       }
 
-      // 4. Update Status Resi di Tabel Scan
-      // FIX: Update status='completed' (bukan stage3_completed)
       const { data: pendingRows } = await supabase
         .from(scanTable)
         .select('id')
@@ -292,15 +286,14 @@ export const processBarangKeluarBatch = async (items: any[], store: string | nul
       
       if (pendingRows && pendingRows.length > 0) {
         const updateData: any = {
-            status: 'completed', // Penanda selesai
+            status: 'completed',
             part_number: item.part_number,
-            barang: item.nama_pesanan, // Nama kolom: barang
+            barang: item.nama_pesanan,
             qty_out: item.qty_keluar,
             total_harga: item.harga_total,
             customer: item.customer
         };
 
-        // Coba simpan No Pesanan jika berupa Angka (karena tipe DB numeric)
         const numOrder = Number(item.order_id);
         if (!isNaN(numOrder) && item.order_id) {
             updateData.no_pesanan = numOrder;
