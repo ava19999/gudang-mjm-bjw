@@ -21,8 +21,8 @@ import {
 // ============================================================================
 
 const getResiTableName = (store: string | null | undefined): string => {
-  if (store === 'mjm') return 'resi_scan_stage_mjm';
-  if (store === 'bjw') return 'resi_scan_stage_bjw';
+  if (store === 'mjm') return 'scan_resi_mjm';
+  if (store === 'bjw') return 'scan_resi_bjw';
   throw new Error('Invalid store specified');
 };
 
@@ -74,10 +74,12 @@ export const scanResiStage1 = async (
     
     // Insert new resi
     const insertData: any = {
+      id: crypto.randomUUID ? crypto.randomUUID() : (Math.random().toString(36).substring(2) + Date.now()),
       resi: data.resi,
       ecommerce: data.ecommerce,
       sub_toko: data.sub_toko,
       negara_ekspor: data.negara_ekspor || null,
+      tanggal: new Date().toISOString(),
       stage1_scanned: true,
       stage1_scanned_at: new Date().toISOString(),
       stage1_scanned_by: data.scanned_by,
@@ -180,7 +182,7 @@ export const getResiStage1List = async (
       query = query.ilike('resi', `%${filters.search}%`);
     }
     
-    const { data, error } = await query.order('created_at', { ascending: false });
+    const { data, error } = await query.order('tanggal', { ascending: false });
     
     if (error) throw error;
     
