@@ -189,6 +189,12 @@ export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh }) => 
     } else {
       showToast(result.message, 'error');
       setResiInput(''); // KOSONGKAN INPUT JIKA DOUBLE/ERROR
+      // Mainkan audio sudah di scan.mp3 jika error/double
+      try {
+        const audio = new Audio(require('./sudah di scan.mp3'));
+        audio.volume = 1.0;
+        audio.play().catch(() => {});
+      } catch {}
       // Tetap fokus ke input jika error
       setTimeout(() => {
         if (resiInputRef.current) {
