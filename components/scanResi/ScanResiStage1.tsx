@@ -113,7 +113,9 @@ export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh }) => 
   const [showResellerForm, setShowResellerForm] = useState(false);
   const [resellers, setResellers] = useState<any[]>([]);
   // Untuk subToko suggestion dari data resi yang sudah pernah diinput
-  const resellerTokoList = Array.from(new Set(resiList.filter(r => r.ecommerce === 'RESELLER').map(r => r.sub_toko))).filter(Boolean);
+  const resellerTokoList: string[] = Array.from(new Set(resiList.filter(r => r.ecommerce === 'RESELLER').map(r => r.sub_toko)))
+    .filter(Boolean)
+    .map(String);
   const [newResellerName, setNewResellerName] = useState('');
   
   const resiInputRef = useRef<HTMLInputElement>(null);
@@ -177,16 +179,24 @@ export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh }) => 
       setResiInput('');
       await loadResiList();
       if (onRefresh) onRefresh();
+      // Scroll/focus ke input resi agar siap scan berikutnya
+      setTimeout(() => {
+        if (resiInputRef.current) {
+          resiInputRef.current.focus();
+          resiInputRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }, 100);
     } else {
       showToast(result.message, 'error');
+      // Tetap fokus ke input jika error
+      setTimeout(() => {
+        if (resiInputRef.current) {
+          resiInputRef.current.focus();
+          resiInputRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }, 100);
     }
-    
     setLoading(false);
-    
-    // Refocus input
-    if (resiInputRef.current) {
-      resiInputRef.current.focus();
-    }
   };
   
   const handleDeleteResi = async (resiId: string) => {
