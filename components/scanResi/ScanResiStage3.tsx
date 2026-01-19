@@ -6,7 +6,11 @@ import {
   processBarangKeluarBatch, 
   lookupPartNumberInfo,
   getPendingStage3List,
-  getAvailableParts 
+  getAvailableParts,
+  saveCSVToResiItems,
+  fetchPendingCSVItems,
+  updateResiItem,
+  getBulkPartNumberInfo // <--- FUNGSI OPTIMASI
 } from '../../services/resiScanService';
 import { 
   parseShopeeCSV, 
@@ -59,21 +63,178 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
     loadParts();
   }, [selectedStore]);
 
-  // --- KEYBOARD NAVIGATION (EXCEL STYLE) ---
+  // LOAD DATA DARI DB SAAT REFRESH / PINDAH TAB
+  useEffect(() => {
+    loadSavedDataFromDB();
+  }, [selectedStore]);
+
+  // --- OPTIMASI SPEED: LOAD BULK ---
+  const loadSavedDataFromDB = async () => {
+    setLoading(true);
+    try {
+      // 1. Ambil data CSV pending (Cepat karena Index)
+      const savedItems = await fetchPendingCSVItems(selectedStore);
+      
+      if (savedItems.length > 0) {
+        // 2. Kumpulkan Resi & Part untuk Bulk Query
+        const allResis = savedItems.map((i: any) => i.resi).filter(Boolean);
+        const allParts = savedItems.map((i: any) => i.part_number).filter(Boolean);
+
+        // 3. Request Paralel (Cuma 2 request ke server)
+        const [dbStatus, bulkPartInfo] = await Promise.all([
+            checkResiStatus(allResis, selectedStore),
+            getBulkPartNumberInfo(allParts, selectedStore)
+        ]);
+
+        // 4. Map untuk pencarian instan (O(1))
+        const statusMap = new Map();
+        dbStatus.forEach((d: any) => statusMap.set(d.resi, d));
+
+        const partMap = new Map();
+        bulkPartInfo.forEach((p: any) => partMap.set(p.part_number, p));
+
+        const loadedRows: Stage3Row[] = [];
+
+        // 5. Loop di memori (Super Cepat)
+        for (const item of savedItems) {
+           const dbRow = statusMap.get(item.resi);
+           const partInfo = partMap.get(item.part_number);
+           
+           let statusMsg = 'Ready';
+           let verified = true;
+           
+           let ecommerceDB = item.ecommerce || '-';
+           let subToko = item.toko || (selectedStore === 'mjm' ? 'MJM' : 'BJW');
+
+           if (!dbRow) { 
+               statusMsg = 'Belum Scan S1'; verified = false; 
+           } else {
+               if (!dbRow.stage2_verified || String(dbRow.stage2_verified) !== 'true') { 
+                   statusMsg = 'Pending S2'; verified = false; 
+               }
+           }
+
+           let stock = 0;
+           let brand = '';
+           let app = '';
+           if (partInfo) { 
+              stock = partInfo.quantity || 0; 
+              brand = partInfo.brand || ''; 
+              app = partInfo.application || ''; 
+           }
+           
+           const qty = Number(item.jumlah || item.quantity || 1);
+           const stockValid = stock >= qty;
+           if (!stockValid && verified) statusMsg = 'Stok Kurang';
+
+           loadedRows.push({
+             id: `db-${item.id}`,
+             tanggal: item.created_at ? item.created_at.split('T')[0] : new Date().toISOString().split('T')[0],
+             resi: item.resi,
+             ecommerce: ecommerceDB,
+             sub_toko: subToko,
+             part_number: item.part_number || '',
+             nama_pesanan: item.nama_produk || 'Item Database',
+             brand: brand,
+             application: app,
+             stock_saat_ini: stock,
+             qty_keluar: qty,
+             harga_total: Number(item.total_harga_produk || 0),
+             harga_satuan: qty > 0 ? (Number(item.total_harga_produk || 0) / qty) : 0,
+             no_pesanan: item.order_id || '',
+             customer: item.customer || '-',
+             is_db_verified: verified,
+             is_stock_valid: stockValid,
+             status_message: statusMsg
+           });
+        }
+
+        setRows(prev => {
+            const currentIds = new Set(prev.map(r => r.resi + r.part_number));
+            const uniqueNew = loadedRows.filter(r => !currentIds.has(r.resi + r.part_number));
+            return [...prev, ...uniqueNew];
+        });
+      }
+    } catch (e) {
+      console.error("Error loading saved items:", e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSaveRow = async (row: Stage3Row) => {
+    if (row.id.startsWith('db-')) {
+       const dbId = row.id.replace('db-', '');
+       const payload = {
+          customer: row.customer,
+          part_number: row.part_number,
+          nama_produk: row.nama_pesanan,
+          jumlah: row.qty_keluar,
+          total_harga_produk: row.harga_total
+       };
+       await updateResiItem(selectedStore, dbId, payload);
+    }
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setLoading(true);
+    try {
+      const text = await file.text();
+      const platform = detectCSVPlatform(text);
+      let parsedItems: any[] = [];
+      if (platform === 'shopee') parsedItems = parseShopeeCSV(text);
+      else if (platform === 'tiktok') parsedItems = parseTikTokCSV(text);
+      else { alert('Format CSV tidak dikenali!'); setLoading(false); return; }
+
+      // 1. Ambil list resi & Cek DB (Optimasi)
+      const resiList = parsedItems.map(i => i.resi);
+      const dbStatus = await checkResiStatus(resiList, selectedStore);
+      
+      // 2. Koreksi Data dengan DB (di Memori)
+      const correctedItems = parsedItems.map(item => {
+        const dbRow = dbStatus.find(d => d.resi === item.resi);
+        if (dbRow) {
+            if (dbRow.ecommerce) item.ecommerce = dbRow.ecommerce; 
+            if (dbRow.sub_toko) (item as any).sub_toko = dbRow.sub_toko; 
+        }
+        return item;
+      });
+
+      // 3. Simpan ke DB
+      if (correctedItems.length > 0) {
+          try {
+             const saveResult = await saveCSVToResiItems(correctedItems, selectedStore);
+             if (!saveResult.success) {
+                 console.warn("Gagal simpan CSV ke DB:", saveResult.message);
+                 alert(`Gagal simpan ke database: ${saveResult.message}`);
+             }
+          } catch (dbErr: any) { console.error(dbErr); }
+      }
+
+      // 4. Reload Data (Optimasi)
+      await loadSavedDataFromDB();
+      
+    } catch (err: any) { alert(`Error CSV: ${err.message}`); } 
+    finally { setLoading(false); if (fileInputRef.current) fileInputRef.current.value = ''; }
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent, rowIndex: number, colKey: string) => {
     const colOrder = ['tanggal', 'customer', 'part_number', 'qty_keluar', 'harga_total', 'harga_satuan'];
     const currentColIdx = colOrder.indexOf(colKey);
 
     if (e.key === 'ArrowDown' || e.key === 'Enter') {
       e.preventDefault();
+      (e.target as HTMLInputElement).blur(); 
       const nextInput = document.getElementById(`input-${rowIndex + 1}-${colKey}`);
       nextInput?.focus();
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
+      (e.target as HTMLInputElement).blur();
       const prevInput = document.getElementById(`input-${rowIndex - 1}-${colKey}`);
       prevInput?.focus();
     } else if (e.key === 'ArrowRight') {
-      // Pindah kanan jika kursor di akhir teks atau input tipe number/date
       const target = e.target as HTMLInputElement;
       if (target.type !== 'text' || target.selectionStart === target.value.length) {
          e.preventDefault();
@@ -81,7 +242,6 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
          if (nextCol) document.getElementById(`input-${rowIndex}-${nextCol}`)?.focus();
       }
     } else if (e.key === 'ArrowLeft') {
-      // Pindah kiri jika kursor di awal teks
       const target = e.target as HTMLInputElement;
       if (target.type !== 'text' || target.selectionStart === 0) {
         e.preventDefault();
@@ -91,24 +251,17 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
     }
   };
 
-  // --- LOGIC: UPDATE CELL & AUTO CALC ---
   const updateRow = (id: string, field: keyof Stage3Row, value: any) => {
     setRows(prev => prev.map(r => {
         if (r.id !== id) return r;
         const updated = { ...r, [field]: value };
-        
-        // Auto-calc Harga (2 Arah)
         if (field === 'harga_total') {
-            // Edit Total -> Hitung Satuan
             updated.harga_satuan = updated.qty_keluar > 0 ? updated.harga_total / updated.qty_keluar : 0;
         } else if (field === 'harga_satuan') {
-            // Edit Satuan -> Hitung Total
             updated.harga_total = updated.harga_satuan * updated.qty_keluar;
         } else if (field === 'qty_keluar') {
-            // Edit Qty -> Hitung Total (Asumsi Satuan tetap)
             updated.harga_total = updated.harga_satuan * updated.qty_keluar;
         }
-        
         return updated;
     }));
   };
@@ -145,84 +298,6 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
     const newUniqueRows = dbRows.filter(r => !currentResis.has(r.resi));
     setRows(prev => [...prev, ...newUniqueRows]);
     setLoading(false);
-  };
-
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setLoading(true);
-    try {
-      const text = await file.text();
-      const platform = detectCSVPlatform(text);
-      let parsedItems: any[] = [];
-      if (platform === 'shopee') parsedItems = parseShopeeCSV(text);
-      else if (platform === 'tiktok') parsedItems = parseTikTokCSV(text);
-      else { alert('Format CSV tidak dikenali!'); setLoading(false); return; }
-
-      const resiList = parsedItems.map(i => i.resi);
-      const dbStatus = await checkResiStatus(resiList, selectedStore);
-      const newRows: Stage3Row[] = [];
-      
-      for (const item of parsedItems) {
-        const dbRow = dbStatus.find(d => d.resi === item.resi);
-        let statusMsg = 'Ready';
-        let verified = true;
-        let subToko = selectedStore === 'mjm' ? 'MJM' : 'BJW';
-        let ecommerceDB = platform.toUpperCase();
-
-        if (!dbRow) { statusMsg = 'Belum Scan S1'; verified = false; }
-        else {
-            if (!dbRow.stage2_verified || String(dbRow.stage2_verified) !== 'true') { 
-                statusMsg = 'Pending S2'; verified = false; 
-            }
-        }
-
-        let stock = 0;
-        let brand = '';
-        let app = '';
-        if (item.part_number) {
-          const partInfo = await lookupPartNumberInfo(item.part_number, selectedStore);
-          if (partInfo) { stock = partInfo.quantity || 0; brand = partInfo.brand || ''; app = partInfo.application || ''; }
-        }
-        const stockValid = stock >= item.quantity;
-        if (!stockValid && verified) statusMsg = 'Stok Kurang';
-
-        const existingIdx = rows.findIndex(r => r.resi === item.resi);
-        const rowData: Stage3Row = {
-          id: existingIdx !== -1 ? rows[existingIdx].id : Math.random().toString(36).substr(2, 9),
-          tanggal: new Date().toISOString().split('T')[0],
-          resi: item.resi,
-          ecommerce: ecommerceDB,
-          sub_toko: subToko,
-          part_number: item.part_number || '',
-          // Menggunakan nama dari CSV
-          nama_pesanan: item.product_name || 'Item CSV',
-          brand: brand,
-          application: app,
-          stock_saat_ini: stock,
-          qty_keluar: item.quantity,
-          harga_total: item.total_price,
-          harga_satuan: item.quantity > 0 ? (item.total_price / item.quantity) : 0,
-          no_pesanan: item.order_id,
-          customer: item.customer || '-',
-          is_db_verified: verified,
-          is_stock_valid: stockValid,
-          status_message: statusMsg
-        };
-
-        if (existingIdx !== -1) {
-           setRows(prev => {
-             const newArr = [...prev];
-             newArr[existingIdx] = rowData;
-             return newArr;
-           });
-        } else {
-           newRows.push(rowData);
-        }
-      }
-      setRows(prev => [...prev, ...newRows]);
-    } catch (err: any) { alert(`Error CSV: ${err.message}`); } 
-    finally { setLoading(false); if (fileInputRef.current) fileInputRef.current.value = ''; }
   };
 
   const handleSplit = (rowId: string) => {
@@ -265,21 +340,32 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
   const handlePartNumberBlur = async (id: string, sku: string) => {
     if (!sku) return;
     const info = await lookupPartNumberInfo(sku, selectedStore);
-    setRows(prev => prev.map(r => {
-        if (r.id !== id) return r;
-        const stock = info?.quantity || 0;
-        const stockValid = stock >= r.qty_keluar;
-        return {
-            ...r,
-            brand: info?.brand || '-',
-            application: info?.application || '-',
-            stock_saat_ini: stock,
-            is_stock_valid: stockValid,
-            // Jika nama pesanan masih 'Menunggu Input', update dari DB. Jika dari CSV, pertahankan.
-            nama_pesanan: r.nama_pesanan.includes('Menunggu') || r.nama_pesanan === 'Item CSV' ? (info?.name || r.nama_pesanan) : r.nama_pesanan,
-            status_message: stockValid ? (r.is_db_verified ? 'Ready' : r.status_message) : 'Stok Kurang'
-        };
-    }));
+    
+    let rowToSave: Stage3Row | undefined;
+    setRows(prev => {
+        const newRows = prev.map(r => {
+            if (r.id !== id) return r;
+            const stock = info?.quantity || 0;
+            const stockValid = stock >= r.qty_keluar;
+            
+            const updated = {
+                ...r,
+                brand: info?.brand || '-',
+                application: info?.application || '-',
+                stock_saat_ini: stock,
+                is_stock_valid: stockValid,
+                nama_pesanan: r.nama_pesanan.includes('Menunggu') || r.nama_pesanan === 'Item CSV' || r.nama_pesanan === 'Item Database' ? (info?.name || r.nama_pesanan) : r.nama_pesanan,
+                status_message: stockValid ? (r.is_db_verified ? 'Ready' : r.status_message) : 'Stok Kurang'
+            };
+            rowToSave = updated;
+            return updated;
+        });
+        return newRows;
+    });
+
+    if (rowToSave) {
+        handleSaveRow(rowToSave);
+    }
   };
 
   const handleProcess = async () => {
@@ -363,7 +449,6 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
               <th className="border border-gray-600 px-1 py-1 w-12">TOKO</th>
               <th className="border border-gray-600 px-1 py-1 w-32 bg-gray-750">CUSTOMER (Edit)</th>
               <th className="border border-gray-600 px-1 py-1 w-32 bg-gray-800">PART NUMBER (Edit)</th>
-              {/* KOLOM NAMA PESANAN DI LEBARKAN */}
               <th className="border border-gray-600 px-1 py-1 min-w-[300px]">NAMA PESANAN</th>
               <th className="border border-gray-600 px-1 py-1 w-20">BRAND</th>
               <th className="border border-gray-600 px-1 py-1 w-20">APP</th>
@@ -384,46 +469,82 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                   <td className="border border-gray-600 px-1 text-center">
                     <span className={`px-1 rounded text-[10px] font-bold ${row.is_db_verified && row.is_stock_valid && row.part_number ? 'bg-green-600 text-white' : 'bg-red-600 text-white'}`}>{row.status_message}</span>
                   </td>
-                  
-                  {/* TANGGAL */}
                   <td className="border border-gray-600 px-1"><input id={`input-${idx}-tanggal`} type="date" value={row.tanggal} onChange={(e) => updateRow(row.id, 'tanggal', e.target.value)} onKeyDown={(e) => handleKeyDown(e, idx, 'tanggal')} className="bg-transparent w-full h-full focus:outline-none text-gray-300"/></td>
-                  
                   <td className="border border-gray-600 px-1 font-mono text-blue-300 truncate" title={row.resi}>{row.resi}</td>
                   <td className="border border-gray-600 px-1 text-center">{row.ecommerce}</td>
                   <td className="border border-gray-600 px-1 text-center">{row.sub_toko}</td>
-                  
-                  {/* CUSTOMER EDIT */}
+
+                  {/* CUSTOMER */}
                   <td className="border border-gray-600 p-0">
-                    <input id={`input-${idx}-customer`} type="text" value={row.customer} onChange={(e) => updateRow(row.id, 'customer', e.target.value)} onKeyDown={(e) => handleKeyDown(e, idx, 'customer')} className="w-full h-full px-2 py-1 bg-gray-800 focus:bg-blue-900 focus:outline-none text-white truncate" placeholder="Customer"/>
+                    <input 
+                        id={`input-${idx}-customer`} 
+                        type="text" 
+                        value={row.customer} 
+                        onChange={(e) => updateRow(row.id, 'customer', e.target.value)} 
+                        onBlur={() => handleSaveRow(row)} 
+                        onKeyDown={(e) => handleKeyDown(e, idx, 'customer')} 
+                        className="w-full h-full px-2 py-1 bg-gray-800 focus:bg-blue-900 focus:outline-none text-white truncate" 
+                        placeholder="Customer"
+                    />
                   </td>
 
-                  {/* PART NUMBER EDIT */}
+                  {/* PART NUMBER */}
                   <td className="border border-gray-600 p-0">
-                    <input id={`input-${idx}-part_number`} type="text" list="part-options" value={row.part_number} onChange={(e) => updateRow(row.id, 'part_number', e.target.value)} onBlur={(e) => handlePartNumberBlur(row.id, e.target.value)} onKeyDown={(e) => handleKeyDown(e, idx, 'part_number')} className="w-full h-full px-2 py-1 bg-gray-800 focus:bg-blue-900 focus:outline-none text-yellow-300 font-mono font-bold" placeholder="Input Part..."/>
+                    <input 
+                        id={`input-${idx}-part_number`} 
+                        type="text" 
+                        list="part-options" 
+                        value={row.part_number} 
+                        onChange={(e) => updateRow(row.id, 'part_number', e.target.value)} 
+                        onBlur={(e) => handlePartNumberBlur(row.id, e.target.value)} 
+                        onKeyDown={(e) => handleKeyDown(e, idx, 'part_number')} 
+                        className="w-full h-full px-2 py-1 bg-gray-800 focus:bg-blue-900 focus:outline-none text-yellow-300 font-mono font-bold" 
+                        placeholder="Input Part..."
+                    />
                   </td>
 
-                  {/* NAMA PESANAN LENGKAP - WRAP ENABLED */}
-                  <td className="border border-gray-600 px-1 whitespace-normal break-words leading-tight" title={row.nama_pesanan}>
-                    {row.nama_pesanan}
-                  </td>
-
+                  <td className="border border-gray-600 px-1 whitespace-normal break-words leading-tight" title={row.nama_pesanan}>{row.nama_pesanan}</td>
                   <td className="border border-gray-600 px-1 text-gray-400">{row.brand}</td>
                   <td className="border border-gray-600 px-1 text-gray-400 truncate max-w-[80px]">{row.application}</td>
                   <td className={`border border-gray-600 px-1 text-center font-bold ${row.stock_saat_ini < row.qty_keluar ? 'text-red-500' : 'text-green-400'}`}>{row.stock_saat_ini}</td>
-                  
-                  {/* QTY EDIT */}
+
+                  {/* QTY KELUAR */}
                   <td className="border border-gray-600 p-0">
-                    <input id={`input-${idx}-qty_keluar`} type="number" value={row.qty_keluar} onChange={(e) => updateRow(row.id, 'qty_keluar', parseInt(e.target.value) || 0)} onKeyDown={(e) => handleKeyDown(e, idx, 'qty_keluar')} className="w-full h-full text-center bg-transparent focus:bg-blue-900 focus:outline-none"/>
+                    <input 
+                        id={`input-${idx}-qty_keluar`} 
+                        type="number" 
+                        value={row.qty_keluar} 
+                        onChange={(e) => updateRow(row.id, 'qty_keluar', parseInt(e.target.value) || 0)} 
+                        onBlur={() => handleSaveRow(row)} 
+                        onKeyDown={(e) => handleKeyDown(e, idx, 'qty_keluar')} 
+                        className="w-full h-full text-center bg-transparent focus:bg-blue-900 focus:outline-none"
+                    />
                   </td>
 
-                  {/* TOTAL HARGA EDIT */}
+                  {/* HARGA TOTAL */}
                   <td className="border border-gray-600 p-0">
-                    <input id={`input-${idx}-harga_total`} type="number" value={row.harga_total} onChange={(e) => updateRow(row.id, 'harga_total', parseInt(e.target.value) || 0)} onKeyDown={(e) => handleKeyDown(e, idx, 'harga_total')} className="w-full h-full text-right px-1 bg-transparent focus:bg-blue-900 focus:outline-none font-mono"/>
+                    <input 
+                        id={`input-${idx}-harga_total`} 
+                        type="number" 
+                        value={row.harga_total} 
+                        onChange={(e) => updateRow(row.id, 'harga_total', parseInt(e.target.value) || 0)} 
+                        onBlur={() => handleSaveRow(row)} 
+                        onKeyDown={(e) => handleKeyDown(e, idx, 'harga_total')} 
+                        className="w-full h-full text-right px-1 bg-transparent focus:bg-blue-900 focus:outline-none font-mono"
+                    />
                   </td>
 
-                  {/* SATUAN EDIT */}
+                  {/* HARGA SATUAN */}
                   <td className="border border-gray-600 p-0">
-                    <input id={`input-${idx}-harga_satuan`} type="number" value={row.harga_satuan} onChange={(e) => updateRow(row.id, 'harga_satuan', parseInt(e.target.value) || 0)} onKeyDown={(e) => handleKeyDown(e, idx, 'harga_satuan')} className="w-full h-full text-right px-1 bg-transparent focus:bg-blue-900 focus:outline-none font-mono text-gray-300"/>
+                    <input 
+                        id={`input-${idx}-harga_satuan`} 
+                        type="number" 
+                        value={row.harga_satuan} 
+                        onChange={(e) => updateRow(row.id, 'harga_satuan', parseInt(e.target.value) || 0)} 
+                        onBlur={() => handleSaveRow(row)} 
+                        onKeyDown={(e) => handleKeyDown(e, idx, 'harga_satuan')} 
+                        className="w-full h-full text-right px-1 bg-transparent focus:bg-blue-900 focus:outline-none font-mono text-gray-300"
+                    />
                   </td>
 
                   <td className="border border-gray-600 px-1 truncate max-w-[100px]" title={row.no_pesanan}>{row.no_pesanan}</td>

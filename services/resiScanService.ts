@@ -1,6 +1,6 @@
 // FILE: services/resiScanService.ts
 import { supabase } from './supabaseClient';
-import { ResiScanStage, ResiItem, ResellerMaster } from '../types';
+import { ResiScanStage, ResiItem, ResellerMaster, ParsedCSVItem } from '../types';
 
 // ============================================================================
 // HELPER: Table Name Selector
@@ -18,7 +18,6 @@ const getStockTable = (store: string | null) =>
 const mapToBoolean = (data: any[]) => {
   return data.map(item => ({
     ...item,
-    // Paksa konversi ke boolean agar UI tidak error
     stage1_scanned: String(item.stage1_scanned) === 'true',
     stage2_verified: String(item.stage2_verified) === 'true',
     is_split: String(item.is_split) === 'true'
@@ -35,7 +34,6 @@ export const scanResiStage1 = async (
 ): Promise<{ success: boolean; message: string; data?: ResiScanStage }> => {
   try {
     const table = getTableName(store);
-    // Insert sebagai STRING 'true' (Sesuai tipe Text di DB)
     const insertData = {
       id: (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : Math.random().toString(36).slice(2),
       resi: data.resi,
@@ -57,7 +55,6 @@ export const scanResiStage1 = async (
     
     if (error) throw error;
     
-    // Return sebagai boolean agar UI langsung update
     return { 
       success: true, 
       message: 'Resi berhasil di-scan!', 
@@ -74,20 +71,16 @@ export const getResiStage1List = async (store: string | null) => {
   const { data, error } = await supabase
     .from(table)
     .select('*')
-    .eq('stage1_scanned', 'true') // Filter pakai string
+    .eq('stage1_scanned', 'true') 
     .order('stage1_scanned_at', { ascending: false })
     .limit(100);
 
   if (error) return [];
-  
-  // KONVERSI KE BOOLEAN SEBELUM DIKIRIM KE UI
   return mapToBoolean(data || []);
 };
 
 export const deleteResiStage1 = async (id: string, store: string | null) => {
   const table = getTableName(store);
-  
-  // Cek string 'true'
   const { data } = await supabase.from(table).select('stage2_verified').eq('id', id).single();
   
   if (data?.stage2_verified === 'true') {
@@ -99,7 +92,7 @@ export const deleteResiStage1 = async (id: string, store: string | null) => {
   return { success: true, message: 'Resi dihapus.' };
 };
 
-// --- FUNGSI RESELLER (PENTING UNTUK STAGE 1) ---
+// --- FUNGSI RESELLER ---
 
 export const getResellers = async (): Promise<ResellerMaster[]> => {
   const { data, error } = await supabase
@@ -128,8 +121,6 @@ export const addReseller = async (nama: string): Promise<{ success: boolean; mes
 
 export const getPendingStage2List = async (store: string | null) => {
   const table = getTableName(store);
-  
-  // Logic: Stage 1 'true' DAN Stage 2 BUKAN 'true'
   const { data, error } = await supabase
     .from(table)
     .select('*')
@@ -165,7 +156,7 @@ export const verifyResiStage2 = async (
   const { error } = await supabase
     .from(table)
     .update({
-      stage2_verified: 'true', // Update String
+      stage2_verified: 'true',
       stage2_verified_at: new Date().toISOString(),
       stage2_verified_by: verified_by,
       status: 'stage2'
@@ -188,16 +179,12 @@ export const getResiHistory = async (store: string | null) => {
     .order('stage1_scanned_at', { ascending: false })
     .limit(100);
     
-  if (error) {
-    console.error("Error fetching history:", error);
-    return [];
-  }
+  if (error) return [];
   return mapToBoolean(data || []);
 };
 
 export const getPendingStage3List = async (store: string | null) => {
   const table = getTableName(store);
-  
   const { data, error } = await supabase
     .from(table)
     .select('*')
@@ -213,13 +200,13 @@ export const checkResiStatus = async (resis: string[], store: string | null) => 
   const table = getTableName(store);
   if (resis.length === 0) return [];
   
+  // Ambil 'ecommerce' dan 'sub_toko' dari DB untuk validasi
   const { data, error } = await supabase
     .from(table)
-    .select('resi, stage1_scanned, stage2_verified, status')
+    .select('resi, stage1_scanned, stage2_verified, status, ecommerce, sub_toko')
     .in('resi', resis);
   
   if (error) return [];
-  // Return raw data is fine here, or map if needed by Stage 3
   return data || [];
 };
 
@@ -233,7 +220,26 @@ export const lookupPartNumberInfo = async (sku: string, store: string | null) =>
   return data;
 };
 
-// AMBIL SEMUA PART UNTUK DROPDOWN
+// [BARU] AMBIL STOK BANYAK SEKALIGUS (BULK)
+export const getBulkPartNumberInfo = async (skus: string[], store: string | null) => {
+  const table = getStockTable(store);
+  if (skus.length === 0) return [];
+  
+  // Unique SKU only
+  const uniqueSkus = [...new Set(skus)].filter(Boolean);
+
+  const { data, error } = await supabase
+    .from(table)
+    .select('part_number, name, brand, application, quantity')
+    .in('part_number', uniqueSkus);
+
+  if (error) {
+    console.error("Error bulk part info:", error);
+    return [];
+  }
+  return data || [];
+};
+
 export const getAvailableParts = async (store: string | null) => {
   const table = getStockTable(store);
   const { data, error } = await supabase
@@ -245,16 +251,35 @@ export const getAvailableParts = async (store: string | null) => {
   return data?.map(d => d.part_number) || [];
 };
 
+export const fetchPendingCSVItems = async (store: string | null) => {
+  const table = store === 'mjm' ? 'resi_items_mjm' : (store === 'bjw' ? 'resi_items_bjw' : null);
+  if (!table) return [];
+
+  const { data, error } = await supabase
+    .from(table)
+    .select('*')
+    .eq('status', 'pending') 
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    console.error("Gagal ambil pending CSV:", error);
+    return [];
+  }
+  return data || [];
+};
+
 export const processBarangKeluarBatch = async (items: any[], store: string | null) => {
   const scanTable = getTableName(store);
   const logTable = getBarangKeluarTable(store);
   const stockTable = getStockTable(store);
+  const csvTable = store === 'mjm' ? 'resi_items_mjm' : 'resi_items_bjw';
   
   let successCount = 0;
   let errors: string[] = [];
 
   for (const item of items) {
     try {
+      // 1. Cek & Potong Stok
       const { data: stock } = await supabase
         .from(stockTable)
         .select('quantity')
@@ -277,6 +302,7 @@ export const processBarangKeluarBatch = async (items: any[], store: string | nul
         continue;
       }
 
+      // 2. Simpan Log Barang Keluar
       const logPayload = {
         tanggal: item.tanggal, 
         kode_toko: item.sub_toko, 
@@ -297,10 +323,10 @@ export const processBarangKeluarBatch = async (items: any[], store: string | nul
       const { error: logErr } = await supabase.from(logTable).insert([logPayload]);
       if (logErr) {
         errors.push(`Gagal simpan log ${item.resi}: ${logErr.message}`);
-        await supabase.from(stockTable).update({ quantity: stock.quantity }).eq('part_number', item.part_number);
         continue;
       }
 
+      // 3. Update Status di Tabel SCAN RESI (Stage 2 -> Completed)
       const { data: pendingRows } = await supabase
         .from(scanTable)
         .select('id')
@@ -317,16 +343,23 @@ export const processBarangKeluarBatch = async (items: any[], store: string | nul
             total_harga: item.harga_total,
             customer: item.customer
         };
-
         const numOrder = Number(item.order_id);
         if (!isNaN(numOrder) && item.order_id) {
             updateData.no_pesanan = numOrder;
         }
-
         await supabase
           .from(scanTable)
           .update(updateData)
           .eq('id', pendingRows[0].id);
+      }
+
+      // 4. Update Status di Tabel CSV (Processed)
+      if (csvTable) {
+         await supabase
+           .from(csvTable)
+           .update({ status: 'processed' })
+           .eq('resi', item.resi)
+           .eq('part_number', item.part_number);
       }
 
       successCount++;
@@ -336,4 +369,93 @@ export const processBarangKeluarBatch = async (items: any[], store: string | nul
   }
 
   return { success: errors.length === 0, processed: successCount, errors };
+};
+
+// ============================================================================
+// FUNGSI SIMPAN KE TABEL RESI_ITEMS (DELETE THEN INSERT)
+// ============================================================================
+export const saveCSVToResiItems = async (
+  items: ParsedCSVItem[], 
+  store: string | null
+): Promise<{ success: boolean; message: string; count: number }> => {
+  const tableName = store === 'mjm' ? 'resi_items_mjm' : (store === 'bjw' ? 'resi_items_bjw' : null);
+  
+  if (!tableName) return { success: false, message: 'Toko tidak valid', count: 0 };
+  if (!items || items.length === 0) return { success: false, message: 'Tidak ada data untuk disimpan', count: 0 };
+
+  try {
+    // 1. Ambil daftar resi yang akan disimpan
+    const resiList = [...new Set(items.map(i => i.resi))];
+
+    // 2. HAPUS data lama yang statusnya masih 'pending'
+    const { error: deleteError } = await supabase
+      .from(tableName)
+      .delete()
+      .in('resi', resiList)
+      .eq('status', 'pending');
+
+    if (deleteError) {
+      console.warn("Warning hapus data lama:", deleteError.message);
+    }
+
+    // 3. SIAPKAN DATA BARU
+    const payload = items.map(item => {
+      const fixedToko = (item as any).sub_toko || store?.toUpperCase();
+      
+      return {
+        order_id: item.order_id,
+        status_pesanan: item.order_status,
+        resi: item.resi,
+        opsi_pengiriman: item.shipping_option,
+        part_number: item.part_number,
+        nama_produk: item.product_name,
+        jumlah: item.quantity,
+        total_harga_produk: item.total_price,
+        customer: item.customer,
+        ecommerce: item.ecommerce, 
+        toko: fixedToko,           
+        status: 'pending',
+        created_at: new Date().toISOString()
+      };
+    });
+
+    // 4. INSERT DATA BARU
+    const { error } = await supabase
+      .from(tableName)
+      .insert(payload); 
+
+    if (error) {
+      console.error('Error saving CSV to DB:', error);
+      throw error;
+    }
+
+    return { success: true, message: 'Data CSV berhasil disimpan ke database', count: payload.length };
+  } catch (err: any) {
+    return { success: false, message: err.message || 'Gagal menyimpan data CSV', count: 0 };
+  }
+};
+
+// ============================================================================
+// FUNGSI UPDATE ITEM (Simpan saat Edit & Enter/Blur)
+// ============================================================================
+export const updateResiItem = async (
+  store: string | null,
+  id: string | number, // ID dari database
+  payload: any         // Data yang mau diupdate
+) => {
+  const table = store === 'mjm' ? 'resi_items_mjm' : (store === 'bjw' ? 'resi_items_bjw' : null);
+  if (!table) return { success: false, message: 'Toko tidak valid' };
+
+  try {
+    const { error } = await supabase
+      .from(table)
+      .update(payload)
+      .eq('id', id);
+
+    if (error) throw error;
+    return { success: true, message: 'Updated' };
+  } catch (err: any) {
+    console.error('Update gagal:', err);
+    return { success: false, message: err.message };
+  }
 };
