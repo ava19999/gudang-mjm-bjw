@@ -14,6 +14,17 @@ const getBarangKeluarTable = (store: string | null) =>
 const getStockTable = (store: string | null) => 
   store === 'mjm' ? 'base_mjm' : 'base_bjw';
 
+// Helper: Konversi Database (String) ke App (Boolean)
+const mapToBoolean = (data: any[]) => {
+  return data.map(item => ({
+    ...item,
+    // Paksa konversi ke boolean agar UI tidak error
+    stage1_scanned: String(item.stage1_scanned) === 'true',
+    stage2_verified: String(item.stage2_verified) === 'true',
+    is_split: String(item.is_split) === 'true'
+  }));
+};
+
 // ============================================================================
 // STAGE 1: SCANNER GUDANG
 // ============================================================================
@@ -24,14 +35,15 @@ export const scanResiStage1 = async (
 ): Promise<{ success: boolean; message: string; data?: ResiScanStage }> => {
   try {
     const table = getTableName(store);
-    
+    // Insert sebagai STRING 'true' (Sesuai tipe Text di DB)
     const insertData = {
+      id: (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : Math.random().toString(36).slice(2),
       resi: data.resi,
       ecommerce: data.ecommerce,
       sub_toko: data.sub_toko,
       negara_ekspor: data.negara_ekspor || null,
       tanggal: new Date().toISOString(),
-      stage1_scanned: 'true',
+      stage1_scanned: 'true', 
       stage1_scanned_at: new Date().toISOString(),
       stage1_scanned_by: data.scanned_by,
       status: 'stage1'
@@ -45,7 +57,12 @@ export const scanResiStage1 = async (
     
     if (error) throw error;
     
-    return { success: true, message: 'Resi berhasil di-scan!', data: inserted };
+    // Return sebagai boolean agar UI langsung update
+    return { 
+      success: true, 
+      message: 'Resi berhasil di-scan!', 
+      data: { ...inserted, stage1_scanned: true } 
+    };
   } catch (error: any) {
     console.error('Error scanning stage 1:', error);
     return { success: false, message: error.message || 'Gagal scan resi' };
@@ -57,19 +74,23 @@ export const getResiStage1List = async (store: string | null) => {
   const { data, error } = await supabase
     .from(table)
     .select('*')
-    .eq('stage1_scanned', 'true')
+    .eq('stage1_scanned', 'true') // Filter pakai string
     .order('stage1_scanned_at', { ascending: false })
     .limit(100);
 
   if (error) return [];
-  return data || [];
+  
+  // KONVERSI KE BOOLEAN SEBELUM DIKIRIM KE UI
+  return mapToBoolean(data || []);
 };
 
 export const deleteResiStage1 = async (id: string, store: string | null) => {
   const table = getTableName(store);
+  
+  // Cek string 'true'
   const { data } = await supabase.from(table).select('stage2_verified').eq('id', id).single();
   
-  if (data?.stage2_verified === 'true' || data?.stage2_verified === true) {
+  if (data?.stage2_verified === 'true') {
     return { success: false, message: 'Tidak bisa dihapus, sudah masuk Stage 2!' };
   }
 
@@ -78,7 +99,7 @@ export const deleteResiStage1 = async (id: string, store: string | null) => {
   return { success: true, message: 'Resi dihapus.' };
 };
 
-// --- FUNGSI RESELLER ---
+// --- FUNGSI RESELLER (PENTING UNTUK STAGE 1) ---
 
 export const getResellers = async (): Promise<ResellerMaster[]> => {
   const { data, error } = await supabase
@@ -107,15 +128,17 @@ export const addReseller = async (nama: string): Promise<{ success: boolean; mes
 
 export const getPendingStage2List = async (store: string | null) => {
   const table = getTableName(store);
+  
+  // Logic: Stage 1 'true' DAN Stage 2 BUKAN 'true'
   const { data, error } = await supabase
     .from(table)
     .select('*')
     .eq('stage1_scanned', 'true')
-    .or('stage2_verified.is.null,stage2_verified.neq.true') 
+    .or('stage2_verified.is.null,stage2_verified.neq.true')
     .order('stage1_scanned_at', { ascending: false });
     
   if (error) return [];
-  return data || [];
+  return mapToBoolean(data || []);
 };
 
 export const verifyResiStage2 = async (
@@ -142,7 +165,7 @@ export const verifyResiStage2 = async (
   const { error } = await supabase
     .from(table)
     .update({
-      stage2_verified: 'true',
+      stage2_verified: 'true', // Update String
       stage2_verified_at: new Date().toISOString(),
       stage2_verified_by: verified_by,
       status: 'stage2'
@@ -162,18 +185,19 @@ export const getResiHistory = async (store: string | null) => {
   const { data, error } = await supabase
     .from(table)
     .select('*')
-    .order('stage1_scanned_at', { ascending: false, nullsFirst: false })
+    .order('stage1_scanned_at', { ascending: false })
     .limit(100);
     
   if (error) {
     console.error("Error fetching history:", error);
     return [];
   }
-  return data || [];
+  return mapToBoolean(data || []);
 };
 
 export const getPendingStage3List = async (store: string | null) => {
   const table = getTableName(store);
+  
   const { data, error } = await supabase
     .from(table)
     .select('*')
@@ -182,7 +206,7 @@ export const getPendingStage3List = async (store: string | null) => {
     .order('stage2_verified_at', { ascending: false });
 
   if (error) return [];
-  return data || [];
+  return mapToBoolean(data || []);
 };
 
 export const checkResiStatus = async (resis: string[], store: string | null) => {
@@ -195,6 +219,7 @@ export const checkResiStatus = async (resis: string[], store: string | null) => 
     .in('resi', resis);
   
   if (error) return [];
+  // Return raw data is fine here, or map if needed by Stage 3
   return data || [];
 };
 
@@ -208,10 +233,9 @@ export const lookupPartNumberInfo = async (sku: string, store: string | null) =>
   return data;
 };
 
-// --- FIX: REMOVED LIMIT UNTUK DROPDOWN PART NUMBER LENGKAP ---
+// AMBIL SEMUA PART UNTUK DROPDOWN
 export const getAvailableParts = async (store: string | null) => {
   const table = getStockTable(store);
-  // Menghapus limit agar semua data terambil
   const { data, error } = await supabase
     .from(table)
     .select('part_number')
