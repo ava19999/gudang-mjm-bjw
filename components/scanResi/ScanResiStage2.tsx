@@ -182,8 +182,9 @@ export const ScanResiStage2: React.FC<ScanResiStage2Props> = ({ onRefresh }) => 
 
     // 2. CEK DOUBLE SCAN
     if (decodedText === lastScannedResi) {
-      // >>> BAGIAN INI YANG DIMODIFIKASI <<<
-      speakMessage("Ini sudah di scan, tolol"); 
+      // >>> MODIFIKASI: Suara error (buzz) + TTS "Ini sudah di scan tolol" <<<
+      playBeep('error');
+      speakMessage("Ini sudah di scan tolol"); 
       showToast('Resi sudah discan barusan!', 'warning');
       return;
     }
