@@ -9,6 +9,7 @@ export const formatDate = (dateString: string | Date): string => {
   if (isNaN(date.getTime())) return "-";
 
   return new Intl.DateTimeFormat("id-ID", {
+    timeZone: 'Asia/Jakarta', // GMT+7
     day: "numeric",
     month: "long",
     year: "numeric",

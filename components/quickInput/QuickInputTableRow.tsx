@@ -39,8 +39,8 @@ export const QuickInputTableRow: React.FC<QuickInputTableRowProps> = ({
 
     // --- CALCULATION LOGIC ---
     
-    // When Qty Masuk changes -> recalculate Harga Satuan
-    const handleQtyMasukChange = (valStr: string) => {
+    // When Qty Keluar changes -> recalculate Harga Satuan
+    const handleQtyKeluarChange = (valStr: string) => {
         const cleanVal = valStr.replace(/[^0-9]/g, '');
         const newQty = cleanVal === '' ? 0 : parseInt(cleanVal, 10);
         
@@ -48,7 +48,7 @@ export const QuickInputTableRow: React.FC<QuickInputTableRowProps> = ({
         const newUnitPrice = newQty > 0 ? (currentTotal / newQty) : 0;
 
         onUpdateRow(row.id, {
-            qtyMasuk: newQty,
+            qtyKeluar: newQty,
             hargaSatuan: newUnitPrice
         });
     };
@@ -58,15 +58,15 @@ export const QuickInputTableRow: React.FC<QuickInputTableRowProps> = ({
         const cleanVal = valStr.replace(/[^0-9]/g, '');
         const newTotal = cleanVal === '' ? 0 : parseInt(cleanVal, 10);
         
-        // Only calculate if qtyMasuk > 0 to avoid division by zero
-        if (row.qtyMasuk > 0) {
-            const newUnitPrice = newTotal / row.qtyMasuk;
+        // Only calculate if qtyKeluar > 0 to avoid division by zero
+        if (row.qtyKeluar > 0) {
+            const newUnitPrice = newTotal / row.qtyKeluar;
             onUpdateRow(row.id, {
                 totalHarga: newTotal,
                 hargaSatuan: newUnitPrice
             });
         } else {
-            // If qtyMasuk is 0, just update totalHarga
+            // If qtyKeluar is 0, just update totalHarga
             onUpdateRow(row.id, {
                 totalHarga: newTotal,
                 hargaSatuan: 0
@@ -173,15 +173,15 @@ export const QuickInputTableRow: React.FC<QuickInputTableRowProps> = ({
                     </div>
                 </td>
 
-                {/* COL 4: Qty Masuk */}
+                {/* COL 4: Qty Keluar */}
                 <td className="px-2 py-1.5">
                     <input
                         ref={el => { inputRefs.current[baseRefIndex + 4] = el; }}
                         type="text"
                         inputMode="numeric"
                         className="w-full bg-transparent px-1 py-1 text-xs font-bold text-right font-mono text-green-400 focus:outline-none focus:text-green-300 placeholder-gray-600"
-                        value={row.qtyMasuk || ''}
-                        onChange={(e) => handleQtyMasukChange(e.target.value)}
+                        value={row.qtyKeluar || ''}
+                        onChange={(e) => handleQtyKeluarChange(e.target.value)}
                         onKeyDown={(e) => onGridKeyDown(e, baseRefIndex + 4)}
                         placeholder="0"
                     />

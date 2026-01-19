@@ -95,7 +95,9 @@ export const PettyCashView: React.FC = () => {
   // Set today's date as default when modal opens
   useEffect(() => {
     if (isAdding) {
-      const today = new Date().toISOString().split('T')[0];
+      const today = new Intl.DateTimeFormat('sv-SE', {
+        timeZone: 'Asia/Jakarta'
+      }).format(new Date());
       setFormDate(today);
       setFormType('out');
       setFormAccountType('cash');
@@ -298,7 +300,10 @@ export const PettyCashView: React.FC = () => {
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = `petty-cash-${new Date().toISOString().split('T')[0]}.csv`;
+    const todayStr = new Intl.DateTimeFormat('sv-SE', {
+      timeZone: 'Asia/Jakarta'
+    }).format(new Date());
+    link.download = `petty-cash-${todayStr}.csv`;
     link.click();
   };
 

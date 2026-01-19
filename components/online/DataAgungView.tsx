@@ -54,29 +54,29 @@ export const DataAgungView: React.FC<DataAgungViewProps> = ({ items, onRefresh, 
   // Filtered tables
   const filteredBaseWarehouse = useMemo(() => {
     return baseWarehouseItems.filter(item =>
-      item.partNumber.toLowerCase().includes(searchBase.toLowerCase()) ||
-      item.name.toLowerCase().includes(searchBase.toLowerCase())
+      (item.partNumber || '').toLowerCase().includes(searchBase.toLowerCase()) ||
+      (item.name || '').toLowerCase().includes(searchBase.toLowerCase())
     );
   }, [baseWarehouseItems, searchBase]);
 
   const filteredOnlineProducts = useMemo(() => {
     return onlineProducts.filter(item =>
-      item.partNumber.toLowerCase().includes(searchOnline.toLowerCase()) ||
-      item.name.toLowerCase().includes(searchOnline.toLowerCase())
+      (item.partNumber || '').toLowerCase().includes(searchOnline.toLowerCase()) ||
+      (item.name || '').toLowerCase().includes(searchOnline.toLowerCase())
     );
   }, [onlineProducts, searchOnline]);
 
   const filteredProdukKosong = useMemo(() => {
     return produkKosong.filter(item =>
-      item.partNumber.toLowerCase().includes(searchKosong.toLowerCase()) ||
-      item.name.toLowerCase().includes(searchKosong.toLowerCase())
+      (item.partNumber || '').toLowerCase().includes(searchKosong.toLowerCase()) ||
+      (item.name || '').toLowerCase().includes(searchKosong.toLowerCase())
     );
   }, [produkKosong, searchKosong]);
 
   const filteredTableMasuk = useMemo(() => {
     return tableMasuk.filter(item =>
-      item.partNumber.toLowerCase().includes(searchMasuk.toLowerCase()) ||
-      item.name.toLowerCase().includes(searchMasuk.toLowerCase())
+      (item.partNumber || '').toLowerCase().includes(searchMasuk.toLowerCase()) ||
+      (item.name || '').toLowerCase().includes(searchMasuk.toLowerCase())
     );
   }, [tableMasuk, searchMasuk]);
 

@@ -1,14 +1,11 @@
-// FILE: src/utils/orderHelpers.ts
+// FILE: utils/orderHelpers.ts
 import { Order, OrderStatus } from '../types';
 import { CheckCircle, XCircle } from 'lucide-react';
+import { WIB_TIMEZONE, getWIBISOString as getWIBISOStringUtil } from './timezone';
 
 // --- TIMEZONE HELPERS ---
-export const getWIBISOString = () => {
-    const now = new Date();
-    const wibOffset = 7 * 60 * 60 * 1000; 
-    const wibDate = new Date(now.getTime() + wibOffset);
-    return wibDate.toISOString().replace('Z', '');
-};
+// Re-export for backward compatibility
+export const getWIBISOString = () => getWIBISOStringUtil();
 
 export const getLocalISOString = (timestamp: number) => {
     const d = new Date(timestamp);
@@ -21,8 +18,17 @@ export const formatDate = (ts: number | string) => {
     try { 
         const d = new Date(ts || Date.now()); 
         return { 
-            date: d.toLocaleDateString('id-ID', {day:'numeric', month:'short', year:'numeric'}), 
-            time: d.toLocaleTimeString('id-ID', {hour:'2-digit', minute:'2-digit'}) 
+            date: new Intl.DateTimeFormat('id-ID', {
+                timeZone: WIB_TIMEZONE,
+                day:'numeric', 
+                month:'short', 
+                year:'numeric'
+            }).format(d), 
+            time: new Intl.DateTimeFormat('id-ID', {
+                timeZone: WIB_TIMEZONE,
+                hour:'2-digit', 
+                minute:'2-digit'
+            }).format(d)
         }; 
     } catch (e) { return {date:'-', time:'-'}; } 
 };

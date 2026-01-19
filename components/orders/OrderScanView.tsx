@@ -536,7 +536,7 @@ export const OrderScanView: React.FC<OrderScanViewProps> = ({ onShowToast, onRef
                                     <td className="px-4 py-3 text-center">
                                         {!isSold ? (<button onClick={() => toggleSelect(log.resi)} disabled={!isReady} className="focus:outline-none">{isSelected ? <CheckSquare size={16} className="text-blue-500"/> : <Square size={16} className={isReady ? "text-gray-500 hover:text-blue-400" : "text-gray-600 cursor-not-allowed"}/>}</button>) : <Check size={16} className="text-green-500 mx-auto"/>}
                                     </td>
-                                    <td className="px-4 py-3 text-gray-500 font-mono whitespace-nowrap">{new Date(log.tanggal).toLocaleDateString('id-ID')}</td>
+                                    <td className="px-4 py-3 text-gray-500 font-mono whitespace-nowrap">{new Date(log.tanggal).toLocaleDateString('id-ID', {timeZone: 'Asia/Jakarta'})}</td>
                                     <td className="px-4 py-3 font-bold text-gray-200 font-mono select-all">{log.resi}</td>
                                     <td className="px-4 py-3 text-gray-400 font-semibold">{log.toko || '-'}</td>
                                     <td className="px-4 py-3"><span className="px-2 py-0.5 rounded text-[10px] font-bold border bg-gray-700 text-gray-300 border-gray-600">{log.ecommerce}</span></td>

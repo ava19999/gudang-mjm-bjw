@@ -9,9 +9,9 @@ export interface QuickInputRow {
     brand?: string; // Brand info from item details
     aplikasi?: string; // Application info from item details
     qtySaatIni?: number; // Current quantity from item details
-    qtyMasuk: number; // Incoming quantity
+    qtyKeluar: number; // Outgoing quantity
     totalHarga: number; // Total price for incoming quantity
-    hargaSatuan: number; // Unit price, calculated as totalHarga/qtyMasuk
+    hargaSatuan: number; // Unit price, calculated as totalHarga/qtyKeluar
     hargaJual: number;
     operation: 'in' | 'out';
     via: string;

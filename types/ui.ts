@@ -1,2 +1,15 @@
 // FILE: src/types/ui.ts
-export type ActiveView = 'shop' | 'inventory' | 'quick_input' | 'orders' | 'finance' | 'petty_cash' | 'barang_kosong' | 'closing' | 'data_agung';
+export type ActiveView = 
+  | 'shop' 
+  | 'inventory' 
+  | 'quick_input' 
+  | 'orders' 
+  | 'finance' 
+  | 'petty_cash' 
+  | 'barang_kosong' 
+  | 'closing' 
+  | 'data_agung'
+  | 'scan_resi_stage1'
+  | 'scan_resi_stage2'
+  | 'scan_resi_stage3'
+  | 'scan_resi_history';
