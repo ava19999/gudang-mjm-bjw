@@ -21,8 +21,10 @@ export const initCamera = async (
   config?: ScannerConfig
 ): Promise<{ success: boolean; message: string }> => {
   try {
+    console.log('[cameraScanner] initCamera called', { elementId, config });
     // Check if already initialized
     if (html5QrCode && html5QrCode.getState() === 2) {
+      console.warn('[cameraScanner] Scanner sudah berjalan');
       return {
         success: false,
         message: 'Scanner sudah berjalan'
@@ -62,13 +64,13 @@ export const initCamera = async (
       onScanSuccess,
       onScanFailure
     );
-
+    console.log('[cameraScanner] Camera started successfully');
     return {
       success: true,
       message: 'Kamera berhasil diaktifkan'
     };
   } catch (error: any) {
-    console.error('Error initializing camera:', error);
+    console.error('[cameraScanner] Error initializing camera:', error);
     return {
       success: false,
       message: error.message || 'Gagal mengaktifkan kamera'
@@ -81,7 +83,9 @@ export const initCamera = async (
  */
 export const stopCamera = async (): Promise<{ success: boolean; message: string }> => {
   try {
+    console.log('[cameraScanner] stopCamera called');
     if (!html5QrCode) {
+      console.warn('[cameraScanner] stopCamera: Scanner belum diinisialisasi');
       return {
         success: false,
         message: 'Scanner belum diinisialisasi'
@@ -91,6 +95,7 @@ export const stopCamera = async (): Promise<{ success: boolean; message: string 
     if (html5QrCode.getState() === 2) {
       await html5QrCode.stop();
       html5QrCode.clear();
+      console.log('[cameraScanner] Camera stopped and cleared');
     }
 
     return {
@@ -98,7 +103,7 @@ export const stopCamera = async (): Promise<{ success: boolean; message: string 
       message: 'Kamera berhasil dihentikan'
     };
   } catch (error: any) {
-    console.error('Error stopping camera:', error);
+    console.error('[cameraScanner] Error stopping camera:', error);
     return {
       success: false,
       message: error.message || 'Gagal menghentikan kamera'
@@ -115,22 +120,23 @@ export const requestCameraPermission = async (): Promise<{
   cameras?: any[];
 }> => {
   try {
+    console.log('[cameraScanner] requestCameraPermission called');
     const cameras = await Html5Qrcode.getCameras();
-    
     if (!cameras || cameras.length === 0) {
+      console.warn('[cameraScanner] Tidak ada kamera yang terdeteksi');
       return {
         success: false,
         message: 'Tidak ada kamera yang terdeteksi'
       };
     }
-
+    console.log(`[cameraScanner] ${cameras.length} kamera terdeteksi`, cameras);
     return {
       success: true,
       message: `${cameras.length} kamera terdeteksi`,
       cameras
     };
   } catch (error: any) {
-    console.error('Error requesting camera permission:', error);
+    console.error('[cameraScanner] Error requesting camera permission:', error);
     return {
       success: false,
       message: error.message || 'Gagal mengakses kamera. Pastikan izin kamera sudah diberikan.'
@@ -212,34 +218,36 @@ export const getScannerState = (): number => {
  */
 export const cleanupScanner = async (): Promise<void> => {
   try {
+    console.log('[cameraScanner] cleanupScanner called');
     if (html5QrCode) {
       if (html5QrCode.getState() === 2 || html5QrCode.getState() === 3) {
         await html5QrCode.stop();
+        console.log('[cameraScanner] Camera stopped in cleanup');
       }
       // Cek apakah elemen scanner masih ada sebelum clear
       try {
         const el = html5QrCode.getState && document.getElementById((html5QrCode as any).elementId);
         if (el) {
           await html5QrCode.clear();
+          console.log('[cameraScanner] Camera cleared in cleanup');
         }
       } catch (err: any) {
         // Abaikan error removeChild yang sering terjadi pada html5-qrcode
         if (err?.message && err.message.includes("removeChild")) {
-          // error ini aman diabaikan
+          console.warn('[cameraScanner] removeChild error in clear (ignored)', err);
         } else {
-          // Log error lain jika perlu
-          // console.warn('html5QrCode.clear() error:', err);
+          console.warn('[cameraScanner] html5QrCode.clear() error:', err);
         }
       }
       html5QrCode = null;
+      console.log('[cameraScanner] html5QrCode set to null');
     }
   } catch (error: any) {
     // Abaikan error removeChild pada root
     if (error?.message && error.message.includes("removeChild")) {
-      // error ini aman diabaikan
+      console.warn('[cameraScanner] removeChild error in cleanup (ignored)', error);
     } else {
-      // Log error lain jika perlu
-      // console.error('Error cleaning up scanner:', error);
+      console.error('[cameraScanner] Error cleaning up scanner:', error);
     }
   }
 };
