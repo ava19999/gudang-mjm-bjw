@@ -1,6 +1,6 @@
 // FILE: components/scanResi/ScanResiStage2.tsx
 // Stage 2: Packing Verification - Camera barcode scanner
-// Updated: With Audio Feedback (Success & Error/Double) + Blank Page Fix
+// Updated: Custom TTS "Ini sudah di scan tolol" for double scan
 
 import React, { useState, useEffect, useRef } from 'react';
 import { useStore } from '../../context/StoreContext';
@@ -32,10 +32,9 @@ import {
 // Nada 'Ting' (Sukses)
 const AUDIO_SUCCESS = 'data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBSuBzvLZiTYIG2m98OmfTgwOUKnk875qHgU7k9X0y3ksBS2Ax/DagjEIF2Kz6OyrUQ8IRp/g8r5sIAUsgs/y2Yg2CBxqvfDpn04MDlCq5PS+aiEGPJLU9Mt5LAUugcbw2oM';
 
-// Nada 'Buzz/Low' (Error/Double)
+// Nada 'Buzz/Low' (Error fallback jika TTS gagal)
 const AUDIO_ERROR = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAgD4AAIA+AAABAAgAZGF0YQAAAAAAAACAgICAgICAgICAgICAgICAgICAgICAgICAf3hxeHCAgIB/cnVygICAf3J1coCAgH9ydXKAgIB/cnVygICAf3J1coCAgH9ydXKAgIB/cnVygICAf3J1coCAgH9ydXKAgIB/cnVygICAf3J1coCAgH9ydXKAgIB/cnVygICAf3J1coCAgH9ydXKAgIB/cnVygICAgIA=';
 
-// Error boundary for camera region
 function CameraError({ error }: { error: string | null }) {
   if (!error) return null;
   return (
@@ -97,8 +96,8 @@ export const ScanResiStage2: React.FC<ScanResiStage2Props> = ({ onRefresh }) => 
     setTimeout(() => setToast(null), 3000);
   };
 
-  // -- HELPER: Play Sound --
-  const playSound = (type: 'success' | 'error') => {
+  // -- HELPER: Play Sound (Beep) --
+  const playBeep = (type: 'success' | 'error') => {
     try {
       const audioSource = type === 'success' ? AUDIO_SUCCESS : AUDIO_ERROR;
       const audio = new Audio(audioSource);
@@ -109,11 +108,35 @@ export const ScanResiStage2: React.FC<ScanResiStage2Props> = ({ onRefresh }) => 
     }
   };
 
+  // -- HELPER: Text to Speech (Suara Ngomong) --
+  const speakMessage = (message: string) => {
+    if ('speechSynthesis' in window) {
+      // Hentikan suara sebelumnya jika ada
+      window.speechSynthesis.cancel();
+
+      const utterance = new SpeechSynthesisUtterance(message);
+      utterance.lang = 'id-ID'; // Bahasa Indonesia
+      utterance.rate = 0.9;     // Kecepatan bicara (1.0 normal, 0.9 agak lambat biar jelas)
+      utterance.pitch = 1.0;    // Nada suara
+      utterance.volume = 1.0;   // Volume maksimal
+
+      // Coba cari voice Indonesia spesifik (opsional)
+      const voices = window.speechSynthesis.getVoices();
+      const indoVoice = voices.find(v => v.lang.includes('id') || v.lang.includes('ID'));
+      if (indoVoice) utterance.voice = indoVoice;
+
+      window.speechSynthesis.speak(utterance);
+    } else {
+      // Fallback jika browser tidak support TTS
+      playBeep('error');
+    }
+  };
+
   const handleManualSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!manualResi.trim()) {
       showToast('Nomor resi tidak boleh kosong!', 'error');
-      playSound('error');
+      playBeep('error');
       return;
     }
     await verifyResi(manualResi.trim());
@@ -142,6 +165,7 @@ export const ScanResiStage2: React.FC<ScanResiStage2Props> = ({ onRefresh }) => 
       mounted = false;
       cleanupScanner();
       if (scanCooldownRef.current) clearTimeout(scanCooldownRef.current);
+      window.speechSynthesis.cancel(); // Stop bicara saat pindah halaman
     };
   }, [selectedStore, showAllStage1]);
   
@@ -158,9 +182,9 @@ export const ScanResiStage2: React.FC<ScanResiStage2Props> = ({ onRefresh }) => 
 
     // 2. CEK DOUBLE SCAN
     if (decodedText === lastScannedResi) {
-      // Play sound Error/Double
-      playSound('error'); 
-      showToast('Resi sudah discan barusan (Double)!', 'warning');
+      // >>> BAGIAN INI YANG DIMODIFIKASI <<<
+      speakMessage("Ini sudah di scan, tolol"); 
+      showToast('Resi sudah discan barusan!', 'warning');
       return;
     }
     
@@ -168,21 +192,18 @@ export const ScanResiStage2: React.FC<ScanResiStage2Props> = ({ onRefresh }) => 
     setLastScannedResi(decodedText);
     setScanningEnabled(false);
     
-    // Play sound Success (Tanda kamera menangkap gambar)
-    playSound('success');
+    // Play sound "Ting" (Sukses Scan)
+    playBeep('success');
     
     // Proses verifikasi ke database
     await verifyResi(decodedText);
     
-    // Cooldown sebelum bisa scan lagi (2 detik)
+    // Cooldown
     if (scanCooldownRef.current) {
       clearTimeout(scanCooldownRef.current);
     }
     scanCooldownRef.current = setTimeout(() => {
       setScanningEnabled(true);
-      // Optional: Reset lastScannedResi setelah beberapa detik 
-      // agar bisa discan ulang jika memang perlu (misal setelah 5 detik)
-      // setLastScannedResi(null); 
     }, 2000);
   };
   
@@ -196,10 +217,7 @@ export const ScanResiStage2: React.FC<ScanResiStage2Props> = ({ onRefresh }) => 
     );
 
     if (result.success) {
-      // Jika verifikasi sukses (Status OK)
       showToast(`✓ ${resiNumber} terverifikasi!`, 'success');
-      // Kita sudah play sound 'success' di handleScanSuccess, jadi cukup di sana saja.
-      
       setLoading(true);
       let data: ResiScanStage[] = [];
       if (statusFilter === 'pending') {
@@ -211,8 +229,8 @@ export const ScanResiStage2: React.FC<ScanResiStage2Props> = ({ onRefresh }) => 
       setLoading(false);
       if (onRefresh) onRefresh();
     } else {
-      // Jika verifikasi GAGAL (Resi tidak ada / Salah Store / Error Server)
-      playSound('error'); // Play sound error lagi untuk penekanan
+      // Jika error dari server (misal resi tidak ditemukan)
+      playBeep('error');
       showToast(result.message, 'error');
     }
   };
@@ -234,9 +252,7 @@ export const ScanResiStage2: React.FC<ScanResiStage2Props> = ({ onRefresh }) => 
       const result = await initCamera(
         'scanner-region',
         handleScanSuccess,
-        (err) => {
-           // Ignore frame errors
-        },
+        (err) => {},
         { fps: 10, qrbox: { width: 320, height: 160 }, aspectRatio: 2.0 }
       );
       
@@ -244,7 +260,12 @@ export const ScanResiStage2: React.FC<ScanResiStage2Props> = ({ onRefresh }) => 
       
       setCameraActive(true);
       setCameraInitialized(true);
-      showToast('Kamera aktif - Arahkan ke barcode', 'success');
+      showToast('Kamera aktif', 'success');
+      
+      // Load voices di awal agar siap pakai
+      if ('speechSynthesis' in window) {
+        window.speechSynthesis.getVoices();
+      }
     } catch (err: any) {
       console.error(err);
       setCameraError(err?.message || 'Terjadi error saat mengaktifkan kamera.');
@@ -367,22 +388,12 @@ export const ScanResiStage2: React.FC<ScanResiStage2Props> = ({ onRefresh }) => 
         
         {/* SAFE SCANNER REGION */}
         <div className="relative bg-gray-900 rounded-lg overflow-hidden" style={{ minHeight: '300px' }}>
-          
-          <div 
-            id="scanner-region" 
-            ref={scannerRef}
-            className="w-full h-full"
-          />
+          <div id="scanner-region" ref={scannerRef} className="w-full h-full"/>
 
           {!cameraActive && !cameraError && (
             <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-gray-800">
               <Camera size={64} className="text-gray-600 mb-4" />
-              <p className="text-gray-400 text-center font-medium">
-                Klik tombol "Aktifkan Kamera" di atas
-              </p>
-              <p className="text-gray-600 text-xs mt-2">
-                Pastikan browser mengizinkan akses kamera
-              </p>
+              <p className="text-gray-400 text-center font-medium">Klik tombol "Aktifkan Kamera" di atas</p>
             </div>
           )}
 
@@ -413,14 +424,13 @@ export const ScanResiStage2: React.FC<ScanResiStage2Props> = ({ onRefresh }) => 
           </h3>
           <ul className="text-sm text-gray-300 space-y-1 ml-6 list-disc">
             <li>Pastikan izin kamera sudah diberikan</li>
-            <li>Arahkan kamera ke barcode/QR code pada resi</li>
             <li>Suara "Ting": Scan berhasil masuk</li>
-            <li>Suara "Buzz": Scan double (duplikat) atau Gagal</li>
+            <li>Suara Bicara: "Ini sudah di scan...": Scan double (duplikat)</li>
           </ul>
         </div>
       </div>
       
-      {/* Pending List */}
+      {/* Pending List Table */}
       <div className="bg-gray-800 rounded-xl shadow-lg border border-gray-700">
         <div className="p-6 border-b border-gray-700">
           <div className="flex items-center justify-between mb-4">
@@ -511,7 +521,6 @@ export const ScanResiStage2: React.FC<ScanResiStage2Props> = ({ onRefresh }) => 
                   <td colSpan={6} className="px-4 py-8 text-center text-gray-400">
                     <CheckCircle size={48} className="mx-auto mb-2 text-green-600" />
                     <p className="text-lg font-semibold">Semua resi sudah diverifikasi!</p>
-                    <p className="text-sm">Tidak ada resi yang menunggu verifikasi</p>
                   </td>
                 </tr>
               ) : (
@@ -519,11 +528,7 @@ export const ScanResiStage2: React.FC<ScanResiStage2Props> = ({ onRefresh }) => 
                   <tr key={resi.id} className="hover:bg-gray-700/50 transition-colors">
                     <td className="px-4 py-3 text-sm">
                       {new Date(resi.stage1_scanned_at || resi.created_at).toLocaleDateString('id-ID', {
-                        day: '2-digit',
-                        month: 'short',
-                        year: 'numeric',
-                        hour: '2-digit',
-                        minute: '2-digit'
+                        day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit'
                       })}
                     </td>
                     <td className="px-4 py-3 text-sm font-mono font-semibold text-blue-400">
@@ -546,13 +551,11 @@ export const ScanResiStage2: React.FC<ScanResiStage2Props> = ({ onRefresh }) => 
                     <td className="px-4 py-3 text-center">
                       {resi.stage2_verified ? (
                         <span className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-blue-600 text-white rounded-full">
-                          <CheckCircle size={12} />
-                          Stage 2
+                          <CheckCircle size={12} /> Stage 2
                         </span>
                       ) : (
                         <span className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-yellow-600 text-white rounded-full">
-                          <AlertCircle size={12} />
-                          Pending
+                          <AlertCircle size={12} /> Pending
                         </span>
                       )}
                     </td>
