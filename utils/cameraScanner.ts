@@ -6,20 +6,25 @@ function patchHtml5QrCodeInstance(instance: any) {
     try {
       // Cek node sebelum clear
       const elId = instance.elementId || (instance._elementId || instance._elementID);
-      if (elId && document.getElementById(elId)) {
+      const el = elId && document.getElementById(elId);
+      if (elId && el) {
         return await origClear.apply(this, args);
       } else {
         // Node sudah tidak ada, skip clear
-        // console.warn('[patchHtml5QrCodeInstance] Node not found, skip clear');
         return;
       }
     } catch (err: any) {
-      if (err?.message && err.message.includes('removeChild')) {
-        // Abaikan error ini
+      // Abaikan error removeChild atau TypeError pada clear
+      if (
+        (err?.message && err.message.includes('removeChild')) ||
+        (err instanceof TypeError && String(err).includes('removeChild'))
+      ) {
         // console.warn('[patchHtml5QrCodeInstance] removeChild error ignored', err);
         return;
       }
-      throw err;
+      // Prevent fatal error, just log
+      console.error('[patchHtml5QrCodeInstance] error in clear:', err);
+      return;
     }
   };
 }
