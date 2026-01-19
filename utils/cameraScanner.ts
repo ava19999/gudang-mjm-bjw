@@ -216,10 +216,20 @@ export const cleanupScanner = async (): Promise<void> => {
       if (html5QrCode.getState() === 2 || html5QrCode.getState() === 3) {
         await html5QrCode.stop();
       }
-      html5QrCode.clear();
+      // Cek apakah elemen scanner masih ada sebelum clear
+      try {
+        const el = html5QrCode.getState && document.getElementById((html5QrCode as any).elementId);
+        if (el) {
+          await html5QrCode.clear();
+        }
+      } catch (err) {
+        // Jika gagal clear karena node sudah tidak ada, abaikan
+        // console.warn('html5QrCode.clear() error:', err);
+      }
       html5QrCode = null;
     }
   } catch (error) {
-    console.error('Error cleaning up scanner:', error);
+    // Jangan crash, hanya log
+    // console.error('Error cleaning up scanner:', error);
   }
 };
