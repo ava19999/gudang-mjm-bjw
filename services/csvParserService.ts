@@ -1,344 +1,128 @@
 // FILE: services/csvParserService.ts
-// Service for parsing Shopee and TikTok CSV exports
+// Service untuk parsing CSV Shopee & TikTok dengan pemisahan header yang benar
 
-import { ParsedCSVItem, ShopeeCSVRow, TikTokCSVRow } from '../types';
-
-// ============================================================================
-// SHOPEE CSV PARSER
-// ============================================================================
-
-/**
- * Parse Shopee CSV export
- */
-export const parseShopeeCSV = (csvText: string): ParsedCSVItem[] => {
-  try {
-    const lines = csvText.split('\n').filter(line => line.trim());
-    if (lines.length < 2) {
-      throw new Error('File CSV kosong atau tidak valid');
-    }
-    
-    // Parse header
-    const headers = parseCSVLine(lines[0]);
-    
-    // Parse rows
-    const items: ParsedCSVItem[] = [];
-    const seenItems = new Set<string>(); // Track duplicates
-    
-    for (let i = 1; i < lines.length; i++) {
-      const values = parseCSVLine(lines[i]);
-      if (values.length < headers.length) continue;
-      
-      const row: any = {};
-      headers.forEach((header, index) => {
-        row[header] = values[index] || '';
-      });
-      
-      // Extract data
-      const resi = row['No. Resi'] || '';
-      const orderNo = row['No. Pesanan'] || '';
-      const productName = row['Nama Produk'] || '';
-      const variation = row['Nama Variasi'] || '';
-      const sku = row['Nomor Referensi SKU'] || row['SKU Induk'] || '';
-      const quantity = parseInt(row['Jumlah']) || 1;
-      const priceAfterDiscount = parseFloat(row['Harga Setelah Diskon']?.replace(/[^\d.]/g, '') || '0');
-      const totalPrice = parseFloat(row['Total Harga Produk']?.replace(/[^\d.]/g, '') || '0');
-      const customer = row['Nama Penerima'] || row['Username (Pembeli)'] || '';
-      
-      // Skip if no resi or already processed this exact item
-      if (!resi || !productName) continue;
-      
-      // Create unique key for duplicate detection
-      const itemKey = `${resi}-${productName}-${variation}`;
-      if (seenItems.has(itemKey)) {
-        console.log(`Skipping duplicate: ${itemKey}`);
-        continue;
-      }
-      seenItems.add(itemKey);
-      
-      items.push({
-        resi,
-        customer,
-        order_id: orderNo,
-        sku,
-        product_name: productName,
-        variation,
-        quantity,
-        price: priceAfterDiscount,
-        total_price: totalPrice
-      });
-    }
-    
-    return items;
-  } catch (error: any) {
-    console.error('Error parsing Shopee CSV:', error);
-    throw new Error('Gagal memproses file Shopee CSV: ' + error.message);
-  }
+const EXCHANGE_RATES: Record<string, number> = {
+  'MYR': 3500,
+  'PHP': 280,
+  'SGD': 11500,
+  'USD': 16000,
+  'IDR': 1
 };
 
-// ============================================================================
-// TIKTOK CSV PARSER
-// ============================================================================
+// Helper: Membersihkan string currency (contoh: "RM 15.00" -> 15.00)
+const cleanCurrency = (val: string): { amount: number, rate: number } => {
+  if (!val) return { amount: 0, rate: 1 };
+  
+  const cleanStr = val.replace(/[,]/g, ''); // Hapus ribuan separator koma
+  let rate = 1;
 
-/**
- * Parse TikTok CSV export
- */
-export const parseTikTokCSV = (csvText: string): ParsedCSVItem[] => {
-  try {
-    const lines = csvText.split('\n').filter(line => line.trim());
-    if (lines.length < 2) {
-      throw new Error('File CSV kosong atau tidak valid');
-    }
-    
-    // Parse header
-    const headers = parseCSVLine(lines[0]);
-    
-    // Parse rows
-    const items: ParsedCSVItem[] = [];
-    const seenItems = new Set<string>(); // Track duplicates
-    
-    for (let i = 1; i < lines.length; i++) {
-      const values = parseCSVLine(lines[i]);
-      if (values.length < headers.length) continue;
-      
-      const row: any = {};
-      headers.forEach((header, index) => {
-        row[header] = values[index] || '';
-      });
-      
-      // Extract data
-      const resi = row['Tracking ID'] || '';
-      const orderId = row['Order ID'] || '';
-      const productName = row['Product Name'] || '';
-      const variation = row['Variation'] || '';
-      const sku = row['Seller SKU'] || row['SKU ID'] || '';
-      const quantity = parseInt(row['Quantity']) || 1;
-      const unitPrice = parseFloat(row['SKU Unit Original Price']?.replace(/[^\d.]/g, '') || '0');
-      const subtotalAfterDiscount = parseFloat(row['SKU Subtotal After Discount']?.replace(/[^\d.]/g, '') || '0');
-      const customer = row['Recipient'] || row['Buyer Username'] || '';
-      
-      // Skip if no resi or already processed this exact item
-      if (!resi || !productName) continue;
-      
-      // Create unique key for duplicate detection
-      const itemKey = `${resi}-${productName}-${variation}`;
-      if (seenItems.has(itemKey)) {
-        console.log(`Skipping duplicate: ${itemKey}`);
-        continue;
-      }
-      seenItems.add(itemKey);
-      
-      items.push({
-        resi,
-        customer,
-        order_id: orderId,
-        sku,
-        product_name: productName,
-        variation,
-        quantity,
-        price: unitPrice,
-        total_price: subtotalAfterDiscount || (unitPrice * quantity)
-      });
-    }
-    
-    return items;
-  } catch (error: any) {
-    console.error('Error parsing TikTok CSV:', error);
-    throw new Error('Gagal memproses file TikTok CSV: ' + error.message);
-  }
+  if (cleanStr.includes('RM')) rate = EXCHANGE_RATES['MYR'];
+  else if (cleanStr.includes('PHP') || cleanStr.includes('₱')) rate = EXCHANGE_RATES['PHP'];
+  else if (cleanStr.includes('SGD') || cleanStr.includes('S$')) rate = EXCHANGE_RATES['SGD'];
+  else if (cleanStr.includes('USD') || cleanStr.includes('$')) rate = EXCHANGE_RATES['USD'];
+  
+  // Ambil angka saja (support desimal titik)
+  const numStr = cleanStr.replace(/[^0-9.]/g, '');
+  const amount = parseFloat(numStr) || 0;
+  
+  return { amount, rate };
 };
 
-// ============================================================================
-// HELPER FUNCTIONS
-// ============================================================================
-
-/**
- * Parse a single CSV line handling quoted values
- */
-function parseCSVLine(line: string): string[] {
-  const result: string[] = [];
+// Helper: Parse CSV Line manually (handling quoted strings)
+const parseCSVLine = (line: string): string[] => {
+  const result = [];
   let current = '';
   let inQuotes = false;
   
   for (let i = 0; i < line.length; i++) {
     const char = line[i];
-    const nextChar = line[i + 1];
-    
     if (char === '"') {
-      if (inQuotes && nextChar === '"') {
-        // Escaped quote
-        current += '"';
-        i++; // Skip next quote
-      } else {
-        // Toggle quote state
-        inQuotes = !inQuotes;
-      }
+      inQuotes = !inQuotes;
     } else if (char === ',' && !inQuotes) {
-      // Field separator
       result.push(current.trim());
       current = '';
     } else {
       current += char;
     }
   }
-  
-  // Add last field
   result.push(current.trim());
-  
   return result;
-}
-
-/**
- * Validate CSV format
- */
-export const validateCSVFormat = (
-  csvText: string,
-  platform: 'shopee' | 'tiktok'
-): { valid: boolean; error?: string } => {
-  try {
-    const lines = csvText.split('\n').filter(line => line.trim());
-    if (lines.length < 2) {
-      return { valid: false, error: 'File CSV kosong' };
-    }
-    
-    const headers = parseCSVLine(lines[0]);
-    
-    if (platform === 'shopee') {
-      const requiredHeaders = ['No. Resi', 'Nama Produk', 'Jumlah'];
-      const hasRequired = requiredHeaders.every(h => 
-        headers.some(header => header.includes(h))
-      );
-      
-      if (!hasRequired) {
-        return { 
-          valid: false, 
-          error: 'Format Shopee CSV tidak valid. Pastikan file export dari Shopee.' 
-        };
-      }
-    } else if (platform === 'tiktok') {
-      const requiredHeaders = ['Tracking ID', 'Product Name', 'Quantity'];
-      const hasRequired = requiredHeaders.every(h => 
-        headers.some(header => header.includes(h))
-      );
-      
-      if (!hasRequired) {
-        return { 
-          valid: false, 
-          error: 'Format TikTok CSV tidak valid. Pastikan file export dari TikTok.' 
-        };
-      }
-    }
-    
-    return { valid: true };
-  } catch (error: any) {
-    return { 
-      valid: false, 
-      error: 'Gagal membaca file CSV: ' + error.message 
-    };
-  }
 };
 
-/**
- * Group parsed items by receipt number
- */
-export const groupItemsByResi = (items: ParsedCSVItem[]): Map<string, ParsedCSVItem[]> => {
-  const grouped = new Map<string, ParsedCSVItem[]>();
+export const detectCSVPlatform = (text: string): 'shopee' | 'tiktok' | 'unknown' => {
+  if (text.includes('No. Resi') && text.includes('Username (Pembeli)')) return 'shopee';
+  if (text.includes('Tracking ID') && text.includes('Seller SKU')) return 'tiktok';
+  return 'unknown';
+};
+
+export const parseShopeeCSV = (text: string) => {
+  const lines = text.split('\n').filter(l => l.trim() !== '');
+  // Cari baris header (kadang baris pertama bukan header di Shopee report)
+  const headerIdx = lines.findIndex(l => l.includes('No. Resi'));
+  if (headerIdx === -1) return [];
+
+  const headers = parseCSVLine(lines[headerIdx]);
+  const dataRows = lines.slice(headerIdx + 1);
   
-  items.forEach(item => {
-    const existing = grouped.get(item.resi) || [];
-    existing.push(item);
-    grouped.set(item.resi, existing);
-  });
+  // Map index kolom
+  const idxResi = headers.findIndex(h => h.includes('No. Resi'));
+  const idxOrder = headers.findIndex(h => h.includes('No. Pesanan'));
+  const idxUser = headers.findIndex(h => h.includes('Username (Pembeli)'));
+  const idxSKU = headers.findIndex(h => h.includes('Nomor Referensi SKU'));
+  const idxNama = headers.findIndex(h => h.includes('Nama Variasi')); // atau Nama Produk
+  const idxQty = headers.findIndex(h => h.includes('Jumlah'));
+  const idxTotal = headers.findIndex(h => h.includes('Total Harga Produk')); // Atau Harga Setelah Diskon
   
-  return grouped;
-};
+  return dataRows.map(line => {
+    const cols = parseCSVLine(line);
+    if (cols.length < headers.length) return null;
 
-/**
- * Get unique customers from parsed items
- */
-export const getUniqueCustomers = (items: ParsedCSVItem[]): string[] => {
-  const customers = new Set<string>();
-  items.forEach(item => {
-    if (item.customer) {
-      customers.add(item.customer);
-    }
-  });
-  return Array.from(customers).sort();
-};
+    const { amount, rate } = cleanCurrency(cols[idxTotal]);
+    const totalPriceIDR = amount * rate;
 
-/**
- * Filter items by receipt number
- */
-export const filterItemsByResi = (
-  items: ParsedCSVItem[],
-  resiNumbers: string[]
-): ParsedCSVItem[] => {
-  const resiSet = new Set(resiNumbers.map(r => r.trim()));
-  return items.filter(item => resiSet.has(item.resi));
-};
-
-/**
- * Convert file to text
- */
-export const readFileAsText = (file: File): Promise<string> => {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    
-    reader.onload = (e) => {
-      const text = e.target?.result as string;
-      resolve(text);
+    return {
+      resi: cols[idxResi]?.replace(/["']/g, ''),
+      order_id: cols[idxOrder]?.replace(/["']/g, ''),
+      customer: cols[idxUser]?.replace(/["']/g, ''),
+      part_number: cols[idxSKU]?.replace(/["']/g, ''),
+      product_name: cols[idxNama] || 'Produk Shopee',
+      quantity: parseInt(cols[idxQty]) || 1,
+      total_price: totalPriceIDR,
+      original_currency_val: cols[idxTotal]
     };
+  }).filter(Boolean); // Hapus null rows
+};
+
+export const parseTikTokCSV = (text: string) => {
+  const lines = text.split('\n').filter(l => l.trim() !== '');
+  const headerIdx = lines.findIndex(l => l.includes('Tracking ID'));
+  if (headerIdx === -1) return [];
+
+  const headers = parseCSVLine(lines[headerIdx]);
+  const dataRows = lines.slice(headerIdx + 1);
+
+  const idxResi = headers.findIndex(h => h.includes('Tracking ID'));
+  const idxOrder = headers.findIndex(h => h.includes('Order ID'));
+  const idxUser = headers.findIndex(h => h.includes('Buyer Username'));
+  const idxSKU = headers.findIndex(h => h.includes('Seller SKU'));
+  const idxQty = headers.findIndex(h => h.includes('Quantity'));
+  const idxTotal = headers.findIndex(h => h.includes('SKU Subtotal After Discount'));
+
+  return dataRows.map(line => {
+    const cols = parseCSVLine(line);
+    if (cols.length < headers.length) return null;
+
+    const { amount, rate } = cleanCurrency(cols[idxTotal]);
     
-    reader.onerror = (e) => {
-      reject(new Error('Gagal membaca file'));
+    return {
+      resi: cols[idxResi]?.replace(/["']/g, ''),
+      order_id: cols[idxOrder]?.replace(/["']/g, ''),
+      customer: cols[idxUser]?.replace(/["']/g, ''),
+      part_number: cols[idxSKU]?.replace(/["']/g, ''),
+      product_name: 'Produk TikTok', // TikTok CSV kadang nama produknya jauh
+      quantity: parseInt(cols[idxQty]) || 1,
+      total_price: amount * rate,
+      original_currency_val: cols[idxTotal]
     };
-    
-    reader.readAsText(file, 'UTF-8');
-  });
-};
-
-/**
- * Auto-detect CSV platform from headers
- */
-export const detectCSVPlatform = (csvText: string): 'shopee' | 'tiktok' | 'unknown' => {
-  try {
-    const lines = csvText.split('\n').filter(line => line.trim());
-    if (lines.length < 1) return 'unknown';
-    
-    const headers = parseCSVLine(lines[0]).map(h => h.toLowerCase());
-    
-    // Check for Shopee-specific headers
-    if (headers.some(h => h.includes('no. pesanan')) || 
-        headers.some(h => h.includes('username (pembeli)'))) {
-      return 'shopee';
-    }
-    
-    // Check for TikTok-specific headers
-    if (headers.some(h => h.includes('order id')) && 
-        headers.some(h => h.includes('tracking id'))) {
-      return 'tiktok';
-    }
-    
-    return 'unknown';
-  } catch (error) {
-    return 'unknown';
-  }
-};
-
-/**
- * Calculate summary statistics from parsed items
- */
-export const calculateSummary = (items: ParsedCSVItem[]) => {
-  const uniqueResi = new Set(items.map(i => i.resi)).size;
-  const uniqueCustomers = new Set(items.map(i => i.customer)).size;
-  const totalItems = items.length;
-  const totalQuantity = items.reduce((sum, item) => sum + item.quantity, 0);
-  const totalValue = items.reduce((sum, item) => sum + item.total_price, 0);
-  
-  return {
-    uniqueResi,
-    uniqueCustomers,
-    totalItems,
-    totalQuantity,
-    totalValue
-  };
+  }).filter(Boolean);
 };
