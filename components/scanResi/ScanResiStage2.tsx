@@ -76,6 +76,7 @@ export const ScanResiStage2: React.FC<ScanResiStage2Props> = ({ onRefresh }) => 
   const [showAllStage1, setShowAllStage1] = useState(true); // default true: tampilkan semua resi stage 1
   const [loading, setLoading] = useState(false);
   const [cameraActive, setCameraActive] = useState(false);
+  const [cameraInitialized, setCameraInitialized] = useState(false); // true jika kamera benar-benar berhasil start
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [searchEcommerce, setSearchEcommerce] = useState('');
@@ -118,11 +119,15 @@ export const ScanResiStage2: React.FC<ScanResiStage2Props> = ({ onRefresh }) => 
     };
     load();
     return () => {
-      cleanupScanner();
+      // Hanya cleanup jika kamera benar-benar berhasil start
+      if (cameraInitialized) {
+        cleanupScanner();
+      }
       if (scanCooldownRef.current) {
         clearTimeout(scanCooldownRef.current);
       }
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedStore, showAllStage1]);
   
   const loadPendingList = async () => {
@@ -189,12 +194,15 @@ export const ScanResiStage2: React.FC<ScanResiStage2Props> = ({ onRefresh }) => 
   
   const startCamera = async () => {
     setCameraError(null);
+    setCameraInitialized(false);
     try {
       // Request permission first
       const permission = await requestCameraPermission();
       if (!permission.success) {
         setCameraError(permission.message);
         showToast(permission.message, 'error');
+        setCameraActive(false);
+        setCameraInitialized(false);
         return;
       }
       // Initialize camera
@@ -210,19 +218,27 @@ export const ScanResiStage2: React.FC<ScanResiStage2Props> = ({ onRefresh }) => 
       );
       if (result.success) {
         setCameraActive(true);
+        setCameraInitialized(true);
         showToast('Kamera aktif - Arahkan ke barcode', 'success');
       } else {
         setCameraError(result.message);
+        setCameraActive(false);
+        setCameraInitialized(false);
         showToast(result.message, 'error');
       }
     } catch (err: any) {
       setCameraError(err?.message || 'Terjadi error saat mengaktifkan kamera.');
+      setCameraActive(false);
+      setCameraInitialized(false);
       showToast(err?.message || 'Terjadi error saat mengaktifkan kamera.', 'error');
     }
   };
   
   const stopCameraScanning = async () => {
-    await stopCamera();
+    if (cameraInitialized) {
+      await stopCamera();
+      setCameraInitialized(false);
+    }
     setCameraActive(false);
     setScanningEnabled(true);
     setLastScannedResi(null);
