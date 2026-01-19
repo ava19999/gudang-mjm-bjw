@@ -60,6 +60,7 @@ const Toast = ({ message, type, onClose }: any) => (
   </div>
 );
 
+
 export const ScanResiStage2: React.FC<ScanResiStage2Props> = ({ onRefresh }) => {
   const { selectedStore, userName } = useStore();
   const [pendingList, setPendingList] = useState<ResiScanStage[]>([]);
@@ -68,6 +69,7 @@ export const ScanResiStage2: React.FC<ScanResiStage2Props> = ({ onRefresh }) => 
   const [cameraActive, setCameraActive] = useState(false);
   const [cameraInitialized, setCameraInitialized] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
+  const [dataError, setDataError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [searchEcommerce, setSearchEcommerce] = useState('');
   const [searchToko, setSearchToko] = useState('');
@@ -108,9 +110,10 @@ export const ScanResiStage2: React.FC<ScanResiStage2Props> = ({ onRefresh }) => 
         } else {
           data = await getPendingStage2List(selectedStore);
         }
-        if (mounted) setPendingList(data);
+        if (mounted) setPendingList(Array.isArray(data) ? data : []);
+        setDataError(null);
       } catch (e: any) {
-        setCameraError('Gagal memuat data resi.');
+        setDataError('Gagal memuat data resi. Silakan refresh halaman.');
       }
       setLoading(false);
     };
@@ -255,277 +258,24 @@ export const ScanResiStage2: React.FC<ScanResiStage2Props> = ({ onRefresh }) => 
     }
   };
   
+  // Fallback UI jika error data
+  if (dataError) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-gray-900 text-gray-100 p-4">
+        <div className="max-w-lg w-full bg-gray-800 rounded-xl p-8 shadow-lg border border-gray-700 flex flex-col items-center">
+          <AlertCircle size={48} className="text-red-500 mb-4" />
+          <h2 className="text-xl font-bold mb-2">Gagal memuat data</h2>
+          <p className="text-gray-300 mb-4">{dataError}</p>
+          <button onClick={() => window.location.reload()} className="px-6 py-3 bg-blue-600 hover:bg-blue-700 rounded-lg font-semibold">Refresh Halaman</button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gray-900 text-gray-100 p-4 md:p-6">
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
-      
-      {/* Header */}
-      <div className="mb-6">
-        <div className="flex items-center justify-between mb-2">
-          <div className="flex items-center gap-3">
-            <div className="p-3 bg-blue-600 rounded-xl">
-              <Camera size={24} />
-            </div>
-            <div>
-              <h1 className="text-2xl font-bold">Stage 2: Packing Verification</h1>
-              <p className="text-sm text-gray-400">Scan resi dengan kamera untuk verifikasi</p>
-            </div>
-          </div>
-          <button
-            onClick={loadPendingList}
-            className="flex items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg transition-colors"
-            disabled={loading}
-          >
-            <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
-            Refresh
-          </button>
-        </div>
-      </div>
-      
-      {/* Camera Scanner + Input Manual */}
-      <div className="bg-gray-800 rounded-xl p-6 mb-6 shadow-lg border border-gray-700">
-        {/* Input Manual Resi */}
-        <form onSubmit={handleManualSubmit} className="flex flex-col md:flex-row gap-2 mb-4">
-          <input
-            type="text"
-            value={manualResi}
-            onChange={e => setManualResi(e.target.value)}
-            placeholder="Input manual nomor resi..."
-            className="flex-1 px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-lg font-mono"
-            autoComplete="off"
-          />
-          <button
-            type="submit"
-            className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors text-lg flex items-center gap-2 disabled:bg-gray-700 disabled:cursor-not-allowed"
-            disabled={loading || !manualResi.trim()}
-          >
-            <Check size={20} />
-            Verifikasi
-          </button>
-        </form>
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold flex items-center gap-2">
-            <Camera size={20} />
-            Scanner Kamera
-          </h2>
-          {cameraActive ? (
-            <button
-              onClick={stopCameraScanning}
-              className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 rounded-lg transition-colors"
-            >
-              <CameraOff size={16} />
-              Matikan Kamera
-            </button>
-          ) : (
-            <button
-              onClick={startCamera}
-              className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 rounded-lg transition-colors"
-            >
-              <Camera size={16} />
-              Aktifkan Kamera
-            </button>
-          )}
-        </div>
-        
-
-        {/* Scanner Region with direct error display */}
-        <div className="relative">
-          <div
-            id="scanner-region"
-            ref={scannerRef}
-            className={`w-full rounded-lg overflow-hidden ${cameraActive ? 'bg-black' : 'bg-gray-700'}`}
-            style={{ minHeight: '300px' }}
-          >
-            {!cameraActive && !cameraError && (
-              <div className="flex flex-col items-center justify-center h-full py-16">
-                <Camera size={64} className="text-gray-500 mb-4" />
-                <p className="text-gray-400 text-center">
-                  Klik "Aktifkan Kamera" untuk mulai scanning
-                </p>
-              </div>
-            )}
-            <CameraError error={cameraError} />
-          </div>
-          {/* Scanning Status Indicator */}
-          {cameraActive && !cameraError && (
-            <div className="absolute top-4 right-4 px-3 py-2 bg-green-600 rounded-lg flex items-center gap-2 text-sm font-semibold shadow-lg">
-              <div className="w-2 h-2 bg-white rounded-full animate-pulse"></div>
-              Scanning Active
-            </div>
-          )}
-          {/* Last Scanned Indicator */}
-          {lastScannedResi && (
-            <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 px-4 py-2 bg-blue-600 rounded-lg text-sm font-semibold shadow-lg">
-              Scanned: {lastScannedResi}
-            </div>
-          )}
-        </div>
-        
-        {/* Instructions */}
-        <div className="mt-4 p-4 bg-gray-700/50 rounded-lg">
-          <h3 className="text-sm font-semibold mb-2 flex items-center gap-2">
-            <AlertCircle size={16} />
-            Petunjuk Penggunaan:
-          </h3>
-          <ul className="text-sm text-gray-300 space-y-1 ml-6 list-disc">
-            <li>Pastikan izin kamera sudah diberikan</li>
-            <li>Arahkan kamera ke barcode/QR code pada resi</li>
-            <li>Pastikan barcode terlihat jelas dalam frame</li>
-            <li>System akan otomatis memverifikasi resi yang terdeteksi</li>
-          </ul>
-        </div>
-      </div>
-      
-      {/* Pending List */}
-      <div className="bg-gray-800 rounded-xl shadow-lg border border-gray-700">
-        <div className="p-6 border-b border-gray-700">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold flex items-center gap-2">
-              <Package size={20} />
-              Menunggu Verifikasi
-            </h2>
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-gray-400 mb-1">Total:</span>
-              <span className="px-3 py-1 bg-yellow-600 rounded-full text-sm font-semibold">
-                {filteredList.length}
-              </span>
-            </div>
-          </div>
-          {/* Filter Bar Responsive */}
-          <div className="flex flex-col md:flex-row gap-2 mb-2">
-            <div className="relative flex-1">
-              <Search size={18} className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
-              <input
-                type="text"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="Cari resi, e-commerce, atau toko..."
-                className="w-full pl-10 pr-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              />
-            </div>
-            <input
-              type="text"
-              list="ecommerce-filter-list"
-              value={searchEcommerce}
-              onChange={e => setSearchEcommerce(e.target.value)}
-              placeholder="Filter E-commerce"
-              className="px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent min-w-[120px]"
-            />
-            <datalist id="ecommerce-filter-list">
-              {ecommerceOptions.map(opt => (
-                <option key={opt} value={opt} />
-              ))}
-            </datalist>
-            <input
-              type="text"
-              list="toko-filter-list"
-              value={searchToko}
-              onChange={e => setSearchToko(e.target.value)}
-              placeholder="Filter Toko"
-              className="px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent min-w-[120px]"
-            />
-            <datalist id="toko-filter-list">
-              {tokoOptions.map(opt => (
-                <option key={opt} value={opt} />
-              ))}
-            </datalist>
-            <select
-              value={statusFilter}
-              onChange={e => setStatusFilter(e.target.value)}
-              className="px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent min-w-[120px]"
-            >
-              <option value="pending">Pending</option>
-              <option value="stage2">Stage 2 (Checked)</option>
-              <option value="all">All</option>
-            </select>
-          </div>
-        </div>
-        
-        {/* Notifikasi Jumlah Pending */}
-        <div className="mb-2">
-          <div className="inline-block px-4 py-2 bg-yellow-600 text-white rounded-lg font-semibold text-sm">
-            Pending: {pendingCount} resi
-          </div>
-        </div>
-        
-        {/* Table */}
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-gray-700">
-              <tr>
-                <th className="px-4 py-3 text-left text-sm font-semibold">Tanggal Scan</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold">Resi</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold">E-commerce</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold">Toko</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold">Di-scan oleh</th>
-                <th className="px-4 py-3 text-center text-sm font-semibold">Status</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-700">
-              {loading && pendingList.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-gray-400">
-                    <RefreshCw size={24} className="animate-spin mx-auto mb-2" />
-                    Memuat data...
-                  </td>
-                </tr>
-              ) : filteredList.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-gray-400">
-                    <CheckCircle size={48} className="mx-auto mb-2 text-green-600" />
-                    <p className="text-lg font-semibold">Semua resi sudah diverifikasi!</p>
-                    <p className="text-sm">Tidak ada resi yang menunggu verifikasi</p>
-                  </td>
-                </tr>
-              ) : (
-                filteredList.map((resi) => (
-                  <tr key={resi.id} className="hover:bg-gray-700/50 transition-colors">
-                    <td className="px-4 py-3 text-sm">
-                      {new Date(resi.stage1_scanned_at || resi.created_at).toLocaleDateString('id-ID', {
-                        day: '2-digit',
-                        month: 'short',
-                        year: 'numeric',
-                        hour: '2-digit',
-                        minute: '2-digit'
-                      })}
-                    </td>
-                    <td className="px-4 py-3 text-sm font-mono font-semibold text-blue-400">
-                      {resi.resi}
-                    </td>
-                    <td className="px-4 py-3 text-sm">
-                      <span className={`px-2 py-1 ${getEcommerceBadgeColor(resi.ecommerce)} rounded text-xs font-semibold`}>
-                        {resi.ecommerce}
-                        {resi.negara_ekspor && ` - ${resi.negara_ekspor}`}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-sm">
-                      <span className="px-2 py-1 bg-blue-600/20 text-blue-400 rounded text-xs font-semibold">
-                        {resi.sub_toko}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-sm text-gray-400">
-                      {resi.stage1_scanned_by || '-'}
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      {resi.stage2_verified ? (
-                        <span className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-blue-600 text-white rounded-full">
-                          <CheckCircle size={12} />
-                          Stage 2
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-yellow-600 text-white rounded-full">
-                          <AlertCircle size={12} />
-                          Pending
-                        </span>
-                      )}
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      {/* ...existing code... */}
     </div>
   );
 };
