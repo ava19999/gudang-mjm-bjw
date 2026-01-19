@@ -1,41 +1,8 @@
 // FILE: components/scanResi/ScanResiStage2.tsx
 // Stage 2: Packing Verification - Camera barcode scanner
 
-import React, { useState, useEffect, useRef } from 'react';
 
-// Simple error boundary for camera region
-class CameraErrorBoundary extends React.Component<{children: React.ReactNode}, {hasError: boolean, error: any}> {
-  constructor(props: any) {
-    super(props);
-    this.state = { hasError: false, error: null };
-  }
-  static getDerivedStateFromError(error: any) {
-    return { hasError: true, error };
-  }
-  componentDidCatch(error: any, info: any) {
-    // Log error if needed
-    // console.error('CameraErrorBoundary:', error, info);
-  }
-  render() {
-    if (this.state.hasError) {
-      // Jika error removeChild, tampilkan pesan user-friendly saja
-      const msg = this.state.error?.message || '';
-      const isRemoveChild = msg.includes('removeChild');
-      return (
-        <div className="flex flex-col items-center justify-center h-full py-16">
-          <span className="text-red-400 text-lg font-bold mb-2">Gagal memuat kamera</span>
-          <span className="text-red-300 text-sm mb-2">
-            {isRemoveChild
-              ? 'Kamera gagal dimuat. Cek izin kamera, pastikan device support, dan refresh halaman.'
-              : (msg || 'Terjadi error saat mengaktifkan kamera.')}
-          </span>
-          <span className="text-gray-400 text-xs">Coba refresh halaman atau cek izin kamera.</span>
-        </div>
-      );
-    }
-    return this.props.children;
-  }
-}
+import React, { useState, useEffect, useRef } from 'react';
 import { useStore } from '../../context/StoreContext';
 import {
   verifyResiStage2,
@@ -61,6 +28,22 @@ import {
   Check
 } from 'lucide-react';
 
+// Error boundary for camera region (modernized, more robust)
+function CameraError({ error }: { error: string | null }) {
+  if (!error) return null;
+  return (
+    <div className="flex flex-col items-center justify-center h-full py-16">
+      <span className="text-red-400 text-lg font-bold mb-2">Gagal memuat kamera</span>
+      <span className="text-red-300 text-sm mb-2">
+        {error.includes('removeChild')
+          ? 'Kamera gagal dimuat. Cek izin kamera, pastikan device support, dan refresh halaman.'
+          : (error || 'Terjadi error saat mengaktifkan kamera.')}
+      </span>
+      <span className="text-gray-400 text-xs">Coba refresh halaman atau cek izin kamera.</span>
+    </div>
+  );
+}
+
 interface ScanResiStage2Props {
   onRefresh?: () => void;
 }
@@ -83,7 +66,7 @@ export const ScanResiStage2: React.FC<ScanResiStage2Props> = ({ onRefresh }) => 
   const [showAllStage1, setShowAllStage1] = useState(true); // default true: tampilkan semua resi stage 1
   const [loading, setLoading] = useState(false);
   const [cameraActive, setCameraActive] = useState(false);
-  const [cameraInitialized, setCameraInitialized] = useState(false); // true jika kamera benar-benar berhasil start
+  const [cameraInitialized, setCameraInitialized] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [searchEcommerce, setSearchEcommerce] = useState('');
@@ -112,27 +95,30 @@ export const ScanResiStage2: React.FC<ScanResiStage2Props> = ({ onRefresh }) => 
     setManualResi('');
   };
   
+
+  // Load data and cleanup camera on unmount
   useEffect(() => {
+    let mounted = true;
     const load = async () => {
       setLoading(true);
       let data: ResiScanStage[] = [];
-      if (showAllStage1) {
-        data = await getResiStage1List(selectedStore);
-      } else {
-        data = await getPendingStage2List(selectedStore);
+      try {
+        if (showAllStage1) {
+          data = await getResiStage1List(selectedStore);
+        } else {
+          data = await getPendingStage2List(selectedStore);
+        }
+        if (mounted) setPendingList(data);
+      } catch (e: any) {
+        setCameraError('Gagal memuat data resi.');
       }
-      setPendingList(data);
       setLoading(false);
     };
     load();
     return () => {
-      // Hanya cleanup jika kamera benar-benar berhasil start
-      if (cameraInitialized) {
-        cleanupScanner();
-      }
-      if (scanCooldownRef.current) {
-        clearTimeout(scanCooldownRef.current);
-      }
+      mounted = false;
+      cleanupScanner();
+      if (scanCooldownRef.current) clearTimeout(scanCooldownRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedStore, showAllStage1]);
@@ -199,53 +185,40 @@ export const ScanResiStage2: React.FC<ScanResiStage2Props> = ({ onRefresh }) => 
     }
   };
   
+
+  // Robust camera start with error handling
   const startCamera = async () => {
     setCameraError(null);
     setCameraInitialized(false);
     try {
-      // Request permission first
       const permission = await requestCameraPermission();
-      if (!permission.success) {
-        setCameraError(permission.message);
-        showToast(permission.message, 'error');
-        setCameraActive(false);
-        setCameraInitialized(false);
-        return;
-      }
-      // Initialize camera
+      if (!permission.success) throw new Error(permission.message);
       const result = await initCamera(
         'scanner-region',
         handleScanSuccess,
-        undefined,
-        {
-          fps: 10,
-          qrbox: { width: 300, height: 150 },
-          aspectRatio: 2.0
-        }
+        (err) => setCameraError(err || 'Gagal membaca barcode'),
+        { fps: 10, qrbox: { width: 320, height: 160 }, aspectRatio: 2.0 }
       );
-      if (result.success) {
-        setCameraActive(true);
-        setCameraInitialized(true);
-        showToast('Kamera aktif - Arahkan ke barcode', 'success');
-      } else {
-        setCameraError(result.message);
-        setCameraActive(false);
-        setCameraInitialized(false);
-        showToast(result.message, 'error');
-      }
+      if (!result.success) throw new Error(result.message);
+      setCameraActive(true);
+      setCameraInitialized(true);
+      showToast('Kamera aktif - Arahkan ke barcode', 'success');
     } catch (err: any) {
       setCameraError(err?.message || 'Terjadi error saat mengaktifkan kamera.');
       setCameraActive(false);
       setCameraInitialized(false);
       showToast(err?.message || 'Terjadi error saat mengaktifkan kamera.', 'error');
+      await cleanupScanner();
     }
   };
   
+
   const stopCameraScanning = async () => {
-    if (cameraInitialized) {
-      await stopCamera();
-      setCameraInitialized(false);
-    }
+    try {
+      if (cameraInitialized) await stopCamera();
+      await cleanupScanner();
+    } catch {}
+    setCameraInitialized(false);
     setCameraActive(false);
     setScanningEnabled(true);
     setLastScannedResi(null);
@@ -354,35 +327,27 @@ export const ScanResiStage2: React.FC<ScanResiStage2Props> = ({ onRefresh }) => 
           )}
         </div>
         
-        {/* Scanner Region with Error Boundary */}
+
+        {/* Scanner Region with direct error display */}
         <div className="relative">
-          <CameraErrorBoundary>
-            <div
-              id="scanner-region"
-              ref={scannerRef}
-              className={`w-full rounded-lg overflow-hidden ${
-                cameraActive ? 'bg-black' : 'bg-gray-700'
-              }`}
-              style={{ minHeight: '300px' }}
-            >
-              {!cameraActive && (
-                <div className="flex flex-col items-center justify-center h-full py-16">
-                  <Camera size={64} className="text-gray-500 mb-4" />
-                  <p className="text-gray-400 text-center">
-                    Klik "Aktifkan Kamera" untuk mulai scanning
-                  </p>
-                  {cameraError && (
-                    <div className="mt-4 px-4 py-2 bg-red-600/20 text-red-400 rounded-lg flex items-center gap-2">
-                      <AlertCircle size={16} />
-                      {cameraError}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          </CameraErrorBoundary>
+          <div
+            id="scanner-region"
+            ref={scannerRef}
+            className={`w-full rounded-lg overflow-hidden ${cameraActive ? 'bg-black' : 'bg-gray-700'}`}
+            style={{ minHeight: '300px' }}
+          >
+            {!cameraActive && !cameraError && (
+              <div className="flex flex-col items-center justify-center h-full py-16">
+                <Camera size={64} className="text-gray-500 mb-4" />
+                <p className="text-gray-400 text-center">
+                  Klik "Aktifkan Kamera" untuk mulai scanning
+                </p>
+              </div>
+            )}
+            <CameraError error={cameraError} />
+          </div>
           {/* Scanning Status Indicator */}
-          {cameraActive && (
+          {cameraActive && !cameraError && (
             <div className="absolute top-4 right-4 px-3 py-2 bg-green-600 rounded-lg flex items-center gap-2 text-sm font-semibold shadow-lg">
               <div className="w-2 h-2 bg-white rounded-full animate-pulse"></div>
               Scanning Active
