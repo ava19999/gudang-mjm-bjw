@@ -1,5 +1,6 @@
 // FILE: components/scanResi/ScanResiStage2.tsx
 // Stage 2: Packing Verification - Camera barcode scanner
+// Updated: With Audio Feedback (Success & Error/Double) + Blank Page Fix
 
 import React, { useState, useEffect, useRef } from 'react';
 import { useStore } from '../../context/StoreContext';
@@ -26,6 +27,13 @@ import {
   X,
   Check
 } from 'lucide-react';
+
+// --- AUDIO ASSETS (Base64) ---
+// Nada 'Ting' (Sukses)
+const AUDIO_SUCCESS = 'data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBSuBzvLZiTYIG2m98OmfTgwOUKnk875qHgU7k9X0y3ksBS2Ax/DagjEIF2Kz6OyrUQ8IRp/g8r5sIAUsgs/y2Yg2CBxqvfDpn04MDlCq5PS+aiEGPJLU9Mt5LAUugcbw2oM';
+
+// Nada 'Buzz/Low' (Error/Double)
+const AUDIO_ERROR = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAgD4AAIA+AAABAAgAZGF0YQAAAAAAAACAgICAgICAgICAgICAgICAgICAgICAgICAf3hxeHCAgIB/cnVygICAf3J1coCAgH9ydXKAgIB/cnVygICAf3J1coCAgH9ydXKAgIB/cnVygICAf3J1coCAgH9ydXKAgIB/cnVygICAf3J1coCAgH9ydXKAgIB/cnVygICAf3J1coCAgH9ydXKAgIB/cnVygICAgIA=';
 
 // Error boundary for camera region
 function CameraError({ error }: { error: string | null }) {
@@ -89,10 +97,23 @@ export const ScanResiStage2: React.FC<ScanResiStage2Props> = ({ onRefresh }) => 
     setTimeout(() => setToast(null), 3000);
   };
 
+  // -- HELPER: Play Sound --
+  const playSound = (type: 'success' | 'error') => {
+    try {
+      const audioSource = type === 'success' ? AUDIO_SUCCESS : AUDIO_ERROR;
+      const audio = new Audio(audioSource);
+      audio.volume = 1.0;
+      audio.play().catch(e => console.error("Audio playback failed", e));
+    } catch (e) {
+      console.error("Audio error", e);
+    }
+  };
+
   const handleManualSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!manualResi.trim()) {
       showToast('Nomor resi tidak boleh kosong!', 'error');
+      playSound('error');
       return;
     }
     await verifyResi(manualResi.trim());
@@ -132,25 +153,36 @@ export const ScanResiStage2: React.FC<ScanResiStage2Props> = ({ onRefresh }) => 
   };
   
   const handleScanSuccess = async (decodedText: string) => {
-    if (!scanningEnabled || decodedText === lastScannedResi) {
+    // 1. Jika masih cooldown, abaikan
+    if (!scanningEnabled) return;
+
+    // 2. CEK DOUBLE SCAN
+    if (decodedText === lastScannedResi) {
+      // Play sound Error/Double
+      playSound('error'); 
+      showToast('Resi sudah discan barusan (Double)!', 'warning');
       return;
     }
     
+    // 3. Scan Baru yang Valid
     setLastScannedResi(decodedText);
     setScanningEnabled(false);
     
-    // Audio feedback
-    const beep = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBSuBzvLZiTYIG2m98OmfTgwOUKnk875qHgU7k9X0y3ksBS2Ax/DagjEIF2Kz6OyrUQ8IRp/g8r5sIAUsgs/y2Yg2CBxqvfDpn04MDlCq5PS+aiEGPJLU9Mt5LAUugcbw2oM');
-    beep.play().catch(() => {});
+    // Play sound Success (Tanda kamera menangkap gambar)
+    playSound('success');
     
+    // Proses verifikasi ke database
     await verifyResi(decodedText);
     
+    // Cooldown sebelum bisa scan lagi (2 detik)
     if (scanCooldownRef.current) {
       clearTimeout(scanCooldownRef.current);
     }
     scanCooldownRef.current = setTimeout(() => {
       setScanningEnabled(true);
-      setLastScannedResi(null);
+      // Optional: Reset lastScannedResi setelah beberapa detik 
+      // agar bisa discan ulang jika memang perlu (misal setelah 5 detik)
+      // setLastScannedResi(null); 
     }, 2000);
   };
   
@@ -162,21 +194,25 @@ export const ScanResiStage2: React.FC<ScanResiStage2Props> = ({ onRefresh }) => 
       },
       selectedStore
     );
+
     if (result.success) {
+      // Jika verifikasi sukses (Status OK)
       showToast(`✓ ${resiNumber} terverifikasi!`, 'success');
+      // Kita sudah play sound 'success' di handleScanSuccess, jadi cukup di sana saja.
+      
       setLoading(true);
       let data: ResiScanStage[] = [];
       if (statusFilter === 'pending') {
         data = await getPendingStage2List(selectedStore);
-      } else if (statusFilter === 'stage2' || statusFilter === 'all') {
-        data = await getResiStage1List(selectedStore);
       } else {
-        data = await getPendingStage2List(selectedStore);
+        data = await getResiStage1List(selectedStore);
       }
       setPendingList(data);
       setLoading(false);
       if (onRefresh) onRefresh();
     } else {
+      // Jika verifikasi GAGAL (Resi tidak ada / Salah Store / Error Server)
+      playSound('error'); // Play sound error lagi untuk penekanan
       showToast(result.message, 'error');
     }
   };
@@ -185,7 +221,6 @@ export const ScanResiStage2: React.FC<ScanResiStage2Props> = ({ onRefresh }) => 
     setCameraError(null);
     setCameraInitialized(false);
     
-    // Pastikan element scanner ada sebelum init
     const scannerElement = document.getElementById('scanner-region');
     if (!scannerElement) {
       setCameraError('Komponen scanner belum siap. Silakan coba lagi.');
@@ -200,11 +235,7 @@ export const ScanResiStage2: React.FC<ScanResiStage2Props> = ({ onRefresh }) => 
         'scanner-region',
         handleScanSuccess,
         (err) => {
-           // Filter error umum scanning agar tidak spam UI
-           // Hanya tampilkan jika benar-benar error fatal, bukan sekedar 'gagal decode frame ini'
-           if (typeof err === 'string' && !err.includes("No MultiFormat Readers")) {
-             // Opsional: setCameraError(err);
-           }
+           // Ignore frame errors
         },
         { fps: 10, qrbox: { width: 320, height: 160 }, aspectRatio: 2.0 }
       );
@@ -334,18 +365,15 @@ export const ScanResiStage2: React.FC<ScanResiStage2Props> = ({ onRefresh }) => 
           )}
         </div>
         
-        {/* FIX: Struktur Scanner yang Aman dari Konflik DOM */}
+        {/* SAFE SCANNER REGION */}
         <div className="relative bg-gray-900 rounded-lg overflow-hidden" style={{ minHeight: '300px' }}>
           
-          {/* 1. Container Khusus Scanner - JANGAN ISI CHILDREN REACT DI SINI */}
-          {/* Biarkan kosong agar library html5-qrcode mengisinya sendiri */}
           <div 
             id="scanner-region" 
             ref={scannerRef}
             className="w-full h-full"
           />
 
-          {/* 2. Overlay Placeholder (Tampil saat kamera mati dan tidak error) */}
           {!cameraActive && !cameraError && (
             <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-gray-800">
               <Camera size={64} className="text-gray-600 mb-4" />
@@ -358,14 +386,12 @@ export const ScanResiStage2: React.FC<ScanResiStage2Props> = ({ onRefresh }) => 
             </div>
           )}
 
-          {/* 3. Overlay Error (Tampil jika ada error) */}
           {cameraError && (
             <div className="absolute inset-0 z-20 bg-gray-800">
                <CameraError error={cameraError} />
             </div>
           )}
 
-          {/* 4. Overlay Status Scanning (Tampil saat kamera aktif) */}
           {cameraActive && !cameraError && (
             <div className="absolute top-4 right-4 z-30 px-3 py-2 bg-green-600 rounded-lg flex items-center gap-2 text-sm font-semibold shadow-lg">
               <div className="w-2 h-2 bg-white rounded-full animate-pulse"></div>
@@ -373,7 +399,6 @@ export const ScanResiStage2: React.FC<ScanResiStage2Props> = ({ onRefresh }) => 
             </div>
           )}
 
-          {/* 5. Overlay Last Scanned */}
           {lastScannedResi && (
             <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 z-30 px-4 py-2 bg-blue-600 rounded-lg text-sm font-semibold shadow-lg">
               Scanned: {lastScannedResi}
@@ -381,7 +406,6 @@ export const ScanResiStage2: React.FC<ScanResiStage2Props> = ({ onRefresh }) => 
           )}
         </div>
         
-        {/* Instructions */}
         <div className="mt-4 p-4 bg-gray-700/50 rounded-lg">
           <h3 className="text-sm font-semibold mb-2 flex items-center gap-2">
             <AlertCircle size={16} />
@@ -390,12 +414,13 @@ export const ScanResiStage2: React.FC<ScanResiStage2Props> = ({ onRefresh }) => 
           <ul className="text-sm text-gray-300 space-y-1 ml-6 list-disc">
             <li>Pastikan izin kamera sudah diberikan</li>
             <li>Arahkan kamera ke barcode/QR code pada resi</li>
-            <li>Posisikan barcode di tengah area pemindaian</li>
+            <li>Suara "Ting": Scan berhasil masuk</li>
+            <li>Suara "Buzz": Scan double (duplikat) atau Gagal</li>
           </ul>
         </div>
       </div>
       
-      {/* Pending List (Tidak berubah) */}
+      {/* Pending List */}
       <div className="bg-gray-800 rounded-xl shadow-lg border border-gray-700">
         <div className="p-6 border-b border-gray-700">
           <div className="flex items-center justify-between mb-4">
