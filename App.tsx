@@ -392,8 +392,13 @@ const AppContent: React.FC = () => {
         {activeView === 'scan_resi_stage2' && isAdmin && <ScanResiStage2 onRefresh={refreshData} />}
         {activeView === 'scan_resi_stage3' && isAdmin && <ScanResiStage3 onRefresh={refreshData} />}
         {activeView === 'scan_resi_history' && isAdmin && <RiwayatScanResi />}
+<<<<<<< HEAD
         {activeView === 'orders' && isAdmin && <OrderManagement />}
         {activeView === 'orders' && !isAdmin && <CustomerOrderView orders={[]} />}
+=======
+        {activeView === 'orders' && isAdmin && <OrderManagement orders={orders} isLoading={loading} onUpdateStatus={handleUpdateStatus} onProcessReturn={handleProcessReturn} onRefresh={refreshData} />}
+        {activeView === 'orders' && !isAdmin && <CustomerOrderView orders={orders.filter(o => o.customerName === loginName)} />}
+>>>>>>> ea30e59be5d9b9efde405f669077f2a2b2a2ad70
         
         {isEditing && isAdmin && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm animate-in fade-in">

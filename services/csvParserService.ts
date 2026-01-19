@@ -69,6 +69,7 @@ export const parseShopeeCSV = (text: string) => {
   const idxOrder = headers.findIndex(h => h.includes('No. Pesanan'));
   const idxUser = headers.findIndex(h => h.includes('Username (Pembeli)'));
   const idxSKU = headers.findIndex(h => h.includes('Nomor Referensi SKU'));
+<<<<<<< HEAD
   
   // PERBAIKAN: Prioritaskan 'Nama Produk' (Judul), baru fallback ke 'Nama Variasi'
   let idxNama = headers.findIndex(h => h.includes('Nama Produk'));
@@ -76,6 +77,9 @@ export const parseShopeeCSV = (text: string) => {
     idxNama = headers.findIndex(h => h.includes('Nama Variasi'));
   }
 
+=======
+  const idxNama = headers.findIndex(h => h.includes('Nama Variasi')); // atau Nama Produk
+>>>>>>> ea30e59be5d9b9efde405f669077f2a2b2a2ad70
   const idxQty = headers.findIndex(h => h.includes('Jumlah'));
   const idxTotal = headers.findIndex(h => h.includes('Total Harga Produk')); // Atau Harga Setelah Diskon
   
@@ -86,16 +90,23 @@ export const parseShopeeCSV = (text: string) => {
     const { amount, rate } = cleanCurrency(cols[idxTotal]);
     const totalPriceIDR = amount * rate;
 
+<<<<<<< HEAD
     // Ambil nama produk dan bersihkan tanda petik jika ada
     const rawName = cols[idxNama] || '';
     const finalName = rawName.replace(/["']/g, '').trim() || 'Produk Shopee';
 
+=======
+>>>>>>> ea30e59be5d9b9efde405f669077f2a2b2a2ad70
     return {
       resi: cols[idxResi]?.replace(/["']/g, ''),
       order_id: cols[idxOrder]?.replace(/["']/g, ''),
       customer: cols[idxUser]?.replace(/["']/g, ''),
       part_number: cols[idxSKU]?.replace(/["']/g, ''),
+<<<<<<< HEAD
       product_name: finalName, 
+=======
+      product_name: cols[idxNama] || 'Produk Shopee',
+>>>>>>> ea30e59be5d9b9efde405f669077f2a2b2a2ad70
       quantity: parseInt(cols[idxQty]) || 1,
       total_price: totalPriceIDR,
       original_currency_val: cols[idxTotal]
@@ -115,7 +126,10 @@ export const parseTikTokCSV = (text: string) => {
   const idxOrder = headers.findIndex(h => h.includes('Order ID'));
   const idxUser = headers.findIndex(h => h.includes('Buyer Username'));
   const idxSKU = headers.findIndex(h => h.includes('Seller SKU'));
+<<<<<<< HEAD
   const idxProductName = headers.findIndex(h => h.includes('Product Name')); // Tambahkan deteksi nama produk TikTok
+=======
+>>>>>>> ea30e59be5d9b9efde405f669077f2a2b2a2ad70
   const idxQty = headers.findIndex(h => h.includes('Quantity'));
   const idxTotal = headers.findIndex(h => h.includes('SKU Subtotal After Discount'));
 
@@ -125,16 +139,23 @@ export const parseTikTokCSV = (text: string) => {
 
     const { amount, rate } = cleanCurrency(cols[idxTotal]);
     
+<<<<<<< HEAD
     // Logic nama produk TikTok
     const rawName = idxProductName !== -1 ? cols[idxProductName] : '';
     const finalName = rawName ? rawName.replace(/["']/g, '').trim() : 'Produk TikTok';
 
+=======
+>>>>>>> ea30e59be5d9b9efde405f669077f2a2b2a2ad70
     return {
       resi: cols[idxResi]?.replace(/["']/g, ''),
       order_id: cols[idxOrder]?.replace(/["']/g, ''),
       customer: cols[idxUser]?.replace(/["']/g, ''),
       part_number: cols[idxSKU]?.replace(/["']/g, ''),
+<<<<<<< HEAD
       product_name: finalName,
+=======
+      product_name: 'Produk TikTok', // TikTok CSV kadang nama produknya jauh
+>>>>>>> ea30e59be5d9b9efde405f669077f2a2b2a2ad70
       quantity: parseInt(cols[idxQty]) || 1,
       total_price: amount * rate,
       original_currency_val: cols[idxTotal]

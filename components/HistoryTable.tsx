@@ -1,39 +1,36 @@
 // FILE: src/components/HistoryTable.tsx
 import React from 'react';
 import { StockHistory } from '../types';
-import { Store } from 'lucide-react';
-import { parseHistoryReason, formatRupiah } from '../utils/dashboardHelpers';
+import { formatRupiah } from '../utils/dashboardHelpers';
 
 export const HistoryTable = ({ data }: { data: StockHistory[] }) => (
     <div className="overflow-x-auto rounded-lg border border-gray-700">
         <table className="w-full text-left border-collapse">
             <thead className="bg-gray-800 text-[10px] font-bold text-gray-400 uppercase tracking-wider border-b border-gray-700">
                 <tr>
-                    <th className="px-3 py-2 border-r border-gray-700 w-24">Tanggal</th>
-                    <th className="px-3 py-2 border-r border-gray-700 w-32">Resi / Toko</th>
-                    <th className="px-3 py-2 border-r border-gray-700 w-36">Via</th>
+                    <th className="px-3 py-2 border-r border-gray-700 w-28">Tanggal</th>
                     <th className="px-3 py-2 border-r border-gray-700 w-32">Pelanggan</th>
-                    <th className="px-3 py-2 border-r border-gray-700 w-28">Part No</th>
-                    <th className="px-3 py-2 border-r border-gray-700">Barang</th>
-                    <th className="px-3 py-2 border-r border-gray-700 text-right w-16">Qty</th>
-                    <th className="px-3 py-2 border-r border-gray-700 text-right w-24">Satuan</th>
-                    <th className="px-3 py-2 border-r border-gray-700 text-right w-24">Total</th>
-                    <th className="px-3 py-2 text-center w-28">Keterangan</th>
+                    <th className="px-3 py-2 border-r border-gray-700 text-right w-24">Qty</th>
+                    <th className="px-3 py-2 border-r border-gray-700 text-right w-28">Satuan</th>
+                    <th className="px-3 py-2 border-r border-gray-700 text-right w-28">Total</th>
+                    <th className="px-3 py-2 w-48">Keterangan</th>
                 </tr>
             </thead>
             <tbody className="divide-y divide-gray-700 text-xs bg-gray-900/30">
                 {data.map((h, idx) => {
-                    const { resi, subInfo, customer, ecommerce, keterangan, isRetur } = parseHistoryReason(h);
+                    const customer = h.customer || '-';
+                    const isIn = h.type === 'in';
                     
-                    let ketStyle = 'bg-gray-700 text-gray-300 border-gray-600';
-                    if (h.type === 'in') {
-                        if (isRetur) {
-                            ketStyle = 'bg-red-900/30 text-red-400 border-red-800'; 
-                        } else {
-                            ketStyle = 'bg-green-900/30 text-green-400 border-green-800'; 
-                        }
-                    } else if (h.type === 'out') {
-                        ketStyle = 'bg-blue-900/30 text-blue-400 border-blue-800';
+                    // Format keterangan
+                    let keterangan = '';
+                    let ketStyle = '';
+                    
+                    if (isIn) {
+                        keterangan = 'RESTOCK';
+                        ketStyle = 'bg-green-900/30 text-green-400 border-green-800';
+                    } else {
+                        keterangan = customer !== '-' ? `KELUAR - ${customer}` : 'KELUAR';
+                        ketStyle = 'bg-red-900/30 text-red-400 border-red-800';
                     }
 
                     return (
@@ -41,6 +38,7 @@ export const HistoryTable = ({ data }: { data: StockHistory[] }) => (
                             <td className="px-3 py-2 align-top border-r border-gray-700 whitespace-nowrap text-gray-400">
                                 <div className="font-bold text-gray-200">{new Date(h.timestamp || 0).toLocaleDateString('id-ID', {timeZone: 'Asia/Jakarta', day:'2-digit', month:'2-digit', year:'2-digit'})}</div>
                                 <div className="text-[9px] opacity-70 font-mono">{new Date(h.timestamp || 0).toLocaleTimeString('id-ID', {timeZone: 'Asia/Jakarta', hour:'2-digit', minute:'2-digit'})}</div>
+<<<<<<< HEAD
                             </td>
                             <td className="px-3 py-2 align-top border-r border-gray-700 font-mono text-[10px]">
                                 <div className="flex flex-col items-start gap-2"> 
@@ -59,27 +57,26 @@ export const HistoryTable = ({ data }: { data: StockHistory[] }) => (
                                 {ecommerce !== '-' ? (
                                     <span className="px-1.5 py-0.5 rounded bg-orange-900/30 text-orange-400 text-[9px] font-bold border border-orange-800 break-words">{ecommerce}</span>
                                 ) : <span className="text-gray-600">-</span>}
+=======
+>>>>>>> ea30e59be5d9b9efde405f669077f2a2b2a2ad70
                             </td>
                             <td className="px-3 py-2 align-top border-r border-gray-700 text-gray-300 font-medium">
-                                {customer !== '-' ? customer : '-'}
+                                {customer}
                             </td>
-                            <td className="px-3 py-2 align-top border-r border-gray-700 font-mono text-[10px] text-gray-400">
-                                {h.partNumber}
+                            <td className={`px-3 py-2 align-top border-r border-gray-700 text-right font-bold text-lg ${isIn ? 'text-green-400' : 'text-red-400'}`}>
+                                <div className="flex items-center justify-end gap-1">
+                                    <span className="text-xs opacity-70">{isIn ? 'MASUK' : 'KELUAR'}</span>
+                                    <span>{isIn ? '+' : '-'}{h.quantity || h.change || 0}</span>
+                                </div>
                             </td>
-                            <td className="px-3 py-2 align-top border-r border-gray-700">
-                                <div className="font-bold text-gray-200 text-xs">{h.name}</div>
+                            <td className="px-3 py-2 align-top border-r border-gray-700 text-right font-mono text-xs text-gray-400">
+                                {formatRupiah(h.price || 0)}
                             </td>
-                            <td className={`px-3 py-2 align-top border-r border-gray-700 text-right font-bold ${h.type === 'in' ? 'text-green-400' : 'text-red-400'}`}>
-                                {h.type === 'in' ? '+' : '-'}{h.quantity}
+                            <td className="px-3 py-2 align-top border-r border-gray-700 text-right font-mono text-xs font-bold text-gray-200">
+                                {formatRupiah(h.total || h.totalPrice || ((h.price||0) * (h.quantity||h.change||0)))}
                             </td>
-                            <td className="px-3 py-2 align-top border-r border-gray-700 text-right font-mono text-[10px] text-gray-400">
-                                {formatRupiah(h.price)}
-                            </td>
-                            <td className="px-3 py-2 align-top border-r border-gray-700 text-right font-mono text-[10px] font-bold text-gray-200">
-                                {formatRupiah(h.totalPrice || ((h.price||0) * h.quantity))}
-                            </td>
-                            <td className="px-3 py-2 align-top text-center">
-                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase border ${ketStyle}`}>
+                            <td className="px-3 py-2 align-top">
+                                <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase border ${ketStyle}`}>
                                     {keterangan}
                                 </span>
                             </td>
