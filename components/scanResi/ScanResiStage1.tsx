@@ -188,6 +188,7 @@ export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh }) => 
       }, 100);
     } else {
       showToast(result.message, 'error');
+      setResiInput(''); // KOSONGKAN INPUT JIKA DOUBLE/ERROR
       // Tetap fokus ke input jika error
       setTimeout(() => {
         if (resiInputRef.current) {
