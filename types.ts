@@ -4,7 +4,7 @@
 
 // 1. OFFLINE (Table: orders_mjm / orders_bjw)
 export interface OfflineOrderRow {
-  id?: string; // Optional - orders_mjm has bigint id, orders_bjw has no id
+  id: string;
   tanggal: string;
   customer: string;
   part_number: string;
@@ -18,24 +18,18 @@ export interface OfflineOrderRow {
 
 // 2. ONLINE (Table: scan_resi_mjm / scan_resi_bjw)
 export interface OnlineOrderRow {
+  id: number;
   tanggal: string;
-  type_toko: string;
-  toko: string;
+  resi: string;
+  toko: string; // MJM, BJW, LARIS
+  ecommerce: string; // SHOPEE, TIKTOK
   customer: string;
   part_number: string;
-  barang: string;
-  brand: string;
-  application: string;
-  stok_saatini: number;
-  qty_out: number;
-  total_harga: number;
+  nama_barang: string;
+  quantity: number;
   harga_satuan: number;
-  resi: string;
-  no_pesanan: number;
-  is_split: boolean;
-  split_group_id?: string; // Only in scan_resi_mjm
-  id_reseller: number;
-  id_customer: number;
+  harga_total: number;
+  status: string; // 'Pending', 'Proses'
 }
 
 // 3. SUDAH TERJUAL (Table: barang_keluar_mjm / barang_keluar_bjw)
@@ -48,34 +42,22 @@ export interface SoldItemRow {
   customer: string;
   part_number: string;
   name: string;
-  brand: string;
-  application: string;
-  rak: string;
-  stock_ahir: number;
   qty_keluar: number;
-  harga_satuan: number;
   harga_total: number;
   resi: string;
-  id_reseller: number;
-  id_customer: number;
 }
 
 // 4. RETUR (Table: retur_mjm / retur_bjw)
 export interface ReturRow {
-  id: number;
-  tanggal_pemesanan: string;
+  id?: number;
+  tanggal_retur: string;
   resi: string;
-  toko: string;
   customer: string;
-  part_number: string;
   nama_barang: string;
   quantity: number;
-  harga_satuan: number;
-  harga_total: number;
-  tanggal_retur: string;
-  keterangan: string;
-  ecommerce: string;
   status: string;
+  keterangan: string;
+  harga_total: number;
 }
 
 // --- TYPE DATA INVENTORY & LEGACY (JANGAN DIHAPUS) ---
@@ -188,24 +170,18 @@ export interface ReturRecord {
 }
 
 export interface ScanResiLog {
+    id: number;
     tanggal: string;
-    type_toko: string;
+    resi: string;
     toko: string;
+    ecommerce: string;
     customer: string;
     part_number: string | null;
-    barang: string;
-    brand: string;
-    application: string;
-    stok_saatini: number;
-    qty_out: number;
-    total_harga: number;
+    nama_barang: string;
+    quantity: number;
     harga_satuan: number;
-    resi: string;
-    no_pesanan: number;
-    is_split: boolean;
-    split_group_id?: string;
-    id_reseller: number;
-    id_customer: number;
+    harga_total: number;
+    status: string;
 }
 
 export interface BaseWarehouseItem {

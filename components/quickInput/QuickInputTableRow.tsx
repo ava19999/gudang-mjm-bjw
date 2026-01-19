@@ -197,7 +197,7 @@ export const QuickInputTableRow: React.FC<QuickInputTableRowProps> = ({
                         value={row.totalHarga || ''}
                         onChange={(e) => handleTotalHargaChange(e.target.value)}
                         onKeyDown={(e) => onGridKeyDown(e, baseRefIndex + 5)}
-                        placeholder="Opsional (bisa 0)"
+                        placeholder="Total..."
                     />
                 </td>
 

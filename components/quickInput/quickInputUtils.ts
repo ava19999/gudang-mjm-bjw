@@ -34,7 +34,7 @@ export const checkIsRowComplete = (row: QuickInputRow) => {
     // - Customer
     // - Part Number & Nama Barang
     // - Qty Masuk (Must be > 0)
-    // - Total Harga (OPSIONAL - bisa 0)
+    // - Total Harga (Must be > 0)
     
     return (
         !!row.tanggal &&
@@ -42,7 +42,7 @@ export const checkIsRowComplete = (row: QuickInputRow) => {
         !!row.customer.trim() &&
         !!row.partNumber && 
         !!row.namaBarang && 
-        row.qtyMasuk > 0
-        // totalHarga tidak wajib, bisa 0
+        row.qtyMasuk > 0 &&
+        row.totalHarga > 0
     );
 };

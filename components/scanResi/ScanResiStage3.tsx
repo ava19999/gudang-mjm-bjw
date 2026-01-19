@@ -195,10 +195,6 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
           ecommerce: ecommerceDB,
           sub_toko: subToko,
           part_number: item.part_number || '',
-<<<<<<< HEAD
-          // Menggunakan nama dari CSV
-=======
->>>>>>> ea30e59be5d9b9efde405f669077f2a2b2a2ad70
           nama_pesanan: item.product_name || 'Item CSV',
           brand: brand,
           application: app,
@@ -278,10 +274,6 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
             application: info?.application || '-',
             stock_saat_ini: stock,
             is_stock_valid: stockValid,
-<<<<<<< HEAD
-            // Jika nama pesanan masih 'Menunggu Input', update dari DB. Jika dari CSV, pertahankan.
-=======
->>>>>>> ea30e59be5d9b9efde405f669077f2a2b2a2ad70
             nama_pesanan: r.nama_pesanan.includes('Menunggu') || r.nama_pesanan === 'Item CSV' ? (info?.name || r.nama_pesanan) : r.nama_pesanan,
             status_message: stockValid ? (r.is_db_verified ? 'Ready' : r.status_message) : 'Stok Kurang'
         };
@@ -369,12 +361,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
               <th className="border border-gray-600 px-1 py-1 w-12">TOKO</th>
               <th className="border border-gray-600 px-1 py-1 w-32 bg-gray-750">CUSTOMER (Edit)</th>
               <th className="border border-gray-600 px-1 py-1 w-32 bg-gray-800">PART NUMBER (Edit)</th>
-<<<<<<< HEAD
-              {/* KOLOM NAMA PESANAN DI LEBARKAN */}
-              <th className="border border-gray-600 px-1 py-1 min-w-[300px]">NAMA PESANAN</th>
-=======
               <th className="border border-gray-600 px-1 py-1 w-48">NAMA PESANAN</th>
->>>>>>> ea30e59be5d9b9efde405f669077f2a2b2a2ad70
               <th className="border border-gray-600 px-1 py-1 w-20">BRAND</th>
               <th className="border border-gray-600 px-1 py-1 w-20">APP</th>
               <th className="border border-gray-600 px-1 py-1 w-12 text-center">STOK</th>
@@ -412,15 +399,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                     <input id={`input-${idx}-part_number`} type="text" list="part-options" value={row.part_number} onChange={(e) => updateRow(row.id, 'part_number', e.target.value)} onBlur={(e) => handlePartNumberBlur(row.id, e.target.value)} onKeyDown={(e) => handleKeyDown(e, idx, 'part_number')} className="w-full h-full px-2 py-1 bg-gray-800 focus:bg-blue-900 focus:outline-none text-yellow-300 font-mono font-bold" placeholder="Input Part..."/>
                   </td>
 
-<<<<<<< HEAD
-                  {/* NAMA PESANAN LENGKAP - WRAP ENABLED */}
-                  <td className="border border-gray-600 px-1 whitespace-normal break-words leading-tight" title={row.nama_pesanan}>
-                    {row.nama_pesanan}
-                  </td>
-
-=======
                   <td className="border border-gray-600 px-1 truncate max-w-[150px]" title={row.nama_pesanan}>{row.nama_pesanan}</td>
->>>>>>> ea30e59be5d9b9efde405f669077f2a2b2a2ad70
                   <td className="border border-gray-600 px-1 text-gray-400">{row.brand}</td>
                   <td className="border border-gray-600 px-1 text-gray-400 truncate max-w-[80px]">{row.application}</td>
                   <td className={`border border-gray-600 px-1 text-center font-bold ${row.stock_saat_ini < row.qty_keluar ? 'text-red-500' : 'text-green-400'}`}>{row.stock_saat_ini}</td>

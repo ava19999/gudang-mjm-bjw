@@ -40,7 +40,6 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
   const [priceHistory, setPriceHistory] = useState<any[]>([]);
   const [loadingPrice, setLoadingPrice] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [urlInput, setUrlInput] = useState<string>('');
 
   useEffect(() => {
     if (initialData) {
@@ -85,9 +84,7 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
         const filesToProcess = Array.from(files).slice(0, slotsAvailable);
 
         for (const file of filesToProcess) {
-            // Kompresi lebih agresif: max 600px, quality 0.6
-            const compressed = await compressImage(file, 600, 0.6);
-            console.log('Foto dikompres. Original size:', file.size, 'bytes');
+            const compressed = await compressImage(file);
             newImages.push(compressed);
         }
         
@@ -118,36 +115,6 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
       setImagePreview(newImages[0] || null);
   };
 
-  const handleAddUrlImage = () => {
-      if (!urlInput || urlInput.trim() === '') {
-          setError("Masukkan URL foto terlebih dahulu!");
-          return;
-      }
-      
-      if (formData.images.length >= 10) {
-          setError("Maksimal 10 foto.");
-          return;
-      }
-      
-      // Validasi sederhana apakah URL valid
-      try {
-          new URL(urlInput);
-      } catch (e) {
-          setError("URL tidak valid!");
-          return;
-      }
-      
-      const newImages = [...formData.images, urlInput.trim()];
-      setFormData(prev => ({
-          ...prev,
-          images: newImages,
-          imageUrl: newImages[0] || ''
-      }));
-      setImagePreview(newImages[0]);
-      setUrlInput('');
-      setError(null);
-  };
-
   const handleCheckPrices = async () => {
     if (!formData.partNumber) { alert("Isi Part Number terlebih dahulu!"); return; }
     setLoadingPrice(true);
@@ -170,20 +137,6 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
     setError(null);
 
     try {
-      // Validasi: Part Number wajib (Primary Key)
-      if (!isEditMode && (!formData.partNumber || formData.partNumber.trim() === '')) {
-        setError('Part Number wajib diisi! (Primary Key)');
-        setLoading(false);
-        return;
-      }
-
-      // Validasi: Nama Barang wajib
-      if (!formData.name || formData.name.trim() === '') {
-        setError('Nama Barang wajib diisi!');
-        setLoading(false);
-        return;
-      }
-
       if (isEditMode && initialData) {
         const qtyAdj = Number(adjustmentQty);
         if (stockAdjustmentType !== 'none' && qtyAdj <= 0) {
@@ -200,14 +153,6 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
             customer: adjustmentCustomer 
         } : undefined;
 
-        console.log('Updating item dengan data:', {
-          partNumber: formData.partNumber,
-          name: formData.name,
-          price: formData.price,
-          costPrice: formData.costPrice,
-          jumlahFoto: formData.images.length
-        });
-
         const updated = await updateInventory({ 
             ...initialData, 
             ...formData, 
@@ -218,24 +163,13 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
         else setError("Gagal update database.");
 
       } else {
-        // Mode tambah barang baru
-        console.log('Menambahkan barang baru dengan data:', {
-          partNumber: formData.partNumber,
-          name: formData.name,
-          jumlahFoto: formData.images.length,
-          images: formData.images
-        });
-        
         const newId = await addInventory(formData, selectedStore);
-        if (newId) {
-          console.log('✓ Barang berhasil ditambahkan dengan ID:', newId);
-          onSuccess();
-        }
-        else setError("Gagal tambah barang. Periksa console untuk detail error.");
+        if (newId) onSuccess();
+        else setError("Gagal tambah barang.");
       }
-    } catch (error: any) {
-      console.error('Error di handleSubmit:', error);
-      setError(`Kesalahan: ${error?.message || error?.toString() || 'Unknown error'}`);
+    } catch (error) {
+      console.error(error);
+      setError("Kesalahan Sistem.");
     } finally {
       setLoading(false);
     }
@@ -334,30 +268,6 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
                   </div>
               )}
               
-              {/* Input URL Foto */}
-              <div className="bg-gray-700/50 p-3 rounded-xl border border-gray-600">
-                  <label className="text-[10px] font-bold text-gray-400 uppercase block mb-2">Atau Paste URL Foto</label>
-                  <div className="flex gap-2">
-                      <input 
-                          type="text" 
-                          value={urlInput}
-                          onChange={(e) => setUrlInput(e.target.value)}
-                          onKeyPress={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddUrlImage())}
-                          placeholder="https://example.com/image.jpg"
-                          className="flex-1 px-3 py-2 bg-gray-800 border border-gray-600 rounded-lg text-xs text-gray-200 focus:border-blue-500 outline-none placeholder-gray-500"
-                      />
-                      <button 
-                          type="button"
-                          onClick={handleAddUrlImage}
-                          disabled={formData.images.length >= 10}
-                          className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-xs font-bold"
-                      >
-                          <Plus size={16} />
-                      </button>
-                  </div>
-                  <p className="text-[9px] text-gray-500 mt-1">Paste link foto dari Supabase Storage atau URL lainnya</p>
-              </div>
-              
               {!isEditMode && (
                   <div className="bg-blue-900/20 p-4 rounded-xl border border-blue-900/40">
                     <label className="text-[10px] font-bold text-blue-300 uppercase mb-1 block flex items-center gap-1"><Layers size={12}/> Stok Awal</label>
@@ -369,35 +279,29 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
             <div className="flex-1 space-y-5">
                <div className="space-y-4">
                   <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider border-b border-gray-700 pb-1 mb-2">Info Produk</h3>
-                  
-                  {/* Part Number - Paling Atas */}
-                  <div>
-                    <label className="text-[10px] font-bold text-gray-400 uppercase ml-1 mb-1 block">Part Number <span className="text-red-400">*</span></label>
-                    <input type="text" name="partNumber" required disabled={isEditMode} placeholder="Wajib Diisi (Primary Key)" className="w-full px-3 py-2.5 bg-gray-700 border border-gray-600 rounded-xl text-sm font-mono font-bold focus:bg-gray-600 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none text-gray-200 disabled:opacity-50 placeholder-gray-500 transition-all" value={formData.partNumber} onChange={handleChange} />
-                  </div>
-
-                  {/* Nama Barang */}
                   <div className="relative">
                     <span className="absolute left-3 top-3 text-gray-400"><Package size={16}/></span>
                     <input type="text" name="name" required placeholder="Nama Barang" className="w-full pl-10 pr-4 py-2.5 bg-gray-700 border border-gray-600 rounded-xl text-sm font-bold text-gray-100 focus:bg-gray-600 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none transition-all placeholder:font-normal placeholder-gray-400" value={formData.name} onChange={handleChange} />
                   </div>
-
-                  {/* Brand & Aplikasi */}
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                        <label className="text-[10px] font-bold text-gray-400 uppercase ml-1">Brand</label>
-                        <input type="text" name="brand" placeholder="Opsional" className="w-full mt-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-xs font-medium focus:bg-gray-600 focus:border-blue-500 outline-none text-gray-200 placeholder-gray-500" value={formData.brand} onChange={handleChange} />
+                        <label className="text-[10px] font-bold text-gray-400 uppercase ml-1">Part Number</label>
+                        <input type="text" name="partNumber" required disabled={isEditMode} className="w-full mt-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-xs font-mono font-medium focus:bg-gray-600 focus:border-blue-500 outline-none text-gray-200 disabled:opacity-50" value={formData.partNumber} onChange={handleChange} />
                     </div>
                     <div>
-                        <label className="text-[10px] font-bold text-gray-400 uppercase ml-1">Aplikasi</label>
-                        <input type="text" name="application" placeholder="Opsional" className="w-full mt-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-xs font-medium focus:bg-gray-600 focus:border-blue-500 outline-none text-gray-200 placeholder-gray-500" value={formData.application} onChange={handleChange} />
+                        <label className="text-[10px] font-bold text-gray-400 uppercase ml-1">Brand</label>
+                        <input type="text" name="brand" className="w-full mt-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-xs font-medium focus:bg-gray-600 focus:border-blue-500 outline-none text-gray-200" value={formData.brand} onChange={handleChange} />
                     </div>
                   </div>
-
-                  {/* Rak */}
-                  <div>
-                    <label className="text-[10px] font-bold text-gray-400 uppercase ml-1">Rak</label>
-                    <input type="text" name="shelf" placeholder="Opsional" className="w-full mt-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-xs font-medium focus:bg-gray-600 focus:border-blue-500 outline-none text-gray-200 placeholder-gray-500" value={formData.shelf} onChange={handleChange} />
+                  <div className="grid grid-cols-2 gap-3">
+                     <div>
+                        <label className="text-[10px] font-bold text-gray-400 uppercase ml-1">Aplikasi</label>
+                        <input type="text" name="application" className="w-full mt-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-xs font-medium focus:bg-gray-600 focus:border-blue-500 outline-none text-gray-200" value={formData.application} onChange={handleChange} />
+                     </div>
+                     <div>
+                        <label className="text-[10px] font-bold text-gray-400 uppercase ml-1">Rak</label>
+                        <input type="text" name="shelf" className="w-full mt-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-xs font-medium focus:bg-gray-600 focus:border-blue-500 outline-none text-gray-200" value={formData.shelf} onChange={handleChange} />
+                     </div>
                   </div>
                </div>
 
@@ -475,8 +379,7 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
                             name="costPrice"
                             value={formData.costPrice} 
                             onChange={handleChange} 
-                            placeholder="Opsional"
-                            className="flex-1 px-3 py-2 bg-orange-900/20 text-orange-300 font-mono font-bold text-sm rounded-lg border border-orange-900/50 focus:ring-2 focus:ring-orange-800 outline-none placeholder-orange-700" 
+                            className="flex-1 px-3 py-2 bg-orange-900/20 text-orange-300 font-mono font-bold text-sm rounded-lg border border-orange-900/50 focus:ring-2 focus:ring-orange-800 outline-none placeholder-orange-800" 
                         />
                         <button type="button" onClick={handleCheckPrices} className="px-3 py-2 bg-gray-800 border border-gray-600 text-gray-400 rounded-lg hover:bg-gray-600 hover:text-white"><History size={18}/></button>
                       </div>
@@ -505,7 +408,7 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
 
                   <div>
                     <label className="text-[10px] font-bold text-gray-400 uppercase ml-1">Harga Jual</label>
-                    <input type="number" name="price" value={formData.price} onChange={handleChange} placeholder="Opsional" className="w-full mt-1 px-3 py-2 bg-blue-900/20 text-blue-300 font-mono font-bold text-sm rounded-lg border border-blue-900/50 focus:ring-2 focus:ring-blue-800 outline-none placeholder-blue-800" />
+                    <input type="number" name="price" value={formData.price} onChange={handleChange} className="w-full mt-1 px-3 py-2 bg-blue-900/20 text-blue-300 font-mono font-bold text-sm rounded-lg border border-blue-900/50 focus:ring-2 focus:ring-blue-800 outline-none" />
                   </div>
                </div>
             </div>

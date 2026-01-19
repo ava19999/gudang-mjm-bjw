@@ -54,9 +54,6 @@ const AppContent: React.FC = () => {
 
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [history, setHistory] = useState<StockHistory[]>([]);
-  // Note: 'orders' state seems to be missing in this file scope but used in handlers below.
-  // Preserving handlers as requested to avoid losing logic, assuming orders might be added later or handlers moved.
-  const [orders, setOrders] = useState<Order[]>([]); 
   const [loading, setLoading] = useState(false); 
   const [activeView, setActiveView] = useState<ActiveView>('inventory'); 
   
@@ -283,10 +280,7 @@ const AppContent: React.FC = () => {
           }
       }
 
-      // NOTE: Logic updateOrderData dan updateOrderStatusService dibawah ini 
-      // mengasumsikan fungsi tersebut ada di scope atau import (mungkin perlu disesuaikan dengan types.ts / services)
-      // Kode ini dipertahankan sesuai permintaan user.
-      /* const newItems = order.items.map(item => {
+      const newItems = order.items.map(item => {
           const returInfo = returnedItems.find(r => r.itemId === item.id);
           if (returInfo) return { ...item, cartQuantity: item.cartQuantity - returInfo.qty };
           return item;
@@ -297,7 +291,6 @@ const AppContent: React.FC = () => {
 
       if (await updateOrderData(orderId, newItems, newTotal, newStatus)) { showToast('Retur berhasil diproses & Stok kembali!'); await refreshData(); } 
       else { showToast('Gagal update data pesanan', 'error'); }
-      */
       setLoading(false);
   };
 
@@ -315,8 +308,6 @@ const AppContent: React.FC = () => {
       }).format(new Date());
       let updateTime = (newStatus === 'completed' || newStatus === 'cancelled') ? Date.now() : undefined;
 
-      // Note: updateOrderStatusService logic preserved here
-      /*
       if (order.status === 'pending' && newStatus === 'processing') {
           if (await updateOrderStatusService(orderId, newStatus)) { 
               for (const orderItem of order.items) {
@@ -353,7 +344,6 @@ const AppContent: React.FC = () => {
       else {
           if (await updateOrderStatusService(orderId, newStatus, updateTime)) refreshData();
       }
-      */
   };
 
   // --- RENDERING ---
@@ -398,8 +388,6 @@ const AppContent: React.FC = () => {
         {activeView === 'barang_kosong' && isAdmin && <BarangKosongView />}
         {activeView === 'closing' && isAdmin && <ClosingView />}
         {activeView === 'data_agung' && isAdmin && <DataAgungView items={items} onRefresh={refreshData} showToast={showToast} />}
-        
-        {/* CONFLICT MARKERS REMOVED, LOGIC PRESERVED */}
         {activeView === 'scan_resi_stage1' && isAdmin && <ScanResiStage1 onRefresh={refreshData} />}
         {activeView === 'scan_resi_stage2' && isAdmin && <ScanResiStage2 onRefresh={refreshData} />}
         {activeView === 'scan_resi_stage3' && isAdmin && <ScanResiStage3 onRefresh={refreshData} />}
