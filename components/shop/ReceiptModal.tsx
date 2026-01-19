@@ -23,6 +23,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
 
     const cartTotal = cart.reduce((sum, item) => sum + ((item.customPrice ?? item.price) * item.cartQuantity), 0);
     const currentDate = new Date().toLocaleDateString('id-ID', { 
+        timeZone: 'Asia/Jakarta',
         day: '2-digit', 
         month: 'long', 
         year: 'numeric',

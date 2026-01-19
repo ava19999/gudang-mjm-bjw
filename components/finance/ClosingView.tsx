@@ -26,7 +26,9 @@ export const ClosingView: React.FC = () => {
 
   // Initialize dates to today
   useEffect(() => {
-    const today = new Date().toISOString().split('T')[0];
+    const today = new Intl.DateTimeFormat('sv-SE', {
+      timeZone: 'Asia/Jakarta'
+    }).format(new Date());
     setStartDate(today);
     setEndDate(today);
   }, []);
@@ -87,6 +89,7 @@ export const ClosingView: React.FC = () => {
 
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString('id-ID', {
+      timeZone: 'Asia/Jakarta',
       day: '2-digit',
       month: 'short',
       year: 'numeric'

@@ -230,3 +230,150 @@ export interface ChatSession {
     unreadAdminCount: number;
     unreadUserCount: number;
 }
+
+// ============================================================================
+// TYPES FOR 3-STAGE RECEIPT SCANNING SYSTEM
+// ============================================================================
+
+// E-commerce platform types
+export type EcommercePlatform = 'TIKTOK' | 'SHOPEE' | 'KILAT' | 'RESELLER' | 'EKSPOR';
+export type SubToko = 'LARIS' | 'MJM' | 'BJW';
+export type NegaraEkspor = 'PH' | 'MY' | 'SG' | 'HK';
+export type ResiScanStatus = 'pending' | 'stage1' | 'stage2' | 'completed';
+
+// Resi Scan Stage interface
+export interface ResiScanStage {
+  id: string;
+  tanggal: string;
+  resi: string;
+  ecommerce: EcommercePlatform;
+  sub_toko: SubToko;
+  negara_ekspor?: NegaraEkspor;
+  
+  // Stage 1
+  stage1_scanned: boolean;
+  stage1_scanned_at?: string;
+  stage1_scanned_by?: string;
+  
+  // Stage 2
+  stage2_verified: boolean;
+  stage2_verified_at?: string;
+  stage2_verified_by?: string;
+  
+  // Stage 3
+  stage3_completed: boolean;
+  stage3_completed_at?: string;
+  customer?: string;
+  order_id?: string;
+  
+  status: ResiScanStatus;
+  created_at: string;
+  updated_at: string;
+}
+
+// Resi Items interface
+export interface ResiItem {
+  id: string;
+  resi_id: string;
+  part_number: string;
+  nama_barang: string;
+  brand: string;
+  application: string;
+  qty_keluar: number;
+  harga_total: number;
+  harga_satuan: number;
+  is_split_item: boolean;
+  split_count: number;
+  sku_from_csv?: string;
+  manual_input: boolean;
+  created_at: string;
+}
+
+// Part Substitusi interface
+export interface PartSubstitusi {
+  id: number;
+  part_number_utama: string;
+  part_number_alias: string;
+  created_at: string;
+}
+
+// Reseller Master interface
+export interface ResellerMaster {
+  id: number;
+  nama_reseller: string;
+  created_at: string;
+}
+
+// CSV Import Interfaces
+export interface ShopeeCSVRow {
+  'No. Pesanan': string;
+  'Status Pesanan': string;
+  'No. Resi': string;
+  'Opsi Pengiriman': string;
+  'SKU Induk': string;
+  'Nama Produk': string;
+  'Nomor Referensi SKU': string;
+  'Nama Variasi': string;
+  'Harga Awal': string;
+  'Harga Setelah Diskon': string;
+  'Jumlah': string;
+  'Total Harga Produk': string;
+  'Username (Pembeli)': string;
+  'Nama Penerima': string;
+  'No. Telepon': string;
+  'Alamat Pengiriman': string;
+  [key: string]: string;
+}
+
+export interface TikTokCSVRow {
+  'Order ID': string;
+  'Order Status': string;
+  'SKU ID': string;
+  'Seller SKU': string;
+  'Product Name': string;
+  'Variation': string;
+  'Quantity': string;
+  'SKU Unit Original Price': string;
+  'SKU Subtotal After Discount': string;
+  'Order Amount': string;
+  'Tracking ID': string;
+  'Buyer Username': string;
+  'Recipient': string;
+  'Phone #': string;
+  [key: string]: string;
+}
+
+export interface ParsedCSVItem {
+  resi: string;
+  customer: string;
+  order_id: string;
+  sku: string;
+  product_name: string;
+  variation: string;
+  quantity: number;
+  price: number;
+  total_price: number;
+}
+
+// Stage 1 Form Data
+export interface Stage1ScanData {
+  ecommerce: EcommercePlatform;
+  sub_toko: SubToko;
+  negara_ekspor?: NegaraEkspor;
+  resi: string;
+  scanned_by: string;
+}
+
+// Stage 2 Verification Data
+export interface Stage2VerifyData {
+  resi: string;
+  verified_by: string;
+}
+
+// Stage 3 Complete Data
+export interface Stage3CompleteData {
+  resi_id: string;
+  customer: string;
+  order_id: string;
+  items: ResiItem[];
+}

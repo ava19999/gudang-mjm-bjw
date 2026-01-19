@@ -14,12 +14,17 @@ import {
 const getTableName = (store: string | null | undefined) => {
   if (store === 'mjm') return 'base_mjm';
   if (store === 'bjw') return 'base_bjw';
-  return 'base';
+  // Default ke base_mjm jika store tidak valid
+  console.warn(`Store tidak valid (${store}), menggunakan default base_mjm`);
+  return 'base_mjm';
 };
 
 const getLogTableName = (baseName: 'barang_masuk' | 'barang_keluar', store: string | null | undefined) => {
-  const suffix = store === 'mjm' ? '_mjm' : (store === 'bjw' ? '_bjw' : '');
-  return `${baseName}${suffix}`;
+  if (store === 'mjm') return `${baseName}_mjm`;
+  if (store === 'bjw') return `${baseName}_bjw`;
+  // Default ke mjm jika tidak valid
+  console.warn(`Store tidak valid (${store}), menggunakan default ${baseName}_mjm`);
+  return `${baseName}_mjm`;
 };
 
 // --- HELPER: SAFE DATE PARSING ---
@@ -560,20 +565,6 @@ export const processOnlineOrderItem = async (item: OnlineOrderRow, store: string
 };
 
 // --- OTHERS & PLACEHOLDERS (Agar tidak error) ---
-export const fetchOrders = async (store?: string | null): Promise<Order[]> => {
-    try {
-        const { data } = await supabase.from('orders').select('*').order('timestamp', { ascending: false });
-        return (data || []).map((o:any) => ({ ...o, items: typeof o.items === 'string' ? JSON.parse(o.items) : o.items }));
-    } catch (e) { return []; }
-};
-export const saveOrder = async (order: Order, store?: string | null): Promise<boolean> => {
-  try {
-      const payload = { ...order, items: JSON.stringify(order.items) };
-      const { error } = await supabase.from('orders').insert([payload]);
-      if (error) throw error;
-      return true;
-  } catch(e: any) { alert(`Gagal Order: ${e.message}`); return false; }
-};
 
 export const saveOfflineOrder = async (
   cart: any[], 
@@ -603,17 +594,6 @@ export const saveOfflineOrder = async (
     return true;
   } catch (e: any) { alert(`Gagal menyimpan order: ${e.message}`); return false; }
 };
-
-export const updateOrderStatusService = async (id: string, status: string) => {
-  const { error } = await supabase.from('orders').update({ status }).eq('id', id);
-  return !error;
-};
-export const updateOrderData = async (id: string, items: any[], total: number, status: string) => {
-  const { error } = await supabase.from('orders').update({ items: JSON.stringify(items), totalAmount: total, status }).eq('id', id);
-  return !error;
-};
-// FILE: services/supabaseService.ts
-// ... (kode yang sudah ada sebelumnya)
 
 // --- FUNGSI BARU: FETCH DATA BARANG KELUAR ---
 export const fetchBarangKeluarLog = async (store: string | null, page = 1, limit = 20, search = '') => {
@@ -660,6 +640,12 @@ export const deleteBarangLog = async (
     const stockTable = getTableName(store);
 
     try {
+        // Validasi input
+        if (!id || !partNumber || qty < 0) {
+            console.error("Invalid parameters for deleteBarangLog:", { id, partNumber, qty });
+            return false;
+        }
+
         // 1. Ambil Data Stok Saat Ini
         const { data: currentItem, error: fetchError } = await supabase
             .from(stockTable)
@@ -667,125 +653,47 @@ export const deleteBarangLog = async (
             .eq('part_number', partNumber)
             .single();
 
-        if (fetchError || !currentItem) throw new Error("Item tidak ditemukan untuk rollback stok");
-
-        // 2. Hitung Stok Rollback
-        // Jika hapus Log Masuk -> Stok Kurang. Jika hapus Log Keluar -> Stok Tambah.
-        let newQty = currentItem.quantity;
-        if (type === 'in') {
-            newQty = currentItem.quantity - qty;
-        } else {
-            newQty = currentItem.quantity + qty;
+        if (fetchError || !currentItem) {
+            console.error("Fetch error:", fetchError);
+            throw new Error("Item tidak ditemukan untuk rollback stok");
         }
 
-        // 3. Update Stok
-        const { error: updateError } = await supabase
-            .from(stockTable)
-            .update({ quantity: newQty, last_updated: new Date().toISOString() })
-            .eq('part_number', partNumber);
+        // 2. Hitung Stok Rollback
+        let newQty = currentItem.quantity;
+        if (type === 'in') {
+            newQty = Math.max(0, newQty - qty); // Hindari stok negatif
+        } else {
+            newQty = newQty + qty;
+        }
 
-        if (updateError) throw new Error("Gagal mengembalikan stok");
-
-        // 4. Hapus Log
+        // 3. Hapus Log TERLEBIH DAHULU (prioritas utama)
         const { error: deleteError } = await supabase
             .from(logTable)
             .delete()
             .eq('id', id);
 
-        if (deleteError) throw new Error("Gagal menghapus log");
+        if (deleteError) {
+            console.error("Delete error:", deleteError);
+            throw new Error("Gagal menghapus log: " + deleteError.message);
+        }
+
+        // 4. Update Stok SETELAH log terhapus
+        const { error: updateError } = await supabase
+            .from(stockTable)
+            .update({ quantity: newQty, last_updated: new Date().toISOString() })
+            .eq('part_number', partNumber);
+
+        if (updateError) {
+            console.error("Update stock error:", updateError);
+            // Log sudah terhapus, tapi stok gagal update - log warning
+            console.warn("WARNING: Log terhapus tapi stok gagal diupdate untuk part_number:", partNumber);
+        }
 
         return true;
     } catch (e) {
         console.error("Delete Log Error:", e);
         return false;
     }
-};
-export const deleteBarangMasukLog = async (id: number, storeName: string) => {
-    try {
-        // 1. Ambil data log dulu untuk mengetahui part_number dan qty yang harus dikembalikan
-        // Asumsi tabel log bernama 'transaction_logs' atau sesuaikan dengan tabel yang dipakai 'fetchBarangMasukLog'
-        const { data: log, error: logError } = await supabase
-            .from('transaction_logs') // Ganti dengan nama tabel log Anda jika berbeda
-            .select('*')
-            .eq('id', id)
-            .single();
-
-        if (logError || !log) throw new Error('Data riwayat tidak ditemukan');
-
-        // 2. Ambil item inventory saat ini untuk update stok
-        const { data: item, error: itemError } = await supabase
-            .from(storeName)
-            .select('*')
-            .eq('part_number', log.part_number)
-            .single();
-
-        if (itemError || !item) throw new Error('Barang master tidak ditemukan, stok tidak bisa dikembalikan');
-
-        // 3. Hitung Stok Baru (REVERSE LOGIC)
-        // Karena ini membatalkan "Barang Masuk", maka stok harus DIKURANGI
-        const qtyToReverse = log.quantity || log.qty_masuk || log.qty;
-        const newQuantity = item.quantity - qtyToReverse;
-
-        if (newQuantity < 0) throw new Error('Stok tidak cukup untuk membatalkan transaksi ini');
-
-        // 4. Update Stok di Inventory
-        const { error: updateError } = await supabase
-            .from(storeName)
-            .update({ 
-                quantity: newQuantity,
-                last_updated: new Date().toISOString()
-            })
-            .eq('id', item.id);
-
-        if (updateError) throw new Error('Gagal mengupdate stok inventory');
-
-        // 5. Hapus Log Transaksi
-        const { error: deleteError } = await supabase
-            .from('transaction_logs') // Sesuaikan nama tabel
-            .delete()
-            .eq('id', id);
-
-        if (deleteError) throw new Error('Gagal menghapus riwayat');
-
-        return true;
-    } catch (error) {
-        console.error('Error deleting log:', error);
-        throw error;
-    }
-};
-export const createOrderFromQuickInput = async (storeName: string, rowData: any) => {
-  const tableName = `orders_${storeName}`; // orders_mjm atau orders_bjw
-
-  // Format item untuk kolom JSONB 'items'
-  const orderItem = {
-    part_number: rowData.partNumber,
-    name: rowData.namaBarang,
-    quantity: rowData.qtyMasuk, // Di UI variable nya qtyMasuk, tapi konteksnya qty keluar
-    price: rowData.hargaSatuan, // Harga satuan (Total / Qty)
-    total: rowData.totalHarga,  // Total harga manual
-  };
-
-  const payload = {
-    customer_name: rowData.customer,
-    total_price: rowData.totalHarga,
-    payment_method: rowData.tempo, // CASH, 3 BLN, NADIR, dll
-    status: 'process', // Status awal sesuai request
-    items: [orderItem], // Simpan sebagai array JSON
-    created_at: rowData.tanggal ? new Date(rowData.tanggal).toISOString() : new Date().toISOString(),
-    updated_at: new Date().toISOString()
-    // Kolom lain bisa disesuaikan dengan struktur tabel orders Anda (misal: cashier_id, dll)
-  };
-
-  const { data, error } = await supabase
-    .from(tableName)
-    .insert([payload])
-    .select();
-
-  if (error) {
-    console.error('Error creating order:', error);
-    throw error;
-  }
-  return data;
 };
 
 // ... (sisa kode lainnya)

@@ -39,8 +39,8 @@ export const HistoryTable = ({ data }: { data: StockHistory[] }) => (
                     return (
                         <tr key={h.id || idx} className="hover:bg-blue-900/10 transition-colors group">
                             <td className="px-3 py-2 align-top border-r border-gray-700 whitespace-nowrap text-gray-400">
-                                <div className="font-bold text-gray-200">{new Date(h.timestamp || 0).toLocaleDateString('id-ID', {day:'2-digit', month:'2-digit', year:'2-digit'})}</div>
-                                <div className="text-[9px] opacity-70 font-mono">{new Date(h.timestamp || 0).toLocaleTimeString('id-ID', {hour:'2-digit', minute:'2-digit'})}</div>
+                                <div className="font-bold text-gray-200">{new Date(h.timestamp || 0).toLocaleDateString('id-ID', {timeZone: 'Asia/Jakarta', day:'2-digit', month:'2-digit', year:'2-digit'})}</div>
+                                <div className="text-[9px] opacity-70 font-mono">{new Date(h.timestamp || 0).toLocaleTimeString('id-ID', {timeZone: 'Asia/Jakarta', hour:'2-digit', minute:'2-digit'})}</div>
                             </td>
                             <td className="px-3 py-2 align-top border-r border-gray-700 font-mono text-[10px]">
                                 <div className="flex flex-col items-start gap-2"> 
