@@ -206,11 +206,62 @@ export const checkResiStatus = async (resis: string[], store: string | null) => 
   
   const { data, error } = await supabase
     .from(table)
-    .select('resi, stage1_scanned, stage2_verified, status, ecommerce, sub_toko')
+    .select('resi, stage1_scanned, stage2_verified, status, ecommerce, sub_toko, no_pesanan')
     .in('resi', resis);
   
   if (error) return [];
   return data || [];
+};
+
+/**
+ * Cek status resi dengan matching ke resi ATAU no_pesanan
+ * Untuk kasus instant/sameday yang scan pakai no pesanan
+ */
+export const checkResiOrOrderStatus = async (
+  resiOrOrders: string[], 
+  store: string | null
+): Promise<any[]> => {
+  const table = getTableName(store);
+  if (resiOrOrders.length === 0) return [];
+  
+  // Query dengan OR: resi IN (...) OR no_pesanan IN (...)
+  const { data, error } = await supabase
+    .from(table)
+    .select('resi, no_pesanan, stage1_scanned, stage2_verified, status, ecommerce, sub_toko')
+    .or(`resi.in.(${resiOrOrders.map(r => `"${r}"`).join(',')}),no_pesanan.in.(${resiOrOrders.map(r => `"${r}"`).join(',')})`);
+  
+  if (error) {
+    console.error('checkResiOrOrderStatus error:', error);
+    return [];
+  }
+  return data || [];
+};
+
+/**
+ * Ambil daftar resi yang sudah melewati Stage 1 (untuk dropdown search)
+ */
+export const getStage1ResiList = async (store: string | null): Promise<Array<{resi: string, no_pesanan?: string, ecommerce: string, sub_toko: string, stage2_verified: boolean}>> => {
+  const table = getTableName(store);
+  
+  const { data, error } = await supabase
+    .from(table)
+    .select('resi, no_pesanan, ecommerce, sub_toko, stage2_verified')
+    .eq('stage1_scanned', 'true')
+    .order('stage1_scanned_at', { ascending: false })
+    .limit(500);
+  
+  if (error) {
+    console.error('getStage1ResiList error:', error);
+    return [];
+  }
+  
+  return (data || []).map(d => ({
+    resi: d.resi,
+    no_pesanan: d.no_pesanan,
+    ecommerce: d.ecommerce || '-',
+    sub_toko: d.sub_toko || '-',
+    stage2_verified: String(d.stage2_verified) === 'true'
+  }));
 };
 
 export const lookupPartNumberInfo = async (sku: string, store: string | null) => {
@@ -477,4 +528,78 @@ export const insertResiItem = async (
     console.error('Insert gagal:', err);
     return null;
   }
+};
+
+// ============================================================================
+// [BARU] FUNGSI UNTUK PRODUCT ALIAS
+// ============================================================================
+
+/**
+ * Insert alias ke product_alias jika belum ada
+ * Skip jika alias_name sudah ada untuk part_number tersebut
+ */
+export const insertProductAlias = async (
+  partNumber: string,
+  aliasName: string
+): Promise<{ success: boolean }> => {
+  if (!partNumber || !aliasName) return { success: false };
+
+  try {
+    // Cek apakah alias sudah ada untuk part_number ini
+    const { data: existing } = await supabase
+      .from('product_alias')
+      .select('id')
+      .eq('part_number', partNumber)
+      .eq('alias_name', aliasName)
+      .maybeSingle();
+
+    if (existing) {
+      // Alias sudah ada, skip
+      return { success: true };
+    }
+
+    // Insert alias baru
+    const { error } = await supabase
+      .from('product_alias')
+      .insert([{ part_number: partNumber, alias_name: aliasName }]);
+
+    if (error) {
+      console.warn('Insert alias gagal:', error.message);
+      return { success: false };
+    }
+
+    return { success: true };
+  } catch (err: any) {
+    console.error('Error insert alias:', err);
+    return { success: false };
+  }
+};
+
+/**
+ * Hapus item dari resi_items setelah diproses
+ */
+export const deleteProcessedResiItems = async (
+  store: string | null,
+  items: Array<{ resi: string; part_number: string }>
+): Promise<{ success: boolean; deleted: number }> => {
+  const table = store === 'mjm' ? 'resi_items_mjm' : (store === 'bjw' ? 'resi_items_bjw' : null);
+  if (!table || items.length === 0) return { success: false, deleted: 0 };
+
+  let deletedCount = 0;
+
+  for (const item of items) {
+    try {
+      const { error } = await supabase
+        .from(table)
+        .delete()
+        .eq('resi', item.resi)
+        .eq('part_number', item.part_number);
+
+      if (!error) deletedCount++;
+    } catch (err) {
+      console.warn('Delete resi item gagal:', err);
+    }
+  }
+
+  return { success: true, deleted: deletedCount };
 };
