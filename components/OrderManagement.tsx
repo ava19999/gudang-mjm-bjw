@@ -334,7 +334,23 @@ export const OrderManagement: React.FC = () => {
                                             setEditForm({ ...editForm, partNumber: newValue ? newValue.partNumber : '' });
                                           }}
                                           renderInput={(params) => (
-                                            <TextField {...params} variant="outlined" className="bg-gray-700 border border-gray-600 rounded text-xs text-white" />
+                                            <TextField
+                                              {...params}
+                                              variant="outlined"
+                                              className="bg-gray-700 border border-gray-600 rounded text-xs"
+                                              InputProps={{
+                                                ...params.InputProps,
+                                                style: { color: 'white' },
+                                                onKeyDown: (e) => {
+                                                  if (e.key === 'Enter') {
+                                                    e.preventDefault();
+                                                    // Trigger saveEdit jika sedang edit
+                                                    if (editingId) saveEdit(editingId);
+                                                  }
+                                                  params.InputProps.onKeyDown && params.InputProps.onKeyDown(e);
+                                                }
+                                              }}
+                                            />
                                           )}
                                           isOptionEqualToValue={(option, value) => option.partNumber === value.partNumber}
                                         />
