@@ -343,16 +343,20 @@ export interface TikTokCSVRow {
   [key: string]: string;
 }
 
+// Update interface untuk hasil parsing CSV
 export interface ParsedCSVItem {
-  resi: string;
-  customer: string;
-  order_id: string;
-  sku: string;
-  product_name: string;
-  variation: string;
-  quantity: number;
-  price: number;
-  total_price: number;
+  resi: string;             // No. Resi
+  order_id: string;         // No. Pesanan
+  order_status: string;     // Status Pesanan (Baru)
+  shipping_option: string;  // Opsi Pengiriman (Baru)
+  part_number: string;      // SKU / Number Part
+  product_name: string;     // Nama Produk
+  quantity: number;         // Jumlah
+  total_price: number;      // Total Harga Produk (IDR)
+  customer: string;         // Username (Pembeli)
+  ecommerce: string;        // 'SHOPEE' | 'TIKTOK'
+  original_currency_val: string; 
+  // 'toko' (MJM/BJW) akan dihandle saat insert database di component
 }
 
 // Stage 1 Form Data

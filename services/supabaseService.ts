@@ -342,7 +342,7 @@ export const fetchBarangMasukLog = async (store: string | null, page = 1, limit 
     return { data: mappedData, total: count || 0 };
 };
 
-// --- SHOP ITEMS (DIPULIHKAN UNTUK BERANDA) ---
+// --- SHOP ITEMS (BERANDA TOKO) ---
 interface ShopItemFilters {
   searchTerm?: string;
   category?: string;
@@ -364,7 +364,9 @@ export const fetchShopItems = async (
   const { searchTerm = '', partNumberSearch = '', nameSearch = '', brandSearch = '', applicationSearch = '' } = filters;
 
   try {
-    let query = supabase.from(table).select('*', { count: 'exact' }).gt('quantity', 0);
+    // --- PERUBAHAN DI SINI: MENGHAPUS .gt('quantity', 0) ---
+    // Agar stok kosong pun tetap tampil di Beranda
+    let query = supabase.from(table).select('*', { count: 'exact' }); 
 
     if (searchTerm) query = query.or(`name.ilike.%${searchTerm}%,part_number.ilike.%${searchTerm}%`);
     if (partNumberSearch) query = query.ilike('part_number', `%${partNumberSearch}%`);
@@ -484,6 +486,8 @@ export const processOfflineOrderItem = async (
     const { data: currentItem, error: fetchError } = await supabase.from(stockTable).select('*').eq('part_number', item.part_number).single();
     if (fetchError || !currentItem) return { success: false, msg: 'Barang tidak ditemukan di gudang.' };
     
+    // NOTE: Sekarang stok kosong pun bisa dilihat di beranda, tapi logikanya kalau mau proses tetap butuh stok.
+    // Kode di bawah ini tetap memvalidasi stok sebelum memproses pesanan.
     if (currentItem.quantity < item.quantity) {
       return { success: false, msg: `Stok tidak cukup! (Sisa: ${currentItem.quantity})` };
     }
@@ -696,7 +700,6 @@ export const deleteBarangLog = async (
     }
 };
 
-// ... (sisa kode lainnya)
 // Placeholder Functions (Safe defaults)
 export const fetchHistory = async () => [];
 export const fetchItemHistory = async () => [];
