@@ -513,7 +513,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
   });
 
   return (
-    <div className="bg-gray-900 text-white h-screen p-2 text-sm font-sans flex flex-col">
+    <div className="bg-gray-900 text-white min-h-screen p-2 pb-20 md:pb-2 text-sm font-sans flex flex-col">
       <datalist id="part-options">
         {partOptions.map((p, idx) => (<option key={idx} value={p} />))}
       </datalist>
@@ -521,44 +521,44 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
       {/* HEADER TOOLBAR */}
       <div className="bg-gray-800 p-2 rounded border border-gray-700 mb-2 shadow-sm flex-shrink-0">
         <div className="flex flex-col gap-2">
-            <div className="flex justify-between items-center">
+            <div className="flex flex-wrap justify-between items-center gap-2">
                 <div className="flex gap-2 items-center">
-                    <h1 className="font-bold text-lg flex items-center gap-2 px-2 text-gray-100">
-                        <RefreshCw size={18} className="text-green-400"/> STAGE 3
+                    <h1 className="font-bold text-base md:text-lg flex items-center gap-1 md:gap-2 text-gray-100">
+                        <RefreshCw size={16} className="text-green-400"/> STAGE 3
                     </h1>
                     
                     {/* SAVING INDICATOR */}
-                    <div className="w-20 flex items-center">
+                    <div className="w-16 md:w-20 flex items-center">
                         {savingStatus === 'saving' && (
-                            <span className="text-yellow-400 text-xs flex items-center gap-1"><Loader2 size={12} className="animate-spin"/> Saving...</span>
+                            <span className="text-yellow-400 text-[10px] md:text-xs flex items-center gap-1"><Loader2 size={10} className="animate-spin"/> Saving...</span>
                         )}
                         {savingStatus === 'saved' && (
-                            <span className="text-green-400 text-xs flex items-center gap-1"><CheckCircle size={12}/> Saved</span>
+                            <span className="text-green-400 text-[10px] md:text-xs flex items-center gap-1"><CheckCircle size={10}/> Saved</span>
                         )}
                     </div>
                 </div>
 
-                <div className="flex gap-2 items-center">
-                     <button onClick={handleLoadPending} className="bg-yellow-700/80 hover:bg-yellow-600 px-3 py-1.5 rounded text-xs flex gap-1 items-center transition-colors">
-                        <DownloadCloud size={14}/> DB Pending
+                <div className="flex gap-1 md:gap-2 items-center">
+                     <button onClick={handleLoadPending} className="bg-yellow-700/80 hover:bg-yellow-600 px-2 md:px-3 py-1 md:py-1.5 rounded text-[10px] md:text-xs flex gap-1 items-center transition-colors">
+                        <DownloadCloud size={12}/> <span className="hidden sm:inline">DB</span> Pending
                     </button>
-                    <button onClick={handleProcess} className="bg-green-600 hover:bg-green-500 text-white px-4 py-1.5 rounded font-bold shadow-md flex gap-2 items-center text-sm transition-all transform active:scale-95">
-                        <Save size={16}/> PROSES ({rows.filter(r => r.is_db_verified && r.is_stock_valid && r.part_number).length})
+                    <button onClick={handleProcess} className="bg-green-600 hover:bg-green-500 text-white px-2 md:px-4 py-1 md:py-1.5 rounded font-bold shadow-md flex gap-1 md:gap-2 items-center text-[10px] md:text-sm transition-all transform active:scale-95">
+                        <Save size={14}/> PROSES ({rows.filter(r => r.is_db_verified && r.is_stock_valid && r.part_number).length})
                     </button>
                 </div>
             </div>
 
             {/* IMPORT & UPLOAD CONFIGURATION SECTION */}
-            <div className="flex items-center gap-2 bg-blue-900/20 p-2 rounded border border-blue-800/50">
-                <div className="text-xs text-blue-300 font-semibold flex items-center gap-1">
-                    <Settings size={14}/> Upload Config:
+            <div className="flex flex-wrap items-center gap-2 bg-blue-900/20 p-2 rounded border border-blue-800/50">
+                <div className="text-[10px] md:text-xs text-blue-300 font-semibold flex items-center gap-1">
+                    <Settings size={12}/> Upload Config:
                 </div>
                 
                 {/* SELECTOR E-COMMERCE */}
                 <select 
                     value={uploadEcommerce} 
                     onChange={e => setUploadEcommerce(e.target.value as EcommercePlatform)}
-                    className="bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs outline-none focus:ring-1 focus:ring-blue-500"
+                    className="bg-gray-700 border border-gray-600 rounded px-2 py-1 text-[10px] md:text-xs outline-none focus:ring-1 focus:ring-blue-500 flex-shrink-0"
                 >
                     <option value="SHOPEE">SHOPEE</option>
                     <option value="TIKTOK">TIKTOK</option>
@@ -578,7 +578,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                     <select 
                         value={uploadSubToko} 
                         onChange={e => setUploadSubToko(e.target.value as SubToko)}
-                        className="bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs outline-none focus:ring-1 focus:ring-blue-500"
+                        className="bg-gray-700 border border-gray-600 rounded px-2 py-1 text-[10px] md:text-xs outline-none focus:ring-1 focus:ring-blue-500 flex-shrink-0"
                     >
                         <option value="MJM">MJM</option>
                         <option value="BJW">BJW</option>
@@ -591,7 +591,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                     <select 
                         value={uploadNegara} 
                         onChange={e => setUploadNegara(e.target.value as NegaraEkspor)}
-                        className="bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs outline-none focus:ring-1 focus:ring-blue-500"
+                        className="bg-gray-700 border border-gray-600 rounded px-2 py-1 text-[10px] md:text-xs outline-none focus:ring-1 focus:ring-blue-500 flex-shrink-0"
                     >
                         <option value="PH">PH</option>
                         <option value="MY">MY</option>
@@ -600,61 +600,61 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                     </select>
                 )}
                 
-                <div className="h-4 w-px bg-gray-600 mx-1"></div>
+                <div className="hidden md:block h-4 w-px bg-gray-600 mx-1"></div>
 
                 <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept=".csv, .xlsx, .xls" className="hidden" />
-                <button onClick={() => fileInputRef.current?.click()} className="bg-blue-600 hover:bg-blue-500 px-4 py-1 rounded text-xs flex gap-1 items-center font-bold shadow transition-colors">
-                    <Upload size={14}/> Import CSV
+                <button onClick={() => fileInputRef.current?.click()} className="bg-blue-600 hover:bg-blue-500 px-3 md:px-4 py-1 rounded text-[10px] md:text-xs flex gap-1 items-center font-bold shadow transition-colors ml-auto md:ml-0">
+                    <Upload size={12}/> Import CSV
                 </button>
             </div>
 
             {/* VIEW FILTER BAR */}
-            <div className="flex gap-2 bg-gray-900/50 p-1.5 rounded items-center border border-gray-700/50">
-                <Filter size={14} className="text-gray-400 ml-1" />
-                <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className="bg-gray-800 border border-gray-600 rounded px-2 py-0.5 text-xs text-gray-300 focus:border-blue-500 outline-none">
-                    <option value="all">View: Semua Status</option>
-                    <option value="pending_input">View: Hanya Butuh Input</option>
+            <div className="flex flex-wrap gap-1 md:gap-2 bg-gray-900/50 p-1.5 rounded items-center border border-gray-700/50">
+                <Filter size={12} className="text-gray-400 ml-1 hidden md:block" />
+                <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className="bg-gray-800 border border-gray-600 rounded px-1.5 md:px-2 py-0.5 text-[10px] md:text-xs text-gray-300 focus:border-blue-500 outline-none flex-shrink-0">
+                    <option value="all">Semua Status</option>
+                    <option value="pending_input">Butuh Input</option>
                 </select>
-                <select value={filterEcommerce} onChange={e => setFilterEcommerce(e.target.value)} className="bg-gray-800 border border-gray-600 rounded px-2 py-0.5 text-xs text-gray-300 focus:border-blue-500 outline-none">
-                    <option value="">View: Semua Ecommerce</option>
+                <select value={filterEcommerce} onChange={e => setFilterEcommerce(e.target.value)} className="bg-gray-800 border border-gray-600 rounded px-1.5 md:px-2 py-0.5 text-[10px] md:text-xs text-gray-300 focus:border-blue-500 outline-none flex-shrink-0">
+                    <option value="">Semua Ecommerce</option>
                     <option value="SHOPEE">SHOPEE</option>
                     <option value="TIKTOK">TIKTOK</option>
                     <option value="RESELLER">RESELLER</option>
                 </select>
-                <div className="ml-auto text-xs text-gray-400 px-2 border-r border-gray-700 mr-2">
-                    Total: {displayedRows.length} baris
+                <div className="ml-auto text-[10px] md:text-xs text-gray-400 px-1 md:px-2">
+                    Total: {displayedRows.length}
                 </div>
             </div>
         </div>
       </div>
 
       {/* EXCEL-LIKE TABLE */}
-      <div className="flex-1 table-wrapper border border-gray-600 bg-gray-800 shadow-inner custom-scrollbar">
-        <table className="border-collapse text-xs" style={{ minWidth: '100%', width: 'max-content' }}>
+      <div className="flex-1 overflow-x-auto overflow-y-auto border border-gray-600 bg-gray-800 shadow-inner custom-scrollbar">
+        <table className="border-collapse text-[10px] md:text-xs min-w-[1000px] md:w-full md:table-fixed">
           <thead className="sticky top-0 z-10 shadow-sm">
             <tr className="bg-gray-700 text-gray-200 font-semibold">
-              <th className="border border-gray-600 px-1 py-1 text-center" style={{ minWidth: '4rem', width: '4rem' }}>Status</th>
-              <th className="border border-gray-600 px-1 py-1 text-center" style={{ minWidth: '5rem', width: '5rem' }}>Tanggal</th>
-              <th className="border border-gray-600 px-1 py-1 text-left" style={{ minWidth: '6rem', width: '6rem' }}>Resi / ID</th>
-              <th className="border border-gray-600 px-1 py-1 text-center" style={{ minWidth: '3.5rem', width: '3.5rem' }}>E-Comm</th>
-              <th className="border border-gray-600 px-1 py-1 text-center" style={{ minWidth: '3rem', width: '3rem' }}>Toko</th>
-              <th className="border border-gray-600 px-1 py-1 text-left bg-gray-700/50" style={{ minWidth: '6rem', width: '8rem' }}>Customer</th>
-              <th className="border border-gray-600 px-1 py-1 text-left bg-gray-700/80 border-b-2 border-b-yellow-600/50" style={{ minWidth: '6rem', width: '8rem' }}>Part Number (Input)</th>
-              <th className="border border-gray-600 px-1 py-1 text-left" style={{ minWidth: '8rem', width: '12rem' }}>Nama Barang (CSV)</th>
-              <th className="border border-gray-600 px-1 py-1 text-left" style={{ minWidth: '8rem', width: '12rem' }}>Nama Barang (Base)</th>
-              <th className="border border-gray-600 px-1 py-1 text-left" style={{ minWidth: '3.5rem', width: '5rem' }}>Brand</th>
-              <th className="border border-gray-600 px-1 py-1 text-left" style={{ minWidth: '5rem', width: '7rem' }}>Aplikasi / Mobil</th>
-              <th className="border border-gray-600 px-1 py-1 text-center" style={{ minWidth: '2.5rem', width: '3rem' }}>Stok</th>
-              <th className="border border-gray-600 px-1 py-1 text-center bg-gray-700/80 border-b-2 border-b-yellow-600/50" style={{ minWidth: '2.5rem', width: '3rem' }}>Qty</th>
-              <th className="border border-gray-600 px-1 py-1 text-right bg-gray-700/80 border-b-2 border-b-yellow-600/50" style={{ minWidth: '5rem', width: '6rem' }}>Total (Rp)</th>
-              <th className="border border-gray-600 px-1 py-1 text-right" style={{ minWidth: '5rem', width: '6rem' }}>Satuan (Rp)</th>
-              <th className="border border-gray-600 px-1 py-1 text-left" style={{ minWidth: '5rem', width: '6rem' }}>No. Pesanan</th>
-              <th className="border border-gray-600 px-1 py-1 text-center" style={{ minWidth: '2rem', width: '2.5rem' }}>#</th>
+              <th className="border border-gray-600 px-1 py-1 text-center w-[55px] md:w-[5%]">Status</th>
+              <th className="border border-gray-600 px-1 py-1 text-center w-[75px] md:w-[6%]">Tanggal</th>
+              <th className="border border-gray-600 px-1 py-1 text-left w-[80px] md:w-[7%]">Resi</th>
+              <th className="border border-gray-600 px-1 py-1 text-center w-[55px] md:w-[5%]">E-Comm</th>
+              <th className="border border-gray-600 px-1 py-1 text-center w-[45px] md:w-[4%]">Toko</th>
+              <th className="border border-gray-600 px-1 py-1 text-left bg-gray-700/50 w-[70px] md:w-[7%]">Customer</th>
+              <th className="border border-gray-600 px-1 py-1 text-left bg-gray-700/80 border-b-2 border-b-yellow-600/50 w-[90px] md:w-[8%]">Part No.</th>
+              <th className="border border-gray-600 px-1 py-1 text-left w-[110px] md:w-[11%]">Nama (CSV)</th>
+              <th className="border border-gray-600 px-1 py-1 text-left w-[110px] md:w-[11%]">Nama (Base)</th>
+              <th className="border border-gray-600 px-1 py-1 text-left w-[55px] md:w-[5%]">Brand</th>
+              <th className="border border-gray-600 px-1 py-1 text-left w-[70px] md:w-[7%]">Aplikasi</th>
+              <th className="border border-gray-600 px-1 py-1 text-center w-[40px] md:w-[3%]">Stok</th>
+              <th className="border border-gray-600 px-1 py-1 text-center bg-gray-700/80 border-b-2 border-b-yellow-600/50 w-[40px] md:w-[3%]">Qty</th>
+              <th className="border border-gray-600 px-1 py-1 text-right bg-gray-700/80 border-b-2 border-b-yellow-600/50 w-[70px] md:w-[6%]">Total</th>
+              <th className="border border-gray-600 px-1 py-1 text-right w-[60px] md:w-[5%]">Satuan</th>
+              <th className="border border-gray-600 px-1 py-1 text-left w-[60px] md:w-[5%]">No. Pesanan</th>
+              <th className="border border-gray-600 px-1 py-1 text-center w-[35px] md:w-[2%]">#</th>
             </tr>
           </thead>
           <tbody className="bg-gray-900 text-gray-300">
             {displayedRows.length === 0 ? (
-              <tr><td colSpan={15} className="text-center py-10 text-gray-500 italic">Data Kosong. Silakan Import atau Load Pending.</td></tr>
+              <tr><td colSpan={17} className="text-center py-10 text-gray-500 italic">Data Kosong. Silakan Import atau Load Pending.</td></tr>
             ) : (
               displayedRows.map((row, idx) => (
                 <tr key={row.id} className={`group hover:bg-gray-800 transition-colors ${!row.is_db_verified ? 'bg-red-900/10' : !row.is_stock_valid ? 'bg-yellow-900/10' : ''}`}>

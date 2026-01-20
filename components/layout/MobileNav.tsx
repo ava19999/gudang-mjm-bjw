@@ -7,6 +7,8 @@ import { OnlineMenu } from '../online/OnlineMenu';
 import { ScanResiMenu } from '../scanResi/ScanResiMenu';
 import { NotificationBadge } from '../common/NotificationBadge';
 
+type OpenMenu = 'none' | 'finance' | 'online' | 'scanresi';
+
 interface MobileNavProps {
   isAdmin: boolean;
   activeView: ActiveView;
@@ -20,6 +22,18 @@ export const MobileNav: React.FC<MobileNavProps> = ({
 }) => {
   const [isVisible, setIsVisible] = useState(true);
   const [lastScrollY, setLastScrollY] = useState(0);
+  const [openMenu, setOpenMenu] = useState<OpenMenu>('none');
+
+  // Close menu when clicking outside or changing view
+  useEffect(() => {
+    const closeMenu = () => setOpenMenu('none');
+    document.addEventListener('click', closeMenu);
+    return () => document.removeEventListener('click', closeMenu);
+  }, []);
+
+  useEffect(() => {
+    setOpenMenu('none');
+  }, [activeView]);
 
   useEffect(() => {
     const handleScroll = () => {
@@ -43,11 +57,12 @@ export const MobileNav: React.FC<MobileNavProps> = ({
 
   return (
     <div 
-      className={`md:hidden fixed bottom-0 left-0 right-0 bg-gradient-to-t from-gray-800 via-gray-800 to-gray-800/95 border-t border-gray-700 pb-safe z-40 shadow-[0_-4px_24px_rgba(0,0,0,0.3)] backdrop-blur-sm transition-transform duration-300 ${
+      className={`md:hidden fixed bottom-0 left-0 right-0 bg-gradient-to-t from-gray-800 via-gray-800 to-gray-800/95 border-t border-gray-700 z-40 shadow-[0_-4px_24px_rgba(0,0,0,0.3)] backdrop-blur-sm transition-transform duration-300 ${
         isVisible ? 'translate-y-0' : 'translate-y-full'
       }`}
+      style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
     >
-      <div className={`grid ${isAdmin ? 'grid-cols-6' : 'grid-cols-2'} h-[56px]`}>
+      <div className={`grid ${isAdmin ? 'grid-cols-7' : 'grid-cols-2'} h-[56px]`}>
           {isAdmin ? (
               <>
                   <button 
@@ -83,11 +98,38 @@ export const MobileNav: React.FC<MobileNavProps> = ({
                       <span className={`text-[9px] font-medium transition-all ${activeView==='quick_input'?'text-green-300':'text-gray-500'}`}>Input</span>
                   </button>
                   
-                  <FinanceMenu activeView={activeView} setActiveView={setActiveView} isMobile={true} />
+                  <FinanceMenu 
+                    activeView={activeView} 
+                    setActiveView={setActiveView} 
+                    isMobile={true}
+                    isOpen={openMenu === 'finance'}
+                    onToggle={(e) => {
+                      e.stopPropagation();
+                      setOpenMenu(openMenu === 'finance' ? 'none' : 'finance');
+                    }}
+                  />
                   
-                  <OnlineMenu activeView={activeView} setActiveView={setActiveView} isMobile={true} />
+                  <OnlineMenu 
+                    activeView={activeView} 
+                    setActiveView={setActiveView} 
+                    isMobile={true}
+                    isOpen={openMenu === 'online'}
+                    onToggle={(e) => {
+                      e.stopPropagation();
+                      setOpenMenu(openMenu === 'online' ? 'none' : 'online');
+                    }}
+                  />
                   
-                  <ScanResiMenu activeView={activeView} setActiveView={setActiveView} isMobile={true} />
+                  <ScanResiMenu 
+                    activeView={activeView} 
+                    setActiveView={setActiveView} 
+                    isMobile={true}
+                    isOpen={openMenu === 'scanresi'}
+                    onToggle={(e) => {
+                      e.stopPropagation();
+                      setOpenMenu(openMenu === 'scanresi' ? 'none' : 'scanresi');
+                    }}
+                  />
                   
                   <button 
                       onClick={()=>setActiveView('orders')} 

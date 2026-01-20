@@ -7,24 +7,35 @@ interface OnlineMenuProps {
   activeView: ActiveView;
   setActiveView: (view: ActiveView) => void;
   isMobile?: boolean;
+  isOpen?: boolean;
+  onToggle?: (e: React.MouseEvent) => void;
 }
 
 export const OnlineMenu: React.FC<OnlineMenuProps> = ({ 
   activeView, 
   setActiveView,
-  isMobile = false 
+  isMobile = false,
+  isOpen: externalIsOpen,
+  onToggle 
 }) => {
-  const [isOpen, setIsOpen] = useState(false);
+  const [internalIsOpen, setInternalIsOpen] = useState(false);
+  
+  // Use external state for mobile, internal for desktop
+  const isOpen = isMobile && externalIsOpen !== undefined ? externalIsOpen : internalIsOpen;
   
   const isOnlineActive = activeView === 'data_agung';
 
-  const handleMainClick = () => {
-    setIsOpen(!isOpen);
+  const handleMainClick = (e: React.MouseEvent) => {
+    if (isMobile && onToggle) {
+      onToggle(e);
+    } else {
+      setInternalIsOpen(!internalIsOpen);
+    }
   };
 
   if (isMobile) {
     return (
-      <div className="relative">
+      <div className="relative" onClick={(e) => e.stopPropagation()}>
         <button 
           onClick={handleMainClick}
           className={`w-full flex flex-col items-center justify-center gap-0.5 transition-all duration-200 active:scale-95 ${
@@ -43,7 +54,6 @@ export const OnlineMenu: React.FC<OnlineMenuProps> = ({
             <button
               onClick={() => {
                 setActiveView('data_agung');
-                setIsOpen(false);
               }}
               className={`w-full px-3 py-2.5 text-left hover:bg-gray-700/80 transition-all duration-150 flex items-center gap-2.5 active:scale-[0.98] ${
                 activeView === 'data_agung' ? 'bg-gradient-to-r from-cyan-900/30 to-transparent text-cyan-400 shadow-inner' : 'text-gray-300'

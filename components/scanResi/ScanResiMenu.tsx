@@ -7,24 +7,35 @@ interface ScanResiMenuProps {
   activeView: ActiveView;
   setActiveView: (view: ActiveView) => void;
   isMobile?: boolean;
+  isOpen?: boolean;
+  onToggle?: (e: React.MouseEvent) => void;
 }
 
 export const ScanResiMenu: React.FC<ScanResiMenuProps> = ({ 
   activeView, 
   setActiveView,
-  isMobile = false 
+  isMobile = false,
+  isOpen: externalIsOpen,
+  onToggle 
 }) => {
-  const [isOpen, setIsOpen] = useState(false);
+  const [internalIsOpen, setInternalIsOpen] = useState(false);
+  
+  // Use external state for mobile, internal for desktop
+  const isOpen = isMobile && externalIsOpen !== undefined ? externalIsOpen : internalIsOpen;
   
   const isScanResiActive = ['scan_resi_stage1', 'scan_resi_stage2', 'scan_resi_stage3', 'scan_resi_history'].includes(activeView);
 
-  const handleMainClick = () => {
-    setIsOpen(!isOpen);
+  const handleMainClick = (e: React.MouseEvent) => {
+    if (isMobile && onToggle) {
+      onToggle(e);
+    } else {
+      setInternalIsOpen(!internalIsOpen);
+    }
   };
 
   if (isMobile) {
     return (
-      <div className="relative">
+      <div className="relative" onClick={(e) => e.stopPropagation()}>
         <button 
           onClick={handleMainClick}
           className={`w-full flex flex-col items-center justify-center gap-0.5 transition-all duration-200 active:scale-95 ${
@@ -43,7 +54,6 @@ export const ScanResiMenu: React.FC<ScanResiMenuProps> = ({
             <button
               onClick={() => {
                 setActiveView('scan_resi_stage1');
-                setIsOpen(false);
               }}
               className={`w-full px-3 py-2.5 text-left hover:bg-gray-700/80 transition-all duration-150 flex items-center gap-2.5 active:scale-[0.98] ${
                 activeView === 'scan_resi_stage1' ? 'bg-gradient-to-r from-green-900/30 to-transparent text-green-400 shadow-inner' : 'text-gray-300'
@@ -58,7 +68,6 @@ export const ScanResiMenu: React.FC<ScanResiMenuProps> = ({
             <button
               onClick={() => {
                 setActiveView('scan_resi_stage2');
-                setIsOpen(false);
               }}
               className={`w-full px-3 py-2.5 text-left hover:bg-gray-700/80 transition-all duration-150 flex items-center gap-2.5 active:scale-[0.98] ${
                 activeView === 'scan_resi_stage2' ? 'bg-gradient-to-r from-green-900/30 to-transparent text-green-400 shadow-inner' : 'text-gray-300'
@@ -73,7 +82,6 @@ export const ScanResiMenu: React.FC<ScanResiMenuProps> = ({
             <button
               onClick={() => {
                 setActiveView('scan_resi_stage3');
-                setIsOpen(false);
               }}
               className={`w-full px-3 py-2.5 text-left hover:bg-gray-700/80 transition-all duration-150 flex items-center gap-2.5 active:scale-[0.98] ${
                 activeView === 'scan_resi_stage3' ? 'bg-gradient-to-r from-green-900/30 to-transparent text-green-400 shadow-inner' : 'text-gray-300'
@@ -88,7 +96,6 @@ export const ScanResiMenu: React.FC<ScanResiMenuProps> = ({
             <button
               onClick={() => {
                 setActiveView('scan_resi_history');
-                setIsOpen(false);
               }}
               className={`w-full px-3 py-2.5 text-left hover:bg-gray-700/80 transition-all duration-150 flex items-center gap-2.5 active:scale-[0.98] ${
                 activeView === 'scan_resi_history' ? 'bg-gradient-to-r from-green-900/30 to-transparent text-green-400 shadow-inner' : 'text-gray-300'

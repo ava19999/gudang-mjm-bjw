@@ -7,29 +7,35 @@ interface FinanceMenuProps {
   activeView: ActiveView;
   setActiveView: (view: ActiveView) => void;
   isMobile?: boolean;
+  isOpen?: boolean;
+  onToggle?: (e: React.MouseEvent) => void;
 }
 
 export const FinanceMenu: React.FC<FinanceMenuProps> = ({ 
   activeView, 
   setActiveView,
-  isMobile = false 
+  isMobile = false,
+  isOpen: externalIsOpen,
+  onToggle 
 }) => {
-  const [isOpen, setIsOpen] = useState(false);
+  const [internalIsOpen, setInternalIsOpen] = useState(false);
+  
+  // Use external state for mobile, internal for desktop
+  const isOpen = isMobile && externalIsOpen !== undefined ? externalIsOpen : internalIsOpen;
   
   const isFinanceActive = activeView === 'petty_cash' || activeView === 'barang_kosong' || activeView === 'closing';
 
-  const handleMainClick = () => {
-    if (isMobile) {
-      setIsOpen(!isOpen);
+  const handleMainClick = (e: React.MouseEvent) => {
+    if (isMobile && onToggle) {
+      onToggle(e);
     } else {
-      // On desktop, toggle dropdown
-      setIsOpen(!isOpen);
+      setInternalIsOpen(!internalIsOpen);
     }
   };
 
   if (isMobile) {
     return (
-      <div className="relative">
+      <div className="relative" onClick={(e) => e.stopPropagation()}>
         <button 
           onClick={handleMainClick}
           className={`w-full flex flex-col items-center justify-center gap-0.5 transition-all duration-200 active:scale-95 ${
@@ -48,7 +54,6 @@ export const FinanceMenu: React.FC<FinanceMenuProps> = ({
             <button
               onClick={() => {
                 setActiveView('petty_cash');
-                setIsOpen(false);
               }}
               className={`w-full px-3 py-2.5 text-left hover:bg-gray-700/80 transition-all duration-150 flex items-center gap-2.5 active:scale-[0.98] ${
                 activeView === 'petty_cash' ? 'bg-gradient-to-r from-green-900/30 to-transparent text-green-400 shadow-inner' : 'text-gray-300'
@@ -62,7 +67,6 @@ export const FinanceMenu: React.FC<FinanceMenuProps> = ({
             <button
               onClick={() => {
                 setActiveView('barang_kosong');
-                setIsOpen(false);
               }}
               className={`w-full px-3 py-2.5 text-left hover:bg-gray-700/80 transition-all duration-150 flex items-center gap-2.5 border-t border-gray-700/50 active:scale-[0.98] ${
                 activeView === 'barang_kosong' ? 'bg-gradient-to-r from-yellow-900/30 to-transparent text-yellow-400 shadow-inner' : 'text-gray-300'
@@ -76,7 +80,6 @@ export const FinanceMenu: React.FC<FinanceMenuProps> = ({
             <button
               onClick={() => {
                 setActiveView('closing');
-                setIsOpen(false);
               }}
               className={`w-full px-3 py-2.5 text-left hover:bg-gray-700/80 transition-all duration-150 flex items-center gap-2.5 border-t border-gray-700/50 active:scale-[0.98] ${
                 activeView === 'closing' ? 'bg-gradient-to-r from-blue-900/30 to-transparent text-blue-400 shadow-inner' : 'text-gray-300'
