@@ -44,12 +44,21 @@ export const OrderManagement: React.FC = () => {
   const [inventory, setInventory] = useState([]);
   const [selectedItem, setSelectedItem] = useState(null);
 
-  // Fetch inventory for Autocomplete
+
+  // Fetch inventory for Autocomplete dari kedua toko
   useEffect(() => {
     if (editingId) {
-      fetchInventory(selectedStore).then((data) => setInventory(data));
+      Promise.all([
+        fetchInventory('mjm'),
+        fetchInventory('bjw')
+      ]).then(([invMjm, invBjw]) => {
+        // Gabungkan, hilangkan duplikat berdasarkan partNumber
+        const all = [...invMjm, ...invBjw];
+        const unique = Array.from(new Map(all.map(item => [item.partNumber, item])).values());
+        setInventory(unique);
+      });
     }
-  }, [editingId, selectedStore]);
+  }, [editingId]);
 
   // Update selectedItem when partNumber changes
   useEffect(() => {

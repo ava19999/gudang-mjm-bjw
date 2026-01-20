@@ -385,7 +385,7 @@ export const fetchShopItems = async (
 // 1. UPDATE DATA ORDER (Fitur Edit)
 export const updateOfflineOrder = async (
   id: string,
-  updates: { partNumber: string; quantity: number; price: number },
+  updates: { partNumber: string; quantity: number; price: number; nama_barang?: string },
   store: string | null
 ): Promise<{ success: boolean; msg: string }> => {
   const table = store === 'mjm' ? 'orders_mjm' : (store === 'bjw' ? 'orders_bjw' : null);
@@ -393,15 +393,17 @@ export const updateOfflineOrder = async (
 
   try {
     const hargaTotal = updates.quantity * updates.price;
-    
+    const updatePayload: any = {
+      part_number: updates.partNumber,
+      quantity: updates.quantity,
+      harga_satuan: updates.price,
+      harga_total: hargaTotal
+    };
+    if (updates.nama_barang) updatePayload.nama_barang = updates.nama_barang;
+
     const { error } = await supabase
       .from(table)
-      .update({
-        part_number: updates.partNumber,
-        quantity: updates.quantity,
-        harga_satuan: updates.price,
-        harga_total: hargaTotal
-      })
+      .update(updatePayload)
       .eq('id', id);
 
     if (error) throw error;
