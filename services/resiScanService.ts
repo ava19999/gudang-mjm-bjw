@@ -1,6 +1,8 @@
 // FILE: services/resiScanService.ts
 import { supabase } from './supabaseClient';
 import { ResiScanStage, ResiItem, ResellerMaster, ParsedCSVItem } from '../types';
+// [UBAH] Import helper timezone
+import { getWIBDate } from '../utils/timezone';
 
 // ============================================================================
 // HELPER: Table Name Selector
@@ -40,9 +42,10 @@ export const scanResiStage1 = async (
       ecommerce: data.ecommerce,
       sub_toko: data.sub_toko,
       negara_ekspor: data.negara_ekspor || null,
-      tanggal: new Date().toISOString(),
+      // [UBAH] Gunakan getWIBDate()
+      tanggal: getWIBDate().toISOString(),
       stage1_scanned: 'true', 
-      stage1_scanned_at: new Date().toISOString(),
+      stage1_scanned_at: getWIBDate().toISOString(),
       stage1_scanned_by: data.scanned_by,
       status: 'stage1'
     };
@@ -157,7 +160,8 @@ export const verifyResiStage2 = async (
     .from(table)
     .update({
       stage2_verified: 'true',
-      stage2_verified_at: new Date().toISOString(),
+      // [UBAH] Gunakan getWIBDate()
+      stage2_verified_at: getWIBDate().toISOString(),
       stage2_verified_by: verified_by,
       status: 'stage2'
     })
@@ -314,7 +318,9 @@ export const processBarangKeluarBatch = async (items: any[], store: string | nul
         harga_satuan: item.harga_satuan,
         harga_total: item.harga_total,
         stock_ahir: newStock,
-        tempo: 'LUNAS'
+        tempo: 'LUNAS',
+        // [UBAH] Tambahkan created_at dengan getWIBDate()
+        created_at: getWIBDate().toISOString()
       };
       
       const { error: logErr } = await supabase.from(logTable).insert([logPayload]);
@@ -406,7 +412,8 @@ export const saveCSVToResiItems = async (
         ecommerce: item.ecommerce, 
         toko: fixedToko,           
         status: 'pending',
-        created_at: new Date().toISOString()
+        // [UBAH] Gunakan getWIBDate()
+        created_at: getWIBDate().toISOString()
       };
     });
 

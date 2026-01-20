@@ -3,11 +3,12 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useStore } from '../context/StoreContext';
 import { 
   fetchOfflineOrders, fetchSoldItems, fetchReturItems,
-  processOfflineOrderItem
+  processOfflineOrderItem, updateOfflineOrder
 } from '../services/supabaseService';
 import { OfflineOrderRow, SoldItemRow, ReturRow } from '../types';
 import { 
-  ClipboardList, Wifi, CheckCircle, RotateCcw, Search, RefreshCw, Box, Check, X, ChevronDown, ChevronUp, Layers, User
+  ClipboardList, CheckCircle, RotateCcw, Search, RefreshCw, Box, Check, X, 
+  ChevronDown, ChevronUp, Layers, User, Pencil, Save, XCircle
 } from 'lucide-react';
 
 // Toast Component Sederhana
@@ -25,13 +26,17 @@ export const OrderManagement: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [toast, setToast] = useState<{msg: string, type: 'success'|'error'} | null>(null);
   
-  // State untuk expand/collapse kartu grup
+  // State Grouping
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
 
-  // Data State
+  // State Data
   const [offlineData, setOfflineData] = useState<OfflineOrderRow[]>([]);
   const [soldData, setSoldData] = useState<SoldItemRow[]>([]);
   const [returData, setReturData] = useState<ReturRow[]>([]);
+
+  // State Edit
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState({ partNumber: '', quantity: 0, price: 0 });
 
   const showToast = (msg: string, type: 'success'|'error' = 'success') => {
     setToast({msg, type});
@@ -52,57 +57,84 @@ export const OrderManagement: React.FC = () => {
 
   useEffect(() => { loadData(); }, [selectedStore, activeTab]);
 
-  // --- LOGIC PENGELOMPOKAN OFFLINE (GROUPING) ---
+  // --- LOGIC GROUPING ---
   const groupedOfflineOrders = useMemo(() => {
     const groups: Record<string, { id: string, customer: string, tempo: string, date: string, items: OfflineOrderRow[], totalAmount: number }> = {};
-    
     offlineData.forEach(item => {
-      // Normalisasi Nama Customer untuk grouping
       const safeCustomer = (item.customer || 'Tanpa Nama').trim();
       const safeTempo = (item.tempo || 'CASH').trim();
-      
-      // Kunci Grouping: Nama + Tempo
       const key = `${safeCustomer}-${safeTempo}`;
-      
       if (!groups[key]) {
         groups[key] = {
-          id: key,
-          customer: safeCustomer,
-          tempo: safeTempo,
-          date: item.tanggal,
-          items: [],
-          totalAmount: 0
+          id: key, customer: safeCustomer, tempo: safeTempo, date: item.tanggal, items: [], totalAmount: 0
         };
       }
       groups[key].items.push(item);
       groups[key].totalAmount += (Number(item.harga_total) || 0);
     });
-
-    // Ubah object ke array & urutkan berdasarkan tanggal terbaru
     return Object.values(groups).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   }, [offlineData]);
 
   // --- HANDLERS ---
 
-  // Proses SATUAN (Offline)
-  const handleProcessItem = async (item: OfflineOrderRow, action: 'Proses' | 'Tolak') => {
-    if (!confirm(`Yakin ingin ${action} barang ini: ${item.nama_barang}?`)) return;
+  // 1. EDIT HANDLERS
+  const startEdit = (item: OfflineOrderRow) => {
+    setEditingId(item.id);
+    setEditForm({
+      partNumber: item.part_number,
+      quantity: item.quantity,
+      price: item.harga_satuan
+    });
+  };
+
+  const cancelEdit = () => {
+    setEditingId(null);
+  };
+
+  const saveEdit = async (id: string) => {
     setLoading(true);
-    const res = await processOfflineOrderItem(item, selectedStore, action);
+    const res = await updateOfflineOrder(id, editForm, selectedStore);
     setLoading(false);
     
     if (res.success) {
-      showToast(action === 'Proses' ? 'Barang di-ACC' : 'Barang Ditolak');
+      showToast('Item berhasil diupdate');
+      setEditingId(null);
       loadData();
     } else {
       showToast(res.msg, 'error');
     }
   };
 
-  // Proses SEMUA dalam satu Grup (Offline)
+  // 2. PROSES / TOLAK HANDLERS
+  const handleProcessItem = async (item: OfflineOrderRow, action: 'Proses' | 'Tolak') => {
+    if (editingId === item.id) {
+        showToast("Simpan perubahan edit dulu sebelum memproses!", 'error');
+        return;
+    }
+
+    const actionText = action === 'Proses' ? 'ACC' : 'TOLAK (Hapus)';
+    if (!confirm(`Yakin ingin ${actionText} barang ini: ${item.nama_barang}?`)) return;
+    
+    setLoading(true);
+    const res = await processOfflineOrderItem(item, selectedStore, action);
+    setLoading(false);
+    
+    if (res.success) {
+      showToast(action === 'Proses' ? 'Barang di-ACC & Masuk Terjual' : 'Barang Ditolak & Dihapus');
+      loadData();
+    } else {
+      showToast(res.msg, 'error');
+    }
+  };
+
   const handleProcessGroup = async (items: OfflineOrderRow[], action: 'Proses' | 'Tolak') => {
-    const actionText = action === 'Proses' ? 'ACC / TERIMA' : 'TOLAK';
-    if (!confirm(`Yakin ingin ${actionText} SEMUA (${items.length} item) untuk pelanggan ini?`)) return;
+    if (items.some(i => i.id === editingId)) {
+        showToast("Ada item yang sedang diedit. Simpan atau batalkan dulu.", 'error');
+        return;
+    }
+
+    const actionText = action === 'Proses' ? 'ACC SEMUA' : 'TOLAK SEMUA (Hapus)';
+    if (!confirm(`Yakin ingin ${actionText} (${items.length} item)?`)) return;
     
     setLoading(true);
     let successCount = 0;
@@ -113,11 +145,9 @@ export const OrderManagement: React.FC = () => {
     }
     
     setLoading(false);
-    showToast(`Berhasil memproses ${successCount} dari ${items.length} item.`);
+    showToast(`${successCount} item berhasil diproses.`);
     loadData();
   };
-
-  // ...existing code...
 
   const toggleExpand = (key: string) => {
     setExpandedGroups(prev => ({ ...prev, [key]: !prev[key] }));
@@ -125,7 +155,6 @@ export const OrderManagement: React.FC = () => {
 
   const formatRupiah = (val: number) => `Rp ${val.toLocaleString('id-ID')}`;
 
-  // Filter Search Logic (Terjual, Retur)
   const filterList = (list: any[]) => {
     if (!searchTerm) return list;
     const lower = searchTerm.toLowerCase();
@@ -137,7 +166,6 @@ export const OrderManagement: React.FC = () => {
     );
   };
 
-  // Filter Search Logic (Offline Grouped)
   const filteredGroupedOffline = groupedOfflineOrders.filter(group => 
     group.customer.toLowerCase().includes(searchTerm.toLowerCase()) ||
     group.items.some(i => i.nama_barang.toLowerCase().includes(searchTerm.toLowerCase()))
@@ -206,8 +234,6 @@ export const OrderManagement: React.FC = () => {
                   {/* GROUP HEADER */}
                   <div className="p-4 flex flex-col md:flex-row justify-between gap-4 bg-gray-800">
                     <div className="flex-1 cursor-pointer select-none" onClick={() => toggleExpand(groupKey)}>
-                      
-                      {/* Baris Atas Info */}
                       <div className="flex items-center gap-3 mb-2">
                         <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${group.tempo === 'CASH' ? 'bg-green-900/30 border-green-800 text-green-400' : 'bg-orange-900/30 border-orange-800 text-orange-400'}`}>
                           {group.tempo}
@@ -219,8 +245,6 @@ export const OrderManagement: React.FC = () => {
                           <Layers size={10} /> {group.items.length} Item
                         </span>
                       </div>
-
-                      {/* Nama Customer */}
                       <div className="flex items-center gap-2">
                         {isExpanded ? <ChevronUp size={20} className="text-purple-400"/> : <ChevronDown size={20} className="text-gray-400"/>}
                         <h3 className="font-bold text-lg text-white flex items-center gap-2">
@@ -229,63 +253,112 @@ export const OrderManagement: React.FC = () => {
                       </div>
                     </div>
 
-                    {/* Total & Action Buttons */}
                     <div className="flex flex-col items-end gap-2 border-t md:border-t-0 border-gray-700 pt-3 md:pt-0">
                       <div>
                         <span className="text-gray-400 text-xs mr-2">Total Tagihan:</span>
                         <span className="text-xl font-bold text-green-400">{formatRupiah(group.totalAmount)}</span>
                       </div>
                       <div className="flex gap-2 w-full md:w-auto">
-                        <button 
-                          onClick={() => handleProcessGroup(group.items, 'Tolak')}
-                          className="flex-1 md:flex-none bg-red-900/20 text-red-400 px-4 py-2 rounded-lg hover:bg-red-900/40 border border-red-900/50 text-xs font-bold flex items-center justify-center gap-2 transition-colors"
-                        >
+                        <button onClick={() => handleProcessGroup(group.items, 'Tolak')} className="flex-1 md:flex-none bg-red-900/20 text-red-400 px-4 py-2 rounded-lg hover:bg-red-900/40 border border-red-900/50 text-xs font-bold flex items-center justify-center gap-2 transition-colors">
                           <X size={14}/> TOLAK SEMUA
                         </button>
-                        <button 
-                          onClick={() => handleProcessGroup(group.items, 'Proses')}
-                          className="flex-1 md:flex-none bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-500 shadow-lg shadow-blue-900/30 text-xs font-bold flex items-center justify-center gap-2 transition-colors"
-                        >
+                        <button onClick={() => handleProcessGroup(group.items, 'Proses')} className="flex-1 md:flex-none bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-500 shadow-lg shadow-blue-900/30 text-xs font-bold flex items-center justify-center gap-2 transition-colors">
                           <Check size={14}/> ACC SEMUA
                         </button>
                       </div>
                     </div>
                   </div>
 
-                  {/* ITEM LIST (EXPANDABLE) */}
+                  {/* ITEM LIST (EDITABLE) */}
                   {isExpanded && (
                     <div className="bg-gray-900/80 border-t border-gray-700 p-2 space-y-2 animate-in slide-in-from-top-2 duration-200">
-                      {group.items.map((item, idx) => (
-                        <div key={`${item.id}-${idx}`} className="flex justify-between items-center p-3 bg-gray-800 rounded-lg border border-gray-700 hover:border-gray-600 ml-4 mr-2">
-                          <div>
-                            <p className="text-sm font-bold text-white">{item.nama_barang}</p>
-                            <p className="text-[10px] text-gray-500 font-mono">Part: {item.part_number}</p>
+                      {group.items.map((item, idx) => {
+                        const isEditing = editingId === item.id;
+
+                        return (
+                        <div key={`${item.id}-${idx}`} className={`flex flex-col md:flex-row justify-between items-center p-3 rounded-lg border ml-4 mr-2 ${isEditing ? 'bg-gray-800 border-blue-500/50 ring-1 ring-blue-500/30' : 'bg-gray-800 border-gray-700 hover:border-gray-600'}`}>
+                          
+                          {/* BAGIAN KIRI: INFO / INPUT */}
+                          <div className="w-full md:w-auto flex-1 mr-4">
+                            {!isEditing ? (
+                                <>
+                                  <p className="text-sm font-bold text-white">{item.nama_barang}</p>
+                                  <p className="text-[10px] text-gray-500 font-mono">Part: {item.part_number}</p>
+                                </>
+                            ) : (
+                                <div className="space-y-2 w-full">
+                                    <div className="flex flex-col">
+                                        <label className="text-[10px] text-gray-400">Part Number</label>
+                                        <input 
+                                            value={editForm.partNumber}
+                                            onChange={(e) => setEditForm({...editForm, partNumber: e.target.value})}
+                                            className="bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs text-white focus:ring-1 focus:ring-blue-500 outline-none"
+                                        />
+                                    </div>
+                                </div>
+                            )}
                           </div>
-                          <div className="flex items-center gap-4">
+
+                          {/* BAGIAN KANAN: QTY, HARGA, ACTIONS */}
+                          <div className="flex items-center gap-4 w-full md:w-auto mt-2 md:mt-0 justify-between md:justify-end">
                             <div className="text-right">
-                              <p className="text-sm font-bold text-white">{item.quantity} x {formatRupiah(item.harga_satuan)}</p>
-                              <p className="text-xs text-green-400 font-mono">{formatRupiah(item.harga_total)}</p>
+                              {!isEditing ? (
+                                  <>
+                                    <p className="text-sm font-bold text-white">{item.quantity} x {formatRupiah(item.harga_satuan)}</p>
+                                    <p className="text-xs text-green-400 font-mono">{formatRupiah(item.harga_total)}</p>
+                                  </>
+                              ) : (
+                                  <div className="flex gap-2 items-end">
+                                      <div className="flex flex-col w-16">
+                                          <label className="text-[10px] text-gray-400">Qty</label>
+                                          <input 
+                                              type="number"
+                                              value={editForm.quantity}
+                                              onChange={(e) => setEditForm({...editForm, quantity: Number(e.target.value)})}
+                                              className="bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs text-white text-center focus:ring-1 focus:ring-blue-500 outline-none"
+                                          />
+                                      </div>
+                                      <div className="flex flex-col w-28">
+                                          <label className="text-[10px] text-gray-400">Harga</label>
+                                          <input 
+                                              type="number"
+                                              value={editForm.price}
+                                              onChange={(e) => setEditForm({...editForm, price: Number(e.target.value)})}
+                                              className="bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs text-white text-right focus:ring-1 focus:ring-blue-500 outline-none"
+                                          />
+                                      </div>
+                                  </div>
+                              )}
                             </div>
-                            {/* Tombol Aksi Satuan */}
+
+                            {/* TOMBOL AKSI */}
                             <div className="flex gap-1">
-                              <button 
-                                onClick={() => handleProcessItem(item, 'Tolak')} 
-                                className="p-1.5 rounded bg-red-900/20 text-red-400 hover:bg-red-900/50 transition-colors" 
-                                title="Tolak Satu Ini"
-                              >
-                                <X size={14}/>
-                              </button>
-                              <button 
-                                onClick={() => handleProcessItem(item, 'Proses')} 
-                                className="p-1.5 rounded bg-blue-900/20 text-blue-400 hover:bg-blue-900/50 transition-colors" 
-                                title="ACC Satu Ini"
-                              >
-                                <Check size={14}/>
-                              </button>
+                                {!isEditing ? (
+                                    <>
+                                        <button onClick={() => startEdit(item)} className="p-1.5 rounded bg-gray-700 text-gray-300 hover:bg-gray-600 transition-colors" title="Edit">
+                                            <Pencil size={14}/>
+                                        </button>
+                                        <button onClick={() => handleProcessItem(item, 'Tolak')} className="p-1.5 rounded bg-red-900/20 text-red-400 hover:bg-red-900/50 transition-colors" title="Tolak">
+                                            <X size={14}/>
+                                        </button>
+                                        <button onClick={() => handleProcessItem(item, 'Proses')} className="p-1.5 rounded bg-blue-900/20 text-blue-400 hover:bg-blue-900/50 transition-colors" title="ACC">
+                                            <Check size={14}/>
+                                        </button>
+                                    </>
+                                ) : (
+                                    <>
+                                        <button onClick={cancelEdit} className="p-1.5 rounded bg-red-600 text-white hover:bg-red-500 transition-colors" title="Batal">
+                                            <XCircle size={16}/>
+                                        </button>
+                                        <button onClick={() => saveEdit(item.id)} className="p-1.5 rounded bg-green-600 text-white hover:bg-green-500 transition-colors" title="Simpan">
+                                            <Save size={16}/>
+                                        </button>
+                                    </>
+                                )}
                             </div>
                           </div>
                         </div>
-                      ))}
+                      )})}
                     </div>
                   )}
                 </div>
@@ -294,9 +367,7 @@ export const OrderManagement: React.FC = () => {
           </div>
         )}
 
-        {/* Tab ONLINE (Resi) dihapus, proses scan resi akan langsung ke Barang Keluar */}
-
-        {/* --- 3. TAB TERJUAL (History Barang Keluar) --- */}
+        {/* --- 3. TAB TERJUAL & RETUR (TIDAK BERUBAH) --- */}
         {activeTab === 'TERJUAL' && (
           <div className="space-y-2">
             {filterList(soldData).length === 0 && <EmptyState msg="Belum ada data penjualan." />}
@@ -319,7 +390,6 @@ export const OrderManagement: React.FC = () => {
           </div>
         )}
 
-        {/* --- 4. TAB RETUR --- */}
         {activeTab === 'RETUR' && (
           <div className="space-y-3">
             {filterList(returData).length === 0 && <EmptyState msg="Tidak ada data retur." />}
