@@ -501,7 +501,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
       </div>
 
       {/* EXCEL-LIKE TABLE */}
-      <div className="flex-1 overflow-x-auto overflow-y-auto border border-gray-600 bg-gray-800 shadow-inner relative" style={{ maxWidth: '100%', width: '100%' }}>
+      <div className="flex-1 table-wrapper border border-gray-600 bg-gray-800 shadow-inner custom-scrollbar">
         <table className="border-collapse text-xs" style={{ minWidth: '100%', width: 'max-content' }}>
           <thead className="sticky top-0 z-10 shadow-sm">
             <tr className="bg-gray-700 text-gray-200 font-semibold">

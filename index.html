@@ -85,6 +85,29 @@
           max-width: none !important;
         }
       }
+      
+      /* Table wrapper for responsive design */
+      .table-wrapper {
+        overflow-x: auto;
+        overflow-y: auto;
+        width: 100%;
+        position: relative;
+      }
+      
+      /* Ensure table stays responsive on zoom */
+      .table-wrapper table {
+        border-collapse: collapse;
+        min-width: 100%;
+        width: max-content;
+      }
+      
+      /* Handle text in table cells to prevent overflow */
+      .table-wrapper td,
+      .table-wrapper th {
+        overflow: hidden;
+        word-wrap: break-word;
+        white-space: normal;
+      }
     </style>
   </head>
   <body class="bg-gray-900 text-gray-100 m-0 p-0">
