@@ -404,7 +404,7 @@ const AppContent: React.FC = () => {
         )}
       </div>
 
-      <MobileNav isAdmin={isAdmin} activeView={activeView} setActiveView={setActiveView} />
+      <MobileNav isAdmin={isAdmin} activeView={activeView} setActiveView={setActiveView} pendingOrdersCount={0} myPendingOrdersCount={0} />
     </div>
   );
 };

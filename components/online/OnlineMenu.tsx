@@ -27,32 +27,32 @@ export const OnlineMenu: React.FC<OnlineMenuProps> = ({
       <div className="relative">
         <button 
           onClick={handleMainClick}
-          className={`w-full flex flex-col items-center justify-center gap-1.5 transition-all duration-200 active:scale-95 ${
+          className={`w-full flex flex-col items-center justify-center gap-0.5 transition-all duration-200 active:scale-95 ${
             isOnlineActive ? 'text-cyan-400' : 'text-gray-500 hover:text-gray-300'
           }`}
         >
-          {isOnlineActive && <div className="absolute top-0 left-1/2 -translate-x-1/2 w-12 h-1 bg-gradient-to-r from-transparent via-cyan-400 to-transparent rounded-full"></div>}
-          <div className={`p-2 rounded-xl transition-all duration-200 ${isOnlineActive ? 'bg-cyan-900/30 shadow-lg shadow-cyan-900/20' : 'bg-transparent'}`}>
-            <Globe size={22} className={`transition-all duration-200 ${isOnlineActive ? 'fill-cyan-900/50 drop-shadow-sm' : ''}`} />
+          {isOnlineActive && <div className="absolute top-0 left-1/2 -translate-x-1/2 w-10 h-0.5 bg-gradient-to-r from-transparent via-cyan-400 to-transparent rounded-full"></div>}
+          <div className={`p-1.5 rounded-lg transition-all duration-200 ${isOnlineActive ? 'bg-cyan-900/30 shadow-lg shadow-cyan-900/20' : 'bg-transparent'}`}>
+            <Globe size={18} className={`transition-all duration-200 ${isOnlineActive ? 'fill-cyan-900/50 drop-shadow-sm' : ''}`} />
           </div>
-          <span className={`text-[10px] font-semibold transition-all ${isOnlineActive ? 'text-cyan-300' : 'text-gray-500'}`}>Online</span>
+          <span className={`text-[9px] font-medium transition-all ${isOnlineActive ? 'text-cyan-300' : 'text-gray-500'}`}>Online</span>
         </button>
 
         {isOpen && (
-          <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-3 bg-gray-800/95 backdrop-blur-sm border border-gray-700 rounded-2xl shadow-2xl overflow-hidden min-w-[200px] animate-in slide-in-from-bottom-2 fade-in duration-200">
+          <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 bg-gray-800/95 backdrop-blur-sm border border-gray-700 rounded-xl shadow-2xl overflow-hidden min-w-[180px] animate-in slide-in-from-bottom-2 fade-in duration-200">
             <button
               onClick={() => {
                 setActiveView('data_agung');
                 setIsOpen(false);
               }}
-              className={`w-full px-4 py-3.5 text-left hover:bg-gray-700/80 transition-all duration-150 flex items-center gap-3 active:scale-[0.98] ${
+              className={`w-full px-3 py-2.5 text-left hover:bg-gray-700/80 transition-all duration-150 flex items-center gap-2.5 active:scale-[0.98] ${
                 activeView === 'data_agung' ? 'bg-gradient-to-r from-cyan-900/30 to-transparent text-cyan-400 shadow-inner' : 'text-gray-300'
               }`}
             >
-              <div className={`p-1.5 rounded-lg ${activeView === 'data_agung' ? 'bg-cyan-900/40' : 'bg-gray-700/50'}`}>
-                <Globe size={18} />
+              <div className={`p-1 rounded-lg ${activeView === 'data_agung' ? 'bg-cyan-900/40' : 'bg-gray-700/50'}`}>
+                <Globe size={16} />
               </div>
-              <span className="text-sm font-semibold">Data Agung</span>
+              <span className="text-sm font-medium">Data Agung</span>
             </button>
           </div>
         )}
