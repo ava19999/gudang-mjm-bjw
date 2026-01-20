@@ -70,6 +70,21 @@
           padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
         }
       }
+      
+      /* Ensure tables handle zoom properly */
+      .overflow-x-auto {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        /* Ensure content is not clipped on zoom */
+        position: relative;
+      }
+      
+      /* Prevent content cutoff on zoom */
+      @media screen {
+        .overflow-x-auto > * {
+          max-width: none !important;
+        }
+      }
     </style>
   </head>
   <body class="bg-gray-900 text-gray-100 m-0 p-0">
