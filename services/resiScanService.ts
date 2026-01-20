@@ -200,7 +200,6 @@ export const checkResiStatus = async (resis: string[], store: string | null) => 
   const table = getTableName(store);
   if (resis.length === 0) return [];
   
-  // Ambil 'ecommerce' dan 'sub_toko' dari DB untuk validasi
   const { data, error } = await supabase
     .from(table)
     .select('resi, stage1_scanned, stage2_verified, status, ecommerce, sub_toko')
@@ -220,12 +219,10 @@ export const lookupPartNumberInfo = async (sku: string, store: string | null) =>
   return data;
 };
 
-// [BARU] AMBIL STOK BANYAK SEKALIGUS (BULK)
 export const getBulkPartNumberInfo = async (skus: string[], store: string | null) => {
   const table = getStockTable(store);
   if (skus.length === 0) return [];
   
-  // Unique SKU only
   const uniqueSkus = [...new Set(skus)].filter(Boolean);
 
   const { data, error } = await supabase
@@ -326,7 +323,7 @@ export const processBarangKeluarBatch = async (items: any[], store: string | nul
         continue;
       }
 
-      // 3. Update Status di Tabel SCAN RESI (Stage 2 -> Completed)
+      // 3. Update Status di Tabel SCAN RESI
       const { data: pendingRows } = await supabase
         .from(scanTable)
         .select('id')
@@ -353,7 +350,7 @@ export const processBarangKeluarBatch = async (items: any[], store: string | nul
           .eq('id', pendingRows[0].id);
       }
 
-      // 4. Update Status di Tabel CSV (Processed)
+      // 4. Update Status di Tabel CSV
       if (csvTable) {
          await supabase
            .from(csvTable)
@@ -371,9 +368,6 @@ export const processBarangKeluarBatch = async (items: any[], store: string | nul
   return { success: errors.length === 0, processed: successCount, errors };
 };
 
-// ============================================================================
-// FUNGSI SIMPAN KE TABEL RESI_ITEMS (DELETE THEN INSERT)
-// ============================================================================
 export const saveCSVToResiItems = async (
   items: ParsedCSVItem[], 
   store: string | null
@@ -384,10 +378,8 @@ export const saveCSVToResiItems = async (
   if (!items || items.length === 0) return { success: false, message: 'Tidak ada data untuk disimpan', count: 0 };
 
   try {
-    // 1. Ambil daftar resi yang akan disimpan
     const resiList = [...new Set(items.map(i => i.resi))];
 
-    // 2. HAPUS data lama yang statusnya masih 'pending'
     const { error: deleteError } = await supabase
       .from(tableName)
       .delete()
@@ -398,7 +390,6 @@ export const saveCSVToResiItems = async (
       console.warn("Warning hapus data lama:", deleteError.message);
     }
 
-    // 3. SIAPKAN DATA BARU
     const payload = items.map(item => {
       const fixedToko = (item as any).sub_toko || store?.toUpperCase();
       
@@ -419,7 +410,6 @@ export const saveCSVToResiItems = async (
       };
     });
 
-    // 4. INSERT DATA BARU
     const { error } = await supabase
       .from(tableName)
       .insert(payload); 
@@ -435,13 +425,10 @@ export const saveCSVToResiItems = async (
   }
 };
 
-// ============================================================================
-// FUNGSI UPDATE ITEM (Simpan saat Edit & Enter/Blur)
-// ============================================================================
 export const updateResiItem = async (
   store: string | null,
-  id: string | number, // ID dari database
-  payload: any         // Data yang mau diupdate
+  id: string | number,
+  payload: any
 ) => {
   const table = store === 'mjm' ? 'resi_items_mjm' : (store === 'bjw' ? 'resi_items_bjw' : null);
   if (!table) return { success: false, message: 'Toko tidak valid' };
@@ -457,5 +444,30 @@ export const updateResiItem = async (
   } catch (err: any) {
     console.error('Update gagal:', err);
     return { success: false, message: err.message };
+  }
+};
+
+// ============================================================================
+// [BARU] FUNGSI INSERT SATU ITEM (Untuk Split / Item Baru Manual)
+// ============================================================================
+export const insertResiItem = async (
+  store: string | null,
+  payload: any
+): Promise<string | null> => {
+  const table = store === 'mjm' ? 'resi_items_mjm' : (store === 'bjw' ? 'resi_items_bjw' : null);
+  if (!table) return null;
+
+  try {
+    const { data, error } = await supabase
+      .from(table)
+      .insert([payload])
+      .select('id')
+      .single();
+
+    if (error) throw error;
+    return data?.id || null;
+  } catch (err: any) {
+    console.error('Insert gagal:', err);
+    return null;
   }
 };
