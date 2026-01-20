@@ -27,32 +27,32 @@ export const ScanResiMenu: React.FC<ScanResiMenuProps> = ({
       <div className="relative">
         <button 
           onClick={handleMainClick}
-          className={`w-full flex flex-col items-center justify-center gap-1.5 transition-all duration-200 active:scale-95 ${
+          className={`w-full flex flex-col items-center justify-center gap-0.5 transition-all duration-200 active:scale-95 ${
             isScanResiActive ? 'text-green-400' : 'text-gray-500 hover:text-gray-300'
           }`}
         >
-          {isScanResiActive && <div className="absolute top-0 left-1/2 -translate-x-1/2 w-12 h-1 bg-gradient-to-r from-transparent via-green-400 to-transparent rounded-full"></div>}
-          <div className={`p-2 rounded-xl transition-all duration-200 ${isScanResiActive ? 'bg-green-900/30 shadow-lg shadow-green-900/20' : 'bg-transparent'}`}>
-            <Scan size={22} className={`transition-all duration-200 ${isScanResiActive ? 'fill-green-900/50 drop-shadow-sm' : ''}`} />
+          {isScanResiActive && <div className="absolute top-0 left-1/2 -translate-x-1/2 w-10 h-0.5 bg-gradient-to-r from-transparent via-green-400 to-transparent rounded-full"></div>}
+          <div className={`p-1.5 rounded-lg transition-all duration-200 ${isScanResiActive ? 'bg-green-900/30 shadow-lg shadow-green-900/20' : 'bg-transparent'}`}>
+            <Scan size={18} className={`transition-all duration-200 ${isScanResiActive ? 'fill-green-900/50 drop-shadow-sm' : ''}`} />
           </div>
-          <span className={`text-[10px] font-semibold transition-all ${isScanResiActive ? 'text-green-300' : 'text-gray-500'}`}>Scan Resi</span>
+          <span className={`text-[9px] font-medium transition-all ${isScanResiActive ? 'text-green-300' : 'text-gray-500'}`}>Scan Resi</span>
         </button>
 
         {isOpen && (
-          <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-3 bg-gray-800/95 backdrop-blur-sm border border-gray-700 rounded-2xl shadow-2xl overflow-hidden min-w-[200px] animate-in slide-in-from-bottom-2 fade-in duration-200">
+          <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 bg-gray-800/95 backdrop-blur-sm border border-gray-700 rounded-xl shadow-2xl overflow-hidden min-w-[180px] animate-in slide-in-from-bottom-2 fade-in duration-200">
             <button
               onClick={() => {
                 setActiveView('scan_resi_stage1');
                 setIsOpen(false);
               }}
-              className={`w-full px-4 py-3.5 text-left hover:bg-gray-700/80 transition-all duration-150 flex items-center gap-3 active:scale-[0.98] ${
+              className={`w-full px-3 py-2.5 text-left hover:bg-gray-700/80 transition-all duration-150 flex items-center gap-2.5 active:scale-[0.98] ${
                 activeView === 'scan_resi_stage1' ? 'bg-gradient-to-r from-green-900/30 to-transparent text-green-400 shadow-inner' : 'text-gray-300'
               }`}
             >
-              <div className={`p-1.5 rounded-lg ${activeView === 'scan_resi_stage1' ? 'bg-green-900/40' : 'bg-gray-700/50'}`}>
-                <Scan size={18} />
+              <div className={`p-1 rounded-lg ${activeView === 'scan_resi_stage1' ? 'bg-green-900/40' : 'bg-gray-700/50'}`}>
+                <Scan size={16} />
               </div>
-              <span className="text-sm font-semibold">Stage 1: Scanner</span>
+              <span className="text-sm font-medium">Stage 1: Scanner</span>
             </button>
             
             <button
@@ -60,14 +60,14 @@ export const ScanResiMenu: React.FC<ScanResiMenuProps> = ({
                 setActiveView('scan_resi_stage2');
                 setIsOpen(false);
               }}
-              className={`w-full px-4 py-3.5 text-left hover:bg-gray-700/80 transition-all duration-150 flex items-center gap-3 active:scale-[0.98] ${
+              className={`w-full px-3 py-2.5 text-left hover:bg-gray-700/80 transition-all duration-150 flex items-center gap-2.5 active:scale-[0.98] ${
                 activeView === 'scan_resi_stage2' ? 'bg-gradient-to-r from-green-900/30 to-transparent text-green-400 shadow-inner' : 'text-gray-300'
               }`}
             >
-              <div className={`p-1.5 rounded-lg ${activeView === 'scan_resi_stage2' ? 'bg-green-900/40' : 'bg-gray-700/50'}`}>
-                <Camera size={18} />
+              <div className={`p-1 rounded-lg ${activeView === 'scan_resi_stage2' ? 'bg-green-900/40' : 'bg-gray-700/50'}`}>
+                <Camera size={16} />
               </div>
-              <span className="text-sm font-semibold">Stage 2: Verifikasi</span>
+              <span className="text-sm font-medium">Stage 2: Verifikasi</span>
             </button>
             
             <button
@@ -75,14 +75,14 @@ export const ScanResiMenu: React.FC<ScanResiMenuProps> = ({
                 setActiveView('scan_resi_stage3');
                 setIsOpen(false);
               }}
-              className={`w-full px-4 py-3.5 text-left hover:bg-gray-700/80 transition-all duration-150 flex items-center gap-3 active:scale-[0.98] ${
+              className={`w-full px-3 py-2.5 text-left hover:bg-gray-700/80 transition-all duration-150 flex items-center gap-2.5 active:scale-[0.98] ${
                 activeView === 'scan_resi_stage3' ? 'bg-gradient-to-r from-green-900/30 to-transparent text-green-400 shadow-inner' : 'text-gray-300'
               }`}
             >
-              <div className={`p-1.5 rounded-lg ${activeView === 'scan_resi_stage3' ? 'bg-green-900/40' : 'bg-gray-700/50'}`}>
-                <FileEdit size={18} />
+              <div className={`p-1 rounded-lg ${activeView === 'scan_resi_stage3' ? 'bg-green-900/40' : 'bg-gray-700/50'}`}>
+                <FileEdit size={16} />
               </div>
-              <span className="text-sm font-semibold">Stage 3: Data Entry</span>
+              <span className="text-sm font-medium">Stage 3: Data Entry</span>
             </button>
             
             <button
@@ -90,14 +90,14 @@ export const ScanResiMenu: React.FC<ScanResiMenuProps> = ({
                 setActiveView('scan_resi_history');
                 setIsOpen(false);
               }}
-              className={`w-full px-4 py-3.5 text-left hover:bg-gray-700/80 transition-all duration-150 flex items-center gap-3 active:scale-[0.98] ${
+              className={`w-full px-3 py-2.5 text-left hover:bg-gray-700/80 transition-all duration-150 flex items-center gap-2.5 active:scale-[0.98] ${
                 activeView === 'scan_resi_history' ? 'bg-gradient-to-r from-green-900/30 to-transparent text-green-400 shadow-inner' : 'text-gray-300'
               }`}
             >
-              <div className={`p-1.5 rounded-lg ${activeView === 'scan_resi_history' ? 'bg-green-900/40' : 'bg-gray-700/50'}`}>
-                <History size={18} />
+              <div className={`p-1 rounded-lg ${activeView === 'scan_resi_history' ? 'bg-green-900/40' : 'bg-gray-700/50'}`}>
+                <History size={16} />
               </div>
-              <span className="text-sm font-semibold">Riwayat</span>
+              <span className="text-sm font-medium">Riwayat</span>
             </button>
           </div>
         )}
