@@ -30,7 +30,8 @@ interface Stage3Row {
   ecommerce: string;
   sub_toko: string;
   part_number: string;
-  nama_pesanan: string;
+  nama_pesanan: string; // Nama barang dari database/base
+  nama_barang_csv?: string; // Nama barang dari CSV/Excel
   brand: string;
   application: string;
   stock_saat_ini: number;
@@ -130,7 +131,8 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
              ecommerce: ecommerceDB,
              sub_toko: subToko,
              part_number: item.part_number || '',
-             nama_pesanan: item.nama_produk || 'Item Database',
+             nama_pesanan: partInfo?.name || item.nama_produk || 'Item Database', // dari base
+             nama_barang_csv: item.nama_produk || '', // dari CSV/Excel
              brand: brand,
              application: app,
              stock_saat_ini: stock,
@@ -510,8 +512,10 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
               <th className="border border-gray-600 px-1 py-1 w-14 text-center">Toko</th>
               <th className="border border-gray-600 px-1 py-1 w-40 text-left bg-gray-700/50">Customer</th>
               <th className="border border-gray-600 px-1 py-1 w-36 text-left bg-gray-700/80 border-b-2 border-b-yellow-600/50">Part Number (Input)</th>
-              <th className="border border-gray-600 px-1 py-1 w-64 text-left">Nama Barang</th>
+              <th className="border border-gray-600 px-1 py-1 w-64 text-left">Nama Barang (CSV)</th>
+              <th className="border border-gray-600 px-1 py-1 w-64 text-left">Nama Barang (Base)</th>
               <th className="border border-gray-600 px-1 py-1 w-20 text-left">Brand</th>
+              <th className="border border-gray-600 px-1 py-1 w-32 text-left">Aplikasi / Mobil</th>
               <th className="border border-gray-600 px-1 py-1 w-12 text-center">Stok</th>
               <th className="border border-gray-600 px-1 py-1 w-12 text-center bg-gray-700/80 border-b-2 border-b-yellow-600/50">Qty</th>
               <th className="border border-gray-600 px-1 py-1 w-24 text-right bg-gray-700/80 border-b-2 border-b-yellow-600/50">Total (Rp)</th>
@@ -588,8 +592,15 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                     />
                   </td>
 
-                  {/* NAMA BARANG (WRAP TEXT) */}
+                  {/* NAMA BARANG DARI CSV/EXCEL */}
                   <td className="border border-gray-600 px-1.5 py-1 text-[11px] leading-tight align-middle text-gray-300">
+                    <div className="line-clamp-2 hover:line-clamp-none max-h-[3.5em] overflow-hidden" title={row.nama_barang_csv}>
+                        {row.nama_barang_csv ? row.nama_barang_csv : <span className="italic text-gray-500">-</span>}
+                    </div>
+                  </td>
+
+                  {/* NAMA BARANG DARI BASE */}
+                  <td className="border border-gray-600 px-1.5 py-1 text-[11px] leading-tight align-middle text-yellow-300">
                     <div className="line-clamp-2 hover:line-clamp-none max-h-[3.5em] overflow-hidden" title={row.nama_pesanan}>
                         {row.nama_pesanan}
                     </div>
@@ -597,6 +608,8 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
 
                   {/* BRAND */}
                   <td className="border border-gray-600 px-1 py-1 text-[11px] truncate text-gray-400">{row.brand}</td>
+                  {/* APPLICATION / MOBIL */}
+                  <td className="border border-gray-600 px-1 py-1 text-[11px] truncate text-gray-400">{row.application}</td>
 
                   {/* STOK INFO */}
                   <td className={`border border-gray-600 px-1 text-center font-bold ${row.stock_saat_ini < row.qty_keluar ? 'text-red-500 bg-red-900/20' : 'text-green-500'}`}>
