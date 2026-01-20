@@ -30,8 +30,7 @@ interface Stage3Row {
   ecommerce: string;
   sub_toko: string;
   part_number: string;
-  nama_pesanan: string; // Nama barang dari database/base
-  nama_barang_csv?: string; // Nama barang dari CSV/Excel
+  nama_pesanan: string;
   brand: string;
   application: string;
   stock_saat_ini: number;
@@ -131,8 +130,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
              ecommerce: ecommerceDB,
              sub_toko: subToko,
              part_number: item.part_number || '',
-             nama_pesanan: partInfo?.name || item.nama_produk || 'Item Database', // dari base
-             nama_barang_csv: item.nama_produk || '', // dari CSV/Excel
+             nama_pesanan: item.nama_produk || 'Item Database',
              brand: brand,
              application: app,
              stock_saat_ini: stock,
@@ -274,9 +272,22 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
     const colOrder = ['tanggal', 'customer', 'part_number', 'qty_keluar', 'harga_total', 'harga_satuan'];
     const currentColIdx = colOrder.indexOf(colKey);
 
-    if (e.key === 'ArrowDown' || e.key === 'Enter') {
+    if (e.key === 'Enter') {
       e.preventDefault();
-      (e.target as HTMLInputElement).blur(); 
+      (e.target as HTMLInputElement).blur();
+      // Trigger auto save untuk kolom part_number
+      if (colKey === 'part_number') {
+        const input = e.target as HTMLInputElement;
+        // id di input: input-{rowIndex}-part_number
+        const idAttr = input.id;
+        const id = idAttr.replace('input-', '').replace(`-${colKey}`, '');
+        handlePartNumberBlur(id, input.value);
+      }
+      const nextInput = document.getElementById(`input-${rowIndex + 1}-${colKey}`);
+      nextInput?.focus();
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      (e.target as HTMLInputElement).blur();
       const nextInput = document.getElementById(`input-${rowIndex + 1}-${colKey}`);
       nextInput?.focus();
     } else if (e.key === 'ArrowUp') {
@@ -442,14 +453,14 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
   });
 
   return (
-    <div className="bg-gray-900 text-white h-screen p-2 text-sm font-sans flex flex-col">
+    <div className="bg-gray-900 text-white min-h-screen p-2 text-sm font-sans flex flex-col">
       <datalist id="part-options">
         {partOptions.map((p, idx) => (<option key={idx} value={p} />))}
       </datalist>
 
       {/* HEADER TOOLBAR */}
-      <div className="bg-gray-800 p-2 rounded border border-gray-700 mb-2 shadow-sm flex-shrink-0">
-        <div className="flex justify-between items-center gap-2 mb-2">
+      <div className="bg-gray-800 p-2 rounded border border-gray-700 mb-2 shadow-sm">
+        <div className="flex flex-wrap justify-between items-center gap-2 mb-2">
             <div className="flex gap-2 items-center">
                 <h1 className="font-bold text-lg flex items-center gap-2 px-2 text-gray-100">
                     <RefreshCw size={18} className="text-green-400"/> STAGE 3
@@ -501,27 +512,25 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
       </div>
 
       {/* EXCEL-LIKE TABLE */}
-      <div className="flex-1 table-wrapper border border-gray-600 bg-gray-800 shadow-inner custom-scrollbar">
-        <table className="border-collapse text-xs" style={{ minWidth: '100%', width: 'max-content' }}>
+      <div className="flex-1 overflow-auto border border-gray-600 bg-gray-800 shadow-inner relative">
+        <table className="w-full border-collapse text-xs table-fixed">
           <thead className="sticky top-0 z-10 shadow-sm">
             <tr className="bg-gray-700 text-gray-200 font-semibold">
-              <th className="border border-gray-600 px-1 py-1 text-center" style={{ minWidth: '4rem', width: '4rem' }}>Status</th>
-              <th className="border border-gray-600 px-1 py-1 text-center" style={{ minWidth: '5rem', width: '5rem' }}>Tanggal</th>
-              <th className="border border-gray-600 px-1 py-1 text-left" style={{ minWidth: '6rem', width: '6rem' }}>Resi / ID</th>
-              <th className="border border-gray-600 px-1 py-1 text-center" style={{ minWidth: '3.5rem', width: '3.5rem' }}>E-Comm</th>
-              <th className="border border-gray-600 px-1 py-1 text-center" style={{ minWidth: '3rem', width: '3rem' }}>Toko</th>
-              <th className="border border-gray-600 px-1 py-1 text-left bg-gray-700/50" style={{ minWidth: '6rem', width: '8rem' }}>Customer</th>
-              <th className="border border-gray-600 px-1 py-1 text-left bg-gray-700/80 border-b-2 border-b-yellow-600/50" style={{ minWidth: '6rem', width: '8rem' }}>Part Number (Input)</th>
-              <th className="border border-gray-600 px-1 py-1 text-left" style={{ minWidth: '8rem', width: '12rem' }}>Nama Barang (CSV)</th>
-              <th className="border border-gray-600 px-1 py-1 text-left" style={{ minWidth: '8rem', width: '12rem' }}>Nama Barang (Base)</th>
-              <th className="border border-gray-600 px-1 py-1 text-left" style={{ minWidth: '3.5rem', width: '5rem' }}>Brand</th>
-              <th className="border border-gray-600 px-1 py-1 text-left" style={{ minWidth: '5rem', width: '7rem' }}>Aplikasi / Mobil</th>
-              <th className="border border-gray-600 px-1 py-1 text-center" style={{ minWidth: '2.5rem', width: '3rem' }}>Stok</th>
-              <th className="border border-gray-600 px-1 py-1 text-center bg-gray-700/80 border-b-2 border-b-yellow-600/50" style={{ minWidth: '2.5rem', width: '3rem' }}>Qty</th>
-              <th className="border border-gray-600 px-1 py-1 text-right bg-gray-700/80 border-b-2 border-b-yellow-600/50" style={{ minWidth: '5rem', width: '6rem' }}>Total (Rp)</th>
-              <th className="border border-gray-600 px-1 py-1 text-right" style={{ minWidth: '5rem', width: '6rem' }}>Satuan (Rp)</th>
-              <th className="border border-gray-600 px-1 py-1 text-left" style={{ minWidth: '5rem', width: '6rem' }}>No. Pesanan</th>
-              <th className="border border-gray-600 px-1 py-1 text-center" style={{ minWidth: '2rem', width: '2.5rem' }}>#</th>
+              <th className="border border-gray-600 px-1 py-1 w-20 text-center">Status</th>
+              <th className="border border-gray-600 px-1 py-1 w-24 text-center">Tanggal</th>
+              <th className="border border-gray-600 px-1 py-1 w-32 text-left">Resi / ID</th>
+              <th className="border border-gray-600 px-1 py-1 w-16 text-center">E-Comm</th>
+              <th className="border border-gray-600 px-1 py-1 w-14 text-center">Toko</th>
+              <th className="border border-gray-600 px-1 py-1 w-40 text-left bg-gray-700/50">Customer</th>
+              <th className="border border-gray-600 px-1 py-1 w-36 text-left bg-gray-700/80 border-b-2 border-b-yellow-600/50">Part Number (Input)</th>
+              <th className="border border-gray-600 px-1 py-1 w-64 text-left">Nama Barang</th>
+              <th className="border border-gray-600 px-1 py-1 w-20 text-left">Brand</th>
+              <th className="border border-gray-600 px-1 py-1 w-12 text-center">Stok</th>
+              <th className="border border-gray-600 px-1 py-1 w-12 text-center bg-gray-700/80 border-b-2 border-b-yellow-600/50">Qty</th>
+              <th className="border border-gray-600 px-1 py-1 w-24 text-right bg-gray-700/80 border-b-2 border-b-yellow-600/50">Total (Rp)</th>
+              <th className="border border-gray-600 px-1 py-1 w-24 text-right">Satuan (Rp)</th>
+              <th className="border border-gray-600 px-1 py-1 w-28 text-left">No. Pesanan</th>
+              <th className="border border-gray-600 px-1 py-1 w-10 text-center">#</th>
             </tr>
           </thead>
           <tbody className="bg-gray-900 text-gray-300">
@@ -592,15 +601,8 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                     />
                   </td>
 
-                  {/* NAMA BARANG DARI CSV/EXCEL */}
+                  {/* NAMA BARANG (WRAP TEXT) */}
                   <td className="border border-gray-600 px-1.5 py-1 text-[11px] leading-tight align-middle text-gray-300">
-                    <div className="line-clamp-2 hover:line-clamp-none max-h-[3.5em] overflow-hidden" title={row.nama_barang_csv}>
-                        {row.nama_barang_csv ? row.nama_barang_csv : <span className="italic text-gray-500">-</span>}
-                    </div>
-                  </td>
-
-                  {/* NAMA BARANG DARI BASE */}
-                  <td className="border border-gray-600 px-1.5 py-1 text-[11px] leading-tight align-middle text-yellow-300">
                     <div className="line-clamp-2 hover:line-clamp-none max-h-[3.5em] overflow-hidden" title={row.nama_pesanan}>
                         {row.nama_pesanan}
                     </div>
@@ -608,8 +610,6 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
 
                   {/* BRAND */}
                   <td className="border border-gray-600 px-1 py-1 text-[11px] truncate text-gray-400">{row.brand}</td>
-                  {/* APPLICATION / MOBIL */}
-                  <td className="border border-gray-600 px-1 py-1 text-[11px] truncate text-gray-400">{row.application}</td>
 
                   {/* STOK INFO */}
                   <td className={`border border-gray-600 px-1 text-center font-bold ${row.stock_saat_ini < row.qty_keluar ? 'text-red-500 bg-red-900/20' : 'text-green-500'}`}>
