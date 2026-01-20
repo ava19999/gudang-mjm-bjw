@@ -113,7 +113,14 @@ export const OrderManagement: React.FC = () => {
 
   const saveEdit = async (id: string) => {
     setLoading(true);
-    const res = await updateOfflineOrder(id, editForm, selectedStore);
+    // Cari nama barang dari inventory jika partNumber valid
+    let namaBarang = editForm.partNumber;
+    const found = inventory.find((item) => item.partNumber === editForm.partNumber);
+    if (found) {
+      namaBarang = found.nama_barang || found.name || editForm.partNumber;
+    }
+    const formWithName = { ...editForm, nama_barang: namaBarang };
+    const res = await updateOfflineOrder(id, formWithName, selectedStore);
     setLoading(false);
     
     if (res.success) {
