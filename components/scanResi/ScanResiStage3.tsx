@@ -501,27 +501,27 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
       </div>
 
       {/* EXCEL-LIKE TABLE */}
-      <div className="flex-1 overflow-x-auto overflow-y-auto border border-gray-600 bg-gray-800 shadow-inner relative">
-        <table className="w-full border-collapse text-xs">
+      <div className="flex-1 overflow-x-auto overflow-y-auto border border-gray-600 bg-gray-800 shadow-inner relative" style={{ maxWidth: '100%', width: '100%' }}>
+        <table className="border-collapse text-xs" style={{ minWidth: '100%', width: 'max-content' }}>
           <thead className="sticky top-0 z-10 shadow-sm">
             <tr className="bg-gray-700 text-gray-200 font-semibold">
-              <th className="border border-gray-600 px-1 py-1 min-w-[5rem] text-center">Status</th>
-              <th className="border border-gray-600 px-1 py-1 min-w-[6rem] text-center">Tanggal</th>
-              <th className="border border-gray-600 px-1 py-1 min-w-[7rem] text-left">Resi / ID</th>
-              <th className="border border-gray-600 px-1 py-1 min-w-[4rem] text-center">E-Comm</th>
-              <th className="border border-gray-600 px-1 py-1 min-w-[3.5rem] text-center">Toko</th>
-              <th className="border border-gray-600 px-1 py-1 min-w-[8rem] text-left bg-gray-700/50">Customer</th>
-              <th className="border border-gray-600 px-1 py-1 min-w-[8rem] text-left bg-gray-700/80 border-b-2 border-b-yellow-600/50">Part Number (Input)</th>
-              <th className="border border-gray-600 px-1 py-1 min-w-[12rem] text-left">Nama Barang (CSV)</th>
-              <th className="border border-gray-600 px-1 py-1 min-w-[12rem] text-left">Nama Barang (Base)</th>
-              <th className="border border-gray-600 px-1 py-1 min-w-[4rem] text-left">Brand</th>
-              <th className="border border-gray-600 px-1 py-1 min-w-[7rem] text-left">Aplikasi / Mobil</th>
-              <th className="border border-gray-600 px-1 py-1 min-w-[3rem] text-center">Stok</th>
-              <th className="border border-gray-600 px-1 py-1 min-w-[3rem] text-center bg-gray-700/80 border-b-2 border-b-yellow-600/50">Qty</th>
-              <th className="border border-gray-600 px-1 py-1 min-w-[6rem] text-right bg-gray-700/80 border-b-2 border-b-yellow-600/50">Total (Rp)</th>
-              <th className="border border-gray-600 px-1 py-1 min-w-[6rem] text-right">Satuan (Rp)</th>
-              <th className="border border-gray-600 px-1 py-1 min-w-[6rem] text-left">No. Pesanan</th>
-              <th className="border border-gray-600 px-1 py-1 min-w-[2.5rem] text-center">#</th>
+              <th className="border border-gray-600 px-1 py-1 text-center" style={{ minWidth: '4rem', width: '4rem' }}>Status</th>
+              <th className="border border-gray-600 px-1 py-1 text-center" style={{ minWidth: '5rem', width: '5rem' }}>Tanggal</th>
+              <th className="border border-gray-600 px-1 py-1 text-left" style={{ minWidth: '6rem', width: '6rem' }}>Resi / ID</th>
+              <th className="border border-gray-600 px-1 py-1 text-center" style={{ minWidth: '3.5rem', width: '3.5rem' }}>E-Comm</th>
+              <th className="border border-gray-600 px-1 py-1 text-center" style={{ minWidth: '3rem', width: '3rem' }}>Toko</th>
+              <th className="border border-gray-600 px-1 py-1 text-left bg-gray-700/50" style={{ minWidth: '6rem', width: '8rem' }}>Customer</th>
+              <th className="border border-gray-600 px-1 py-1 text-left bg-gray-700/80 border-b-2 border-b-yellow-600/50" style={{ minWidth: '6rem', width: '8rem' }}>Part Number (Input)</th>
+              <th className="border border-gray-600 px-1 py-1 text-left" style={{ minWidth: '8rem', width: '12rem' }}>Nama Barang (CSV)</th>
+              <th className="border border-gray-600 px-1 py-1 text-left" style={{ minWidth: '8rem', width: '12rem' }}>Nama Barang (Base)</th>
+              <th className="border border-gray-600 px-1 py-1 text-left" style={{ minWidth: '3.5rem', width: '5rem' }}>Brand</th>
+              <th className="border border-gray-600 px-1 py-1 text-left" style={{ minWidth: '5rem', width: '7rem' }}>Aplikasi / Mobil</th>
+              <th className="border border-gray-600 px-1 py-1 text-center" style={{ minWidth: '2.5rem', width: '3rem' }}>Stok</th>
+              <th className="border border-gray-600 px-1 py-1 text-center bg-gray-700/80 border-b-2 border-b-yellow-600/50" style={{ minWidth: '2.5rem', width: '3rem' }}>Qty</th>
+              <th className="border border-gray-600 px-1 py-1 text-right bg-gray-700/80 border-b-2 border-b-yellow-600/50" style={{ minWidth: '5rem', width: '6rem' }}>Total (Rp)</th>
+              <th className="border border-gray-600 px-1 py-1 text-right" style={{ minWidth: '5rem', width: '6rem' }}>Satuan (Rp)</th>
+              <th className="border border-gray-600 px-1 py-1 text-left" style={{ minWidth: '5rem', width: '6rem' }}>No. Pesanan</th>
+              <th className="border border-gray-600 px-1 py-1 text-center" style={{ minWidth: '2rem', width: '2.5rem' }}>#</th>
             </tr>
           </thead>
           <tbody className="bg-gray-900 text-gray-300">
