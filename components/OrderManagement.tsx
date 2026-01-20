@@ -1,9 +1,11 @@
 // FILE: src/components/OrderManagement.tsx
 import React, { useState, useEffect, useMemo } from 'react';
+import Autocomplete from '@mui/material/Autocomplete';
+import TextField from '@mui/material/TextField';
 import { useStore } from '../context/StoreContext';
 import { 
   fetchOfflineOrders, fetchSoldItems, fetchReturItems,
-  processOfflineOrderItem, updateOfflineOrder
+  processOfflineOrderItem, updateOfflineOrder, fetchInventory
 } from '../services/supabaseService';
 import { OfflineOrderRow, SoldItemRow, ReturRow } from '../types';
 import { 
@@ -37,6 +39,24 @@ export const OrderManagement: React.FC = () => {
   // State Edit
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState({ partNumber: '', quantity: 0, price: 0 });
+
+  // Inventory for Autocomplete
+  const [inventory, setInventory] = useState([]);
+  const [selectedItem, setSelectedItem] = useState(null);
+
+  // Fetch inventory for Autocomplete
+  useEffect(() => {
+    if (editingId) {
+      fetchInventory(selectedStore).then((data) => setInventory(data));
+    }
+  }, [editingId, selectedStore]);
+
+  // Update selectedItem when partNumber changes
+  useEffect(() => {
+    if (!editingId) { setSelectedItem(null); return; }
+    const found = inventory.find((item) => item.partNumber === editForm.partNumber);
+    setSelectedItem(found || null);
+  }, [editForm.partNumber, inventory, editingId]);
 
   const showToast = (msg: string, type: 'success'|'error' = 'success') => {
     setToast({msg, type});
@@ -289,12 +309,29 @@ export const OrderManagement: React.FC = () => {
                                 <div className="space-y-2 w-full">
                                     <div className="flex flex-col">
                                         <label className="text-[10px] text-gray-400">Part Number</label>
-                                        <input 
-                                            value={editForm.partNumber}
-                                            onChange={(e) => setEditForm({...editForm, partNumber: e.target.value})}
-                                            className="bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs text-white focus:ring-1 focus:ring-blue-500 outline-none"
+                                        <Autocomplete
+                                          size="small"
+                                          options={inventory}
+                                          getOptionLabel={(option) => option.partNumber || ''}
+                                          value={inventory.find((item) => item.partNumber === editForm.partNumber) || null}
+                                          onChange={(_, newValue) => {
+                                            setEditForm({ ...editForm, partNumber: newValue ? newValue.partNumber : '' });
+                                          }}
+                                          renderInput={(params) => (
+                                            <TextField {...params} variant="outlined" className="bg-gray-700 border border-gray-600 rounded text-xs text-white" />
+                                          )}
+                                          isOptionEqualToValue={(option, value) => option.partNumber === value.partNumber}
                                         />
                                     </div>
+                                    {/* Detail info kanan */}
+                                    {selectedItem && (
+                                      <div className="mt-2 text-xs bg-gray-800 border border-gray-700 rounded p-2 text-white min-w-[180px]">
+                                        <div><b>Name:</b> {selectedItem.nama_barang || selectedItem.name || '-'}</div>
+                                        <div><b>Brand:</b> {selectedItem.brand || '-'}</div>
+                                        <div><b>Aplikasi:</b> {selectedItem.application || selectedItem.aplikasi || '-'}</div>
+                                        <div><b>Stock:</b> {selectedItem.quantity ?? '-'}</div>
+                                      </div>
+                                    )}
                                 </div>
                             )}
                           </div>
