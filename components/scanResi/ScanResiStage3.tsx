@@ -399,10 +399,18 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
         for (const key in worksheet) {
             if (key.startsWith('!')) continue;
             const cell = worksheet[key];
+            
+            // 1. Fix Scientific Notation (1.10E+13 -> "110...")
             if (cell && cell.t === 'n') {
                 cell.t = 's';
                 cell.v = String(cell.v);
                 delete cell.w;
+            }
+            
+            // 2. Fix Column Shifting: Hapus koma di dalam text agar tidak merusak format CSV
+            // (Misal: "Kebayoran Baru, Jakarta" -> "Kebayoran Baru Jakarta")
+            if (cell && cell.v && typeof cell.v === 'string' && cell.v.includes(',')) {
+                cell.v = cell.v.replace(/,/g, ' ');
             }
         }
       }
@@ -429,7 +437,17 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
       // FILTER: Skip item yang tidak ada resinya (kosong atau strip)
       const initialCount = parsedItems.length;
       parsedItems = parsedItems.map(item => ({...item, resi: item.resi ? String(item.resi).trim() : ''}));
-      parsedItems = parsedItems.filter(item => item.resi && item.resi !== '' && item.resi !== '-');
+      
+      parsedItems = parsedItems.filter(item => {
+          const resi = item.resi;
+          if (!resi || resi === '' || resi === '-') return false;
+
+          // Skip jika resi sama dengan order_id (indikasi resi kosong di CSV dan parser mengambil order_id sebagai fallback)
+          const orderId = item.order_id || item.no_pesanan || item['No. Pesanan'] || item['Order ID'] || '';
+          if (orderId && resi === String(orderId).trim()) return false;
+
+          return true;
+      });
 
       if (parsedItems.length === 0) {
         alert('Tidak ada data valid (Mungkin status Batal/Belum Bayar?).');
