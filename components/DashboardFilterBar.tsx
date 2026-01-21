@@ -28,7 +28,7 @@ export const DashboardFilterBar: React.FC<DashboardFilterBarProps> = ({
   onAddNew
 }) => {
   return (
-    <div className="bg-gray-800 border-b border-gray-700 shadow-md">
+    <div className="sticky top-0 z-20 bg-gray-800 border-b border-gray-700 shadow-md">
       <div className="px-4 pb-3 pt-2">
         {/* Main Search & Add Button */}
         <div className="flex gap-2 items-center mb-2">
@@ -36,6 +36,7 @@ export const DashboardFilterBar: React.FC<DashboardFilterBarProps> = ({
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
                 <input 
                   type="text" 
+                  value={searchTerm}
                   placeholder="Cari nama / part number..." 
                   onChange={(e) => setSearchTerm(e.target.value)} 
                   className="w-full pl-10 pr-4 py-2.5 bg-gray-700 border border-gray-600 rounded-xl text-sm font-medium focus:ring-2 focus:ring-blue-500/50 outline-none text-white placeholder-gray-400" 

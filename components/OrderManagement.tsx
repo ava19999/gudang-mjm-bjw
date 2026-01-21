@@ -50,28 +50,12 @@ export const OrderManagement: React.FC = () => {
     const loadInventory = async () => {
       setInventoryLoading(true);
       try {
-        console.log('=== LOADING INVENTORY ===');
-        const [invMjm, invBjw] = await Promise.all([
-          fetchInventory('mjm'),
-          fetchInventory('bjw')
-        ]);
+        console.log(`=== LOADING INVENTORY FOR ${selectedStore.toUpperCase()} ===`);
+        // Ambil inventory sesuai toko yang dipilih agar saran part number sesuai base masing-masing
+        const data = await fetchInventory(selectedStore);
         
-        console.log('MJM items:', invMjm?.length || 0);
-        console.log('BJW items:', invBjw?.length || 0);
-        
-        // Log sample dari setiap toko
-        if (invMjm?.length > 0) {
-          console.log('Sample MJM:', invMjm[0]);
-        }
-        if (invBjw?.length > 0) {
-          console.log('Sample BJW:', invBjw[0]);
-        }
-        
-        // Gabungkan semua
-        const all = [...(invMjm || []), ...(invBjw || [])];
-        console.log('Total inventory:', all.length);
-        
-        setInventory(all);
+        console.log(`${selectedStore.toUpperCase()} items:`, data?.length || 0);
+        setInventory(data || []);
       } catch (err) {
         console.error("Error fetching inventory:", err);
       } finally {
@@ -80,7 +64,7 @@ export const OrderManagement: React.FC = () => {
     };
     
     loadInventory();
-  }, []); // Load sekali saat mount
+  }, [selectedStore]); // Reload saat ganti toko
 
   // Update selectedItem when partNumber changes
   useEffect(() => {
@@ -112,7 +96,7 @@ export const OrderManagement: React.FC = () => {
   const groupedOfflineOrders = useMemo(() => {
     const groups: Record<string, { id: string, customer: string, tempo: string, date: string, items: OfflineOrderRow[], totalAmount: number }> = {};
     offlineData.forEach(item => {
-      const safeCustomer = (item.customer || 'Tanpa Nama').trim();
+      const safeCustomer = (item.customer || 'Tanpa Nama').trim().toUpperCase();
       const safeTempo = (item.tempo || 'CASH').trim();
       const key = `${safeCustomer}-${safeTempo}`;
       if (!groups[key]) {

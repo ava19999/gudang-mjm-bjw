@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { InventoryItem, Order, StockHistory } from '../types';
 // Pastikan import ini sesuai
-import { fetchInventoryPaginated, fetchInventoryStats, fetchInventoryAllFiltered } from '../services/supabaseService';
+import { fetchInventoryPaginated, fetchInventoryStats, fetchInventoryAllFiltered, fetchInventory } from '../services/supabaseService';
 import { ItemForm } from './ItemForm';
 import { DashboardStats } from './DashboardStats';
 import { DashboardFilterBar } from './DashboardFilterBar';
@@ -73,41 +73,54 @@ export const Dashboard: React.FC<DashboardProps> = ({
   // --- DATA LOADING (BAGIAN YANG DIPERBAIKI) ---
   const loadData = useCallback(async () => {
     setLoading(true);
-    
-    // Kita bungkus filter jadi satu objek
-    const filters = {
-        search: debouncedSearch,
-        brand: debouncedBrand,
-        app: debouncedApp,
-        type: filterType
-    };
 
     try {
-        // If price sorting is active, fetch all data
-        if (priceSort !== 'none') {
-          // PERBAIKAN: Kirim store dulu, baru filters
-          const allData = await fetchInventoryAllFiltered(selectedStore, filters);
-          setAllItems(allData);
-          setTotalPages(Math.ceil(allData.length / 50));
-        } else {
-          // Otherwise, use paginated fetch
-          // PERBAIKAN: Urutan argumen disesuaikan dengan supabaseService.ts
-          // (store, page, perPage, filters)
-          const result = await fetchInventoryPaginated(selectedStore, page, 50, filters);
-          
-          setLocalItems(result.data);
-          setAllItems([]); // Clear all items when not sorting
-          
-          // Gunakan result.total dari service baru (sebelumnya mungkin result.count)
-          const totalCount = result.total || 0;
-          setTotalPages(Math.ceil(totalCount / 50));
+        // PERBAIKAN: Menggunakan strategi Client-Side Filtering (seperti di Tab Beranda/OrderManagement)
+        // Ini memastikan filter Aplikasi berfungsi karena backend mungkin tidak mendukung filter tersebut secara native.
+        const allData = await fetchInventory(selectedStore);
+        
+        let filtered = allData || [];
+
+        // 1. Filter Search (Nama / Part Number)
+        if (debouncedSearch) {
+            const lower = debouncedSearch.toLowerCase();
+            filtered = filtered.filter(item => 
+                (item.name || '').toLowerCase().includes(lower) || 
+                (item.partNumber || '').toLowerCase().includes(lower)
+            );
         }
+
+        // 2. Filter Brand
+        if (debouncedBrand) {
+            const lower = debouncedBrand.toLowerCase();
+            filtered = filtered.filter(item => (item.brand || '').toLowerCase().includes(lower));
+        }
+
+        // 3. Filter Aplikasi (Cek field application dan aplikasi)
+        if (debouncedApp) {
+            const lower = debouncedApp.toLowerCase();
+            filtered = filtered.filter(item => 
+                (item.application || '').toLowerCase().includes(lower) ||
+                (item.aplikasi || '').toLowerCase().includes(lower)
+            );
+        }
+
+        // 4. Filter Type
+        if (filterType === 'low') {
+            filtered = filtered.filter(item => (item.quantity || 0) < 5);
+        } else if (filterType === 'empty') {
+            filtered = filtered.filter(item => (item.quantity || 0) === 0);
+        }
+
+        setAllItems(filtered);
+        setTotalPages(Math.ceil(filtered.length / 50));
+        
     } catch (error) {
         console.error("Gagal memuat data dashboard:", error);
     }
     
     setLoading(false);
-  }, [page, debouncedSearch, filterType, debouncedBrand, debouncedApp, priceSort, selectedStore]);
+  }, [debouncedSearch, filterType, debouncedBrand, debouncedApp, selectedStore]);
 
   const loadStats = useCallback(async () => {
     // Bagian ini sudah benar karena fetchInventoryStats hanya butuh parameter store
@@ -130,30 +143,28 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   // --- SORTING ---
   const sortedItems = useMemo(() => {
-    // Determine which dataset to use
-    const itemsToSort = priceSort !== 'none' ? allItems : localItems;
+    // Selalu gunakan allItems (hasil filter client-side)
+    const sorted = [...allItems];
     
-    // Jika tidak ada sort harga, langsung return data dari server (sudah dipaginasi)
-    if (priceSort === 'none') return itemsToSort;
+    if (priceSort !== 'none') {
+      sorted.sort((a, b) => {
+        const priceA = a.costPrice || a.price || 0;
+        const priceB = b.costPrice || b.price || 0;
+        
+        if (priceSort === 'asc') {
+          return priceA - priceB; // Termurah ke Termahal
+        } else {
+          return priceB - priceA; // Termahal ke Termurah
+        }
+      });
+    }
     
-    // Jika sort harga aktif (pakai allItems), kita sort manual di client
-    const sorted = [...itemsToSort].sort((a, b) => {
-      const priceA = a.costPrice || a.price || 0;
-      const priceB = b.costPrice || b.price || 0;
-      
-      if (priceSort === 'asc') {
-        return priceA - priceB; // Termurah ke Termahal
-      } else {
-        return priceB - priceA; // Termahal ke Termurah
-      }
-    });
-    
-    // Apply pagination manual untuk data yang disort di client
+    // Apply pagination manual
     const pageSize = 50;
     const startIdx = (page - 1) * pageSize;
     const endIdx = startIdx + pageSize;
     return sorted.slice(startIdx, endIdx);
-  }, [localItems, allItems, priceSort, page]);
+  }, [allItems, priceSort, page]);
 
   // --- HANDLERS ---
   const handleEditClick = (item: InventoryItem) => { setEditingItem(item); setShowItemForm(true); };

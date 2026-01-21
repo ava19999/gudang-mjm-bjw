@@ -62,7 +62,7 @@ export const ShopCheckoutModal: React.FC<ShopCheckoutModalProps> = ({ isOpen, on
             <input
               type="text"
               value={customerName}
-              onChange={(e) => setCustomerName(e.target.value)}
+              onChange={(e) => setCustomerName(e.target.value.toUpperCase())}
               className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
               placeholder="Contoh: Budi Motor"
               required
