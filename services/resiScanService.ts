@@ -69,6 +69,111 @@ export const scanResiStage1 = async (
   }
 };
 
+// ============================================================================
+// STAGE 1: BULK SCAN (SCAN MASAL)
+// ============================================================================
+export const scanResiStage1Bulk = async (
+  items: Array<{
+    resi: string;
+    ecommerce: string;
+    sub_toko: string;
+    negara_ekspor?: string;
+    scanned_by: string;
+  }>,
+  store: string | null
+): Promise<{ success: boolean; message: string; inserted: number; skipped: number; duplicates: string[] }> => {
+  try {
+    const table = getTableName(store);
+    
+    // Filter resi kosong dan duplikat dalam batch
+    const uniqueResis = new Map<string, typeof items[0]>();
+    const batchDuplicates: string[] = [];
+    
+    for (const item of items) {
+      const resiClean = item.resi.trim();
+      if (!resiClean) continue;
+      
+      if (uniqueResis.has(resiClean)) {
+        batchDuplicates.push(resiClean);
+      } else {
+        uniqueResis.set(resiClean, { ...item, resi: resiClean });
+      }
+    }
+    
+    if (uniqueResis.size === 0) {
+      return { success: false, message: 'Tidak ada resi valid untuk disimpan', inserted: 0, skipped: 0, duplicates: [] };
+    }
+    
+    // Cek resi yang sudah ada di database
+    const resiList = Array.from(uniqueResis.keys());
+    const { data: existingData } = await supabase
+      .from(table)
+      .select('resi')
+      .in('resi', resiList);
+    
+    const existingResis = new Set((existingData || []).map((r: any) => r.resi));
+    
+    // Filter hanya resi yang belum ada
+    const newItems: typeof items = [];
+    const dbDuplicates: string[] = [];
+    
+    for (const [resi, item] of uniqueResis) {
+      if (existingResis.has(resi)) {
+        dbDuplicates.push(resi);
+      } else {
+        newItems.push(item);
+      }
+    }
+    
+    if (newItems.length === 0) {
+      return { 
+        success: true, 
+        message: 'Semua resi sudah ada di database', 
+        inserted: 0, 
+        skipped: dbDuplicates.length + batchDuplicates.length,
+        duplicates: [...dbDuplicates, ...batchDuplicates]
+      };
+    }
+    
+    // Siapkan payload untuk insert
+    const payload = newItems.map(item => ({
+      id: (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : Math.random().toString(36).slice(2),
+      resi: item.resi,
+      ecommerce: item.ecommerce,
+      sub_toko: item.sub_toko,
+      negara_ekspor: item.negara_ekspor || null,
+      tanggal: getWIBDate().toISOString(),
+      stage1_scanned: 'true',
+      stage1_scanned_at: getWIBDate().toISOString(),
+      stage1_scanned_by: item.scanned_by,
+      status: 'stage1'
+    }));
+    
+    const { error } = await supabase
+      .from(table)
+      .insert(payload);
+    
+    if (error) throw error;
+    
+    const allDuplicates = [...dbDuplicates, ...batchDuplicates];
+    let message = `Berhasil menyimpan ${newItems.length} resi`;
+    if (allDuplicates.length > 0) {
+      message += `, ${allDuplicates.length} dilewati (duplikat)`;
+    }
+    
+    return { 
+      success: true, 
+      message,
+      inserted: newItems.length,
+      skipped: allDuplicates.length,
+      duplicates: allDuplicates
+    };
+  } catch (error: any) {
+    console.error('Error bulk scanning stage 1:', error);
+    return { success: false, message: error.message || 'Gagal scan masal', inserted: 0, skipped: 0, duplicates: [] };
+  }
+};
+
 export const getResiStage1List = async (store: string | null) => {
   const table = getTableName(store);
   const { data, error } = await supabase
@@ -428,15 +533,35 @@ export const processBarangKeluarBatch = async (items: any[], store: string | nul
 export const saveCSVToResiItems = async (
   items: ParsedCSVItem[], 
   store: string | null
-): Promise<{ success: boolean; message: string; count: number }> => {
+): Promise<{ success: boolean; message: string; count: number; skipped: number }> => {
   const tableName = store === 'mjm' ? 'resi_items_mjm' : (store === 'bjw' ? 'resi_items_bjw' : null);
   
-  if (!tableName) return { success: false, message: 'Toko tidak valid', count: 0 };
-  if (!items || items.length === 0) return { success: false, message: 'Tidak ada data untuk disimpan', count: 0 };
+  if (!tableName) return { success: false, message: 'Toko tidak valid', count: 0, skipped: 0 };
+  if (!items || items.length === 0) return { success: false, message: 'Tidak ada data untuk disimpan', count: 0, skipped: 0 };
 
   try {
-    const resiList = [...new Set(items.map(i => i.resi))];
+    // Ambil semua resi dan order_id unik dari items yang akan diimport
+    const resiList = [...new Set(items.map(i => i.resi).filter(Boolean))];
+    const orderIdList = [...new Set(items.map(i => i.order_id).filter(Boolean))];
 
+    // Cek data yang SUDAH DIPROSES di database (status = 'processed')
+    // Item pending boleh di-replace, item processed tidak boleh di-import ulang
+    const { data: processedData } = await supabase
+      .from(tableName)
+      .select('resi, order_id, nama_produk')
+      .eq('status', 'processed')
+      .or(`resi.in.(${resiList.map(r => `"${r}"`).join(',')}),order_id.in.(${orderIdList.map(o => `"${o}"`).join(',')})`);
+
+    // Buat set key untuk cek duplikat: resi + order_id + nama_produk (normalized)
+    // Hanya item yang sudah processed yang dianggap duplikat
+    const processedKeys = new Set<string>();
+    (processedData || []).forEach((row: any) => {
+      const namaNormalized = (row.nama_produk || '').toLowerCase().trim();
+      const key = `${row.resi || ''}||${row.order_id || ''}||${namaNormalized}`;
+      processedKeys.add(key);
+    });
+
+    // Hapus data pending yang akan di-replace dengan data baru
     const { error: deleteError } = await supabase
       .from(tableName)
       .delete()
@@ -444,10 +569,44 @@ export const saveCSVToResiItems = async (
       .eq('status', 'pending');
 
     if (deleteError) {
-      console.warn("Warning hapus data lama:", deleteError.message);
+      console.warn("Warning hapus data pending lama:", deleteError.message);
     }
 
-    const payload = items.map(item => {
+    // Filter items: skip yang sudah processed, sisanya bisa diimport
+    const newItems: ParsedCSVItem[] = [];
+    let skippedCount = 0;
+    const batchKeys = new Set<string>(); // Untuk cek duplikat dalam batch yang sama
+
+    for (const item of items) {
+      const namaNormalized = (item.product_name || '').toLowerCase().trim();
+      const key = `${item.resi || ''}||${item.order_id || ''}||${namaNormalized}`;
+      
+      // Skip jika sudah diproses sebelumnya
+      if (processedKeys.has(key)) {
+        skippedCount++;
+        continue;
+      }
+      
+      // Skip jika duplikat dalam batch yang sama
+      if (batchKeys.has(key)) {
+        skippedCount++;
+        continue;
+      }
+      
+      batchKeys.add(key);
+      newItems.push(item);
+    }
+
+    if (newItems.length === 0) {
+      return { 
+        success: true, 
+        message: `Semua ${skippedCount} item sudah pernah diproses sebelumnya`, 
+        count: 0, 
+        skipped: skippedCount 
+      };
+    }
+
+    const payload = newItems.map(item => {
       const fixedToko = (item as any).sub_toko || store?.toUpperCase();
       
       return {
@@ -477,9 +636,14 @@ export const saveCSVToResiItems = async (
       throw error;
     }
 
-    return { success: true, message: 'Data CSV berhasil disimpan ke database', count: payload.length };
+    let message = `Berhasil import ${payload.length} item baru`;
+    if (skippedCount > 0) {
+      message += `, ${skippedCount} item dilewati (sudah diproses)`;
+    }
+
+    return { success: true, message, count: payload.length, skipped: skippedCount };
   } catch (err: any) {
-    return { success: false, message: err.message || 'Gagal menyimpan data CSV', count: 0 };
+    return { success: false, message: err.message || 'Gagal menyimpan data CSV', count: 0, skipped: 0 };
   }
 };
 

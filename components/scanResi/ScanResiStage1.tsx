@@ -50,6 +50,7 @@ const SubTokoResellerDropdown = ({ value, onChange, suggestions }: { value: stri
 import { useStore } from '../../context/StoreContext';
 import { 
   scanResiStage1, 
+  scanResiStage1Bulk,
   deleteResiStage1, 
   getResiStage1List,
   getResellers,
@@ -70,7 +71,10 @@ import {
   X,
   Check,
   ShoppingCart,
-  User
+  User,
+  List,
+  Save,
+  AlertTriangle
 } from 'lucide-react';
 
 interface ScanResiStage1Props {
@@ -117,6 +121,17 @@ export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh }) => 
     .filter(Boolean)
     .map(String);
   const [newResellerName, setNewResellerName] = useState('');
+  
+  // State untuk Bulk Scan (Scan Masal)
+  const [showBulkScanModal, setShowBulkScanModal] = useState(false);
+  const [bulkEcommerce, setBulkEcommerce] = useState<EcommercePlatform>('SHOPEE');
+  const [bulkSubToko, setBulkSubToko] = useState<SubToko>('MJM');
+  const [bulkNegaraEkspor, setBulkNegaraEkspor] = useState<NegaraEkspor>('PH');
+  const [bulkResiList, setBulkResiList] = useState<Array<{ id: string; resi: string; isDuplicate: boolean }>>([
+    { id: '1', resi: '', isDuplicate: false }
+  ]);
+  const [bulkSaving, setBulkSaving] = useState(false);
+  const bulkInputRefs = useRef<{ [key: string]: HTMLInputElement | null }>({});
   
   const resiInputRef = useRef<HTMLInputElement>(null);
   
@@ -249,6 +264,123 @@ export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh }) => 
     const matchToko = !searchToko || resi.sub_toko === searchToko;
     return matchSearch && matchEcommerce && matchToko;
   });
+
+  // ============================================================================
+  // BULK SCAN FUNCTIONS
+  // ============================================================================
+  
+  // Check duplikat dalam list bulk scan
+  const checkBulkDuplicates = (list: typeof bulkResiList) => {
+    const seen = new Set<string>();
+    return list.map(item => {
+      const resiClean = item.resi.trim().toUpperCase();
+      if (!resiClean) return { ...item, isDuplicate: false };
+      
+      const isDupe = seen.has(resiClean);
+      seen.add(resiClean);
+      return { ...item, isDuplicate: isDupe };
+    });
+  };
+
+  const handleBulkResiChange = (id: string, value: string) => {
+    setBulkResiList(prev => {
+      const updated = prev.map(item => 
+        item.id === id ? { ...item, resi: value } : item
+      );
+      return checkBulkDuplicates(updated);
+    });
+  };
+
+  const handleBulkResiKeyDown = (e: React.KeyboardEvent, id: string, index: number) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const currentResi = bulkResiList.find(r => r.id === id)?.resi.trim();
+      
+      // Jika ada isi dan ini row terakhir, tambah row baru
+      if (currentResi && index === bulkResiList.length - 1) {
+        const newId = Date.now().toString();
+        setBulkResiList(prev => [...prev, { id: newId, resi: '', isDuplicate: false }]);
+        // Focus ke row baru setelah render
+        setTimeout(() => {
+          bulkInputRefs.current[newId]?.focus();
+        }, 50);
+      } else if (index < bulkResiList.length - 1) {
+        // Pindah ke row berikutnya
+        const nextId = bulkResiList[index + 1].id;
+        bulkInputRefs.current[nextId]?.focus();
+      }
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (index < bulkResiList.length - 1) {
+        const nextId = bulkResiList[index + 1].id;
+        bulkInputRefs.current[nextId]?.focus();
+      }
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (index > 0) {
+        const prevId = bulkResiList[index - 1].id;
+        bulkInputRefs.current[prevId]?.focus();
+      }
+    }
+  };
+
+  const handleAddBulkRow = () => {
+    const newId = Date.now().toString();
+    setBulkResiList(prev => [...prev, { id: newId, resi: '', isDuplicate: false }]);
+    setTimeout(() => {
+      bulkInputRefs.current[newId]?.focus();
+    }, 50);
+  };
+
+  const handleRemoveBulkRow = (id: string) => {
+    if (bulkResiList.length <= 1) return;
+    setBulkResiList(prev => {
+      const filtered = prev.filter(item => item.id !== id);
+      return checkBulkDuplicates(filtered);
+    });
+  };
+
+  const handleClearBulkList = () => {
+    setBulkResiList([{ id: '1', resi: '', isDuplicate: false }]);
+  };
+
+  const handleSaveBulkScan = async () => {
+    const validResis = bulkResiList.filter(r => r.resi.trim() && !r.isDuplicate);
+    
+    if (validResis.length === 0) {
+      showToast('Tidak ada resi valid untuk disimpan!', 'error');
+      return;
+    }
+
+    setBulkSaving(true);
+
+    const items = validResis.map(r => ({
+      resi: r.resi.trim(),
+      ecommerce: bulkEcommerce === 'EKSPOR' ? `EKSPOR - ${bulkNegaraEkspor}` : bulkEcommerce,
+      sub_toko: bulkSubToko,
+      negara_ekspor: bulkEcommerce === 'EKSPOR' ? bulkNegaraEkspor : undefined,
+      scanned_by: userName || 'Admin'
+    }));
+
+    const result = await scanResiStage1Bulk(items, selectedStore);
+
+    if (result.success) {
+      showToast(result.message);
+      await loadResiList();
+      if (onRefresh) onRefresh();
+      
+      // Reset bulk list
+      setBulkResiList([{ id: '1', resi: '', isDuplicate: false }]);
+      setShowBulkScanModal(false);
+    } else {
+      showToast(result.message, 'error');
+    }
+
+    setBulkSaving(false);
+  };
+
+  const validBulkCount = bulkResiList.filter(r => r.resi.trim() && !r.isDuplicate).length;
+  const duplicateBulkCount = bulkResiList.filter(r => r.isDuplicate).length;
   
   const getStatusBadge = (resi: ResiScanStage) => {
     if (resi.stage3_completed) {
@@ -279,14 +411,23 @@ export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh }) => 
               <p className="text-sm text-gray-400">Scan resi dengan barcode scanner</p>
             </div>
           </div>
-          <button
-            onClick={loadResiList}
-            className="flex items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg transition-colors"
-            disabled={loading}
-          >
-            <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
-            Refresh
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowBulkScanModal(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 rounded-lg transition-colors font-semibold"
+            >
+              <List size={16} />
+              Scan Masal
+            </button>
+            <button
+              onClick={loadResiList}
+              className="flex items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg transition-colors"
+              disabled={loading}
+            >
+              <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
+              Refresh
+            </button>
+          </div>
         </div>
       </div>
       
@@ -320,7 +461,7 @@ export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh }) => 
               {ecommerce === 'RESELLER' ? (
                 <SubTokoResellerDropdown
                   value={subToko}
-                  onChange={setSubToko}
+                  onChange={(v) => setSubToko(v as SubToko)}
                   suggestions={resellerTokoList}
                 />
               ) : (
@@ -563,6 +704,200 @@ export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh }) => 
                   className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors"
                 >
                   Tutup
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Scan Modal (Scan Masal) */}
+      {showBulkScanModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+          <div className="bg-gray-800 rounded-xl max-w-3xl w-full border border-gray-700 shadow-2xl max-h-[90vh] flex flex-col">
+            {/* Modal Header */}
+            <div className="p-4 border-b border-gray-700 flex items-center justify-between flex-shrink-0">
+              <h3 className="text-xl font-semibold flex items-center gap-2">
+                <List size={24} className="text-purple-400" />
+                Scan Masal - Input Banyak Resi
+              </h3>
+              <button
+                onClick={() => setShowBulkScanModal(false)}
+                className="p-2 hover:bg-gray-700 rounded-lg transition-colors"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Settings */}
+            <div className="p-4 border-b border-gray-700 bg-gray-800/50 flex-shrink-0">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-sm font-medium mb-1 text-gray-300">E-commerce</label>
+                  <select
+                    value={bulkEcommerce}
+                    onChange={(e) => setBulkEcommerce(e.target.value as EcommercePlatform)}
+                    className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent text-sm"
+                  >
+                    <option value="SHOPEE">Shopee</option>
+                    <option value="TIKTOK">TikTok</option>
+                    <option value="KILAT">Kilat</option>
+                    <option value="RESELLER">Reseller</option>
+                    <option value="EKSPOR">Ekspor</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1 text-gray-300">Sub Toko</label>
+                  {bulkEcommerce === 'RESELLER' ? (
+                    <SubTokoResellerDropdown
+                      value={bulkSubToko}
+                      onChange={(v) => setBulkSubToko(v as SubToko)}
+                      suggestions={resellerTokoList}
+                    />
+                  ) : (
+                    <select
+                      value={bulkSubToko}
+                      onChange={(e) => setBulkSubToko(e.target.value as SubToko)}
+                      className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent text-sm"
+                    >
+                      <option value="MJM">MJM</option>
+                      <option value="BJW">BJW</option>
+                      <option value="LARIS">LARIS</option>
+                    </select>
+                  )}
+                </div>
+                {bulkEcommerce === 'EKSPOR' && (
+                  <div>
+                    <label className="block text-sm font-medium mb-1 text-gray-300">Negara</label>
+                    <select
+                      value={bulkNegaraEkspor}
+                      onChange={(e) => setBulkNegaraEkspor(e.target.value as NegaraEkspor)}
+                      className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent text-sm"
+                    >
+                      <option value="PH">Philippines (PH)</option>
+                      <option value="MY">Malaysia (MY)</option>
+                      <option value="SG">Singapore (SG)</option>
+                      <option value="HK">Hong Kong (HK)</option>
+                    </select>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Table Header */}
+            <div className="px-4 py-2 bg-gray-700/50 border-b border-gray-600 flex items-center gap-4 text-sm font-medium text-gray-300 flex-shrink-0">
+              <div className="w-12 text-center">#</div>
+              <div className="flex-1">Nomor Resi</div>
+              <div className="w-24 text-center">Status</div>
+              <div className="w-16 text-center">Aksi</div>
+            </div>
+
+            {/* Scrollable Table Body */}
+            <div className="flex-1 overflow-auto p-2">
+              {bulkResiList.map((item, index) => (
+                <div 
+                  key={item.id} 
+                  className={`flex items-center gap-4 px-2 py-1.5 rounded ${
+                    item.isDuplicate ? 'bg-red-900/30' : 'hover:bg-gray-700/30'
+                  }`}
+                >
+                  <div className="w-12 text-center text-sm text-gray-400 font-mono">
+                    {index + 1}
+                  </div>
+                  <div className="flex-1">
+                    <input
+                      ref={(el) => { bulkInputRefs.current[item.id] = el; }}
+                      type="text"
+                      value={item.resi}
+                      onChange={(e) => handleBulkResiChange(item.id, e.target.value)}
+                      onKeyDown={(e) => handleBulkResiKeyDown(e, item.id, index)}
+                      placeholder="Scan atau ketik resi..."
+                      className={`w-full px-3 py-2 bg-gray-700 border rounded-lg text-sm font-mono focus:ring-2 focus:ring-purple-500 focus:border-transparent ${
+                        item.isDuplicate ? 'border-red-500 text-red-300' : 'border-gray-600'
+                      }`}
+                      autoFocus={index === 0}
+                    />
+                  </div>
+                  <div className="w-24 text-center">
+                    {item.isDuplicate ? (
+                      <span className="px-2 py-1 bg-red-600/30 text-red-300 rounded text-xs flex items-center gap-1 justify-center">
+                        <AlertTriangle size={12} /> Double
+                      </span>
+                    ) : item.resi.trim() ? (
+                      <span className="px-2 py-1 bg-green-600/30 text-green-300 rounded text-xs flex items-center gap-1 justify-center">
+                        <Check size={12} /> OK
+                      </span>
+                    ) : (
+                      <span className="text-gray-500 text-xs">-</span>
+                    )}
+                  </div>
+                  <div className="w-16 text-center">
+                    <button
+                      onClick={() => handleRemoveBulkRow(item.id)}
+                      disabled={bulkResiList.length <= 1}
+                      className="p-1.5 text-red-400 hover:bg-red-600/20 rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Footer */}
+            <div className="p-4 border-t border-gray-700 flex-shrink-0">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-4 text-sm">
+                  <span className="text-gray-400">
+                    Total: <span className="font-semibold text-white">{bulkResiList.filter(r => r.resi.trim()).length}</span>
+                  </span>
+                  <span className="text-green-400">
+                    Valid: <span className="font-semibold">{validBulkCount}</span>
+                  </span>
+                  {duplicateBulkCount > 0 && (
+                    <span className="text-red-400">
+                      Duplikat: <span className="font-semibold">{duplicateBulkCount}</span>
+                    </span>
+                  )}
+                </div>
+                <button
+                  onClick={handleAddBulkRow}
+                  className="flex items-center gap-1 px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm transition-colors"
+                >
+                  <Plus size={14} />
+                  Tambah Baris
+                </button>
+              </div>
+              
+              <div className="flex gap-2">
+                <button
+                  onClick={handleClearBulkList}
+                  className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors text-sm"
+                >
+                  Bersihkan
+                </button>
+                <button
+                  onClick={() => setShowBulkScanModal(false)}
+                  className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors text-sm"
+                >
+                  Batal
+                </button>
+                <button
+                  onClick={handleSaveBulkScan}
+                  disabled={bulkSaving || validBulkCount === 0}
+                  className="flex-1 px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-700 disabled:cursor-not-allowed rounded-lg font-semibold transition-colors flex items-center justify-center gap-2"
+                >
+                  {bulkSaving ? (
+                    <>
+                      <RefreshCw size={16} className="animate-spin" />
+                      Menyimpan...
+                    </>
+                  ) : (
+                    <>
+                      <Save size={16} />
+                      Simpan {validBulkCount} Resi
+                    </>
+                  )}
                 </button>
               </div>
             </div>

@@ -411,8 +411,12 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
       });
 
       if (correctedItems.length > 0) {
-          await saveCSVToResiItems(correctedItems, selectedStore);
-          alert(`Berhasil import ${correctedItems.length} item sebagai ${uploadEcommerce} (${uploadSubToko}).`);
+          const result = await saveCSVToResiItems(correctedItems, selectedStore);
+          if (result.skipped > 0) {
+            alert(`Import selesai:\n• ${result.count} item baru ditambahkan\n• ${result.skipped} item dilewati (sudah ada di database)`);
+          } else {
+            alert(`Berhasil import ${result.count} item sebagai ${uploadEcommerce} (${uploadSubToko}).`);
+          }
       }
 
       await loadSavedDataFromDB();
@@ -631,6 +635,13 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
     if (filterStatus !== 'all' && row.status_message !== filterStatus) return false;
     if (filterEcommerce && row.ecommerce !== filterEcommerce) return false;
     if (filterSubToko && row.sub_toko !== filterSubToko) return false;
+    // Filter by resi search query - mencari di semua resi yang ada di Stage 3
+    if (resiSearchQuery) {
+      const query = resiSearchQuery.toLowerCase();
+      const matchResi = row.resi?.toLowerCase().includes(query);
+      const matchOrder = row.no_pesanan?.toLowerCase().includes(query);
+      if (!matchResi && !matchOrder) return false;
+    }
     return true;
   });
 
@@ -772,7 +783,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                             value={resiSearchQuery}
                             onChange={e => { setResiSearchQuery(e.target.value); setShowResiDropdown(true); }}
                             onFocus={() => setShowResiDropdown(true)}
-                            placeholder="Cari Resi S1..."
+                            placeholder="Cari Resi..."
                             className="bg-gray-800 border border-gray-600 rounded px-2 py-0.5 text-[10px] md:text-xs text-gray-300 w-28 md:w-40 focus:border-blue-500 outline-none"
                         />
                     </div>
