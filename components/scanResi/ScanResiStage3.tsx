@@ -273,7 +273,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
            loadedRows.push({
              id: `db-${item.id}`,
              tanggal: item.created_at ? item.created_at.split('T')[0] : new Date().toISOString().split('T')[0],
-             resi: item.resi,
+             resi: item.resi ? String(item.resi).trim() : '',
              ecommerce: ecommerceDB,
              sub_toko: subToko,
              part_number: item.part_number || '',
@@ -295,18 +295,39 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
         }
 
         setRows(prev => {
-            const newMap = new Map();
-            loadedRows.forEach(r => newMap.set(r.resi + r.part_number, r));
-            const mergedRows = prev.map(existingRow => {
-                const key = existingRow.resi + existingRow.part_number;
-                if (newMap.has(key)) {
-                    const freshData = newMap.get(key);
-                    newMap.delete(key);
-                    return freshData;
-                }
-                return existingRow;
+            // Group incoming rows by Resi (normalized)
+            const incomingByResi = new Map<string, Stage3Row[]>();
+            loadedRows.forEach(r => {
+                const key = String(r.resi).trim();
+                if (!incomingByResi.has(key)) incomingByResi.set(key, []);
+                incomingByResi.get(key)?.push(r);
             });
-            return [...mergedRows, ...Array.from(newMap.values()) as Stage3Row[]];
+
+            const newRows: Stage3Row[] = [];
+            
+            // Iterate existing rows to merge/replace
+            prev.forEach(existingRow => {
+                const resiKey = String(existingRow.resi).trim();
+                
+                if (incomingByResi.has(resiKey)) {
+                    const candidates = incomingByResi.get(resiKey)!;
+                    // Replace if placeholder or empty part number
+                    if ((existingRow.nama_barang_csv === 'Menunggu Input...' || !existingRow.part_number) && candidates.length > 0) {
+                        newRows.push(candidates.shift()!);
+                    } else {
+                        newRows.push(existingRow);
+                    }
+                } else {
+                    newRows.push(existingRow);
+                }
+            });
+
+            // Add remaining new rows
+            incomingByResi.forEach((candidates) => {
+                candidates.forEach(r => newRows.push(r));
+            });
+            
+            return newRows;
         });
       }
     } catch (e) {
@@ -369,9 +390,23 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
     
     try {
       const data = await file.arrayBuffer();
-      const workbook = XLSX.read(data, { type: 'array' });
+      const workbook = XLSX.read(data, { type: 'array', raw: true });
       const sheetName = workbook.SheetNames[0];
       const worksheet = workbook.Sheets[sheetName];
+      
+      // FIX: Hapus formatting agar angka panjang (Resi) tidak jadi scientific notation (1.10E+13)
+      if (worksheet) {
+        for (const key in worksheet) {
+            if (key.startsWith('!')) continue;
+            const cell = worksheet[key];
+            if (cell && cell.t === 'n') {
+                cell.t = 's';
+                cell.v = String(cell.v);
+                delete cell.w;
+            }
+        }
+      }
+
       const csvText = XLSX.utils.sheet_to_csv(worksheet);
 
       const platform = detectCSVPlatform(csvText);
@@ -391,6 +426,11 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
         }
       }
 
+      // FILTER: Skip item yang tidak ada resinya (kosong atau strip)
+      const initialCount = parsedItems.length;
+      parsedItems = parsedItems.map(item => ({...item, resi: item.resi ? String(item.resi).trim() : ''}));
+      parsedItems = parsedItems.filter(item => item.resi && item.resi !== '' && item.resi !== '-');
+
       if (parsedItems.length === 0) {
         alert('Tidak ada data valid (Mungkin status Batal/Belum Bayar?).');
         setLoading(false);
@@ -407,6 +447,14 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
         item.ecommerce = uploadEcommerce;
         item.sub_toko = uploadSubToko;
         
+        // CLEANUP NUMBERS: Buang titik dan koma, convert ke number
+        const cleanNumber = (val: any) => parseFloat(String(val).replace(/[.,]/g, '')) || 0;
+        
+        item.jumlah = cleanNumber(item.jumlah || item.quantity || 1);
+        item.total_harga_produk = cleanNumber(item.total_harga_produk || 0);
+        item.harga_satuan = cleanNumber(item.harga_satuan || 0);
+        if (item.jumlah > 0 && item.total_harga_produk > 0) item.harga_satuan = item.total_harga_produk / item.jumlah;
+
         // Handle Ekspor (tambah suffix negara)
         if (uploadEcommerce === 'EKSPOR') {
             item.ecommerce = `EKSPOR - ${uploadNegara}`;
@@ -417,7 +465,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
 
       if (correctedItems.length > 0) {
           await saveCSVToResiItems(correctedItems, selectedStore);
-          alert(`Berhasil import ${correctedItems.length} item sebagai ${uploadEcommerce} (${uploadSubToko}).`);
+          alert(`Berhasil import ${correctedItems.length} item (dari total ${initialCount} baris) sebagai ${uploadEcommerce} (${uploadSubToko}).`);
       }
 
       await loadSavedDataFromDB();
@@ -489,7 +537,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
     const dbRows: Stage3Row[] = pendingData.map(item => ({
       id: Math.random().toString(36).substr(2, 9), 
       tanggal: new Date(item.stage2_verified_at || item.created_at).toISOString().split('T')[0],
-      resi: item.resi,
+      resi: item.resi ? item.resi.trim() : '',
       ecommerce: item.ecommerce || '-',
       sub_toko: item.sub_toko || (selectedStore === 'bjw' ? 'BJW' : 'MJM'),
       part_number: '', 

@@ -218,7 +218,10 @@ export const OrderManagement: React.FC = () => {
       (item.customer || '').toLowerCase().includes(lower) ||
       (item.nama_barang || item.name || '').toLowerCase().includes(lower) ||
       (item.resi || '').toLowerCase().includes(lower) ||
-      (item.part_number || '').toLowerCase().includes(lower)
+      (item.part_number || '').toLowerCase().includes(lower) ||
+      (item.ecommerce || '').toLowerCase().includes(lower) ||
+      (item.toko || '').toLowerCase().includes(lower) ||
+      (item.tempo || '').toLowerCase().includes(lower)
     );
   };
 
@@ -265,7 +268,7 @@ export const OrderManagement: React.FC = () => {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
           <input 
             type="text" 
-            placeholder="Cari Customer, Barang, Resi..." 
+            placeholder="Cari Customer, Barang, Resi, Part No, E-comm..." 
             className="w-full pl-10 pr-4 py-3 bg-gray-800 border border-gray-700 rounded-xl text-sm focus:ring-2 focus:ring-purple-500 outline-none text-white placeholder-gray-500"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
