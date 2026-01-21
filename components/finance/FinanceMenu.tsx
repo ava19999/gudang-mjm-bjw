@@ -96,9 +96,24 @@ export const FinanceMenu: React.FC<FinanceMenuProps> = ({
     );
   }
 
-  // Desktop version
+  // Desktop version - Click to toggle dropdown
+  // Close dropdown when clicking outside
+  React.useEffect(() => {
+    if (!internalIsOpen) return;
+    
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest('.finance-menu-desktop')) {
+        setInternalIsOpen(false);
+      }
+    };
+    
+    document.addEventListener('click', handleClickOutside);
+    return () => document.removeEventListener('click', handleClickOutside);
+  }, [internalIsOpen]);
+
   return (
-    <div className="relative">
+    <div className="relative finance-menu-desktop">
       <button 
         onClick={handleMainClick}
         className={`hidden md:flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-full transition-all ${
@@ -117,7 +132,7 @@ export const FinanceMenu: React.FC<FinanceMenuProps> = ({
           <button
             onClick={() => {
               setActiveView('petty_cash');
-              setIsOpen(false);
+              setInternalIsOpen(false);
             }}
             className={`w-full px-4 py-3 text-left hover:bg-gray-700 transition-colors flex items-center gap-2 ${
               activeView === 'petty_cash' ? 'bg-gray-700 text-green-400' : 'text-gray-300'
@@ -129,7 +144,7 @@ export const FinanceMenu: React.FC<FinanceMenuProps> = ({
           <button
             onClick={() => {
               setActiveView('barang_kosong');
-              setIsOpen(false);
+              setInternalIsOpen(false);
             }}
             className={`w-full px-4 py-3 text-left hover:bg-gray-700 transition-colors flex items-center gap-2 border-t border-gray-700 ${
               activeView === 'barang_kosong' ? 'bg-gray-700 text-yellow-400' : 'text-gray-300'
@@ -141,7 +156,7 @@ export const FinanceMenu: React.FC<FinanceMenuProps> = ({
           <button
             onClick={() => {
               setActiveView('closing');
-              setIsOpen(false);
+              setInternalIsOpen(false);
             }}
             className={`w-full px-4 py-3 text-left hover:bg-gray-700 transition-colors flex items-center gap-2 border-t border-gray-700 ${
               activeView === 'closing' ? 'bg-gray-700 text-blue-400' : 'text-gray-300'

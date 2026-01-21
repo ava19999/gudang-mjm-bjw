@@ -70,9 +70,24 @@ export const OnlineMenu: React.FC<OnlineMenuProps> = ({
     );
   }
 
-  // Desktop version
+  // Desktop version - Click to toggle dropdown
+  // Close dropdown when clicking outside
+  React.useEffect(() => {
+    if (!internalIsOpen) return;
+    
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest('.online-menu-desktop')) {
+        setInternalIsOpen(false);
+      }
+    };
+    
+    document.addEventListener('click', handleClickOutside);
+    return () => document.removeEventListener('click', handleClickOutside);
+  }, [internalIsOpen]);
+
   return (
-    <div className="relative">
+    <div className="relative online-menu-desktop">
       <button 
         onClick={handleMainClick}
         className={`hidden md:flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-full transition-all ${
@@ -91,7 +106,7 @@ export const OnlineMenu: React.FC<OnlineMenuProps> = ({
           <button
             onClick={() => {
               setActiveView('data_agung');
-              setIsOpen(false);
+              setInternalIsOpen(false);
             }}
             className={`w-full px-4 py-3 text-left hover:bg-gray-700 transition-colors flex items-center gap-2 ${
               activeView === 'data_agung' ? 'bg-gray-700 text-cyan-400' : 'text-gray-300'

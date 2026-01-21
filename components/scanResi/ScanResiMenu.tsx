@@ -112,9 +112,24 @@ export const ScanResiMenu: React.FC<ScanResiMenuProps> = ({
     );
   }
 
-  // Desktop version
+  // Desktop version - Click to toggle dropdown
+  // Close dropdown when clicking outside
+  React.useEffect(() => {
+    if (!internalIsOpen) return;
+    
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest('.scan-resi-menu-desktop')) {
+        setInternalIsOpen(false);
+      }
+    };
+    
+    document.addEventListener('click', handleClickOutside);
+    return () => document.removeEventListener('click', handleClickOutside);
+  }, [internalIsOpen]);
+
   return (
-    <div className="relative">
+    <div className="relative scan-resi-menu-desktop">
       <button 
         onClick={handleMainClick}
         className={`hidden md:flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-full transition-all ${
@@ -133,7 +148,7 @@ export const ScanResiMenu: React.FC<ScanResiMenuProps> = ({
           <button
             onClick={() => {
               setActiveView('scan_resi_stage1');
-              setIsOpen(false);
+              setInternalIsOpen(false);
             }}
             className={`w-full px-4 py-3 text-left hover:bg-gray-700 transition-colors flex items-center gap-2 ${
               activeView === 'scan_resi_stage1' ? 'bg-gray-700 text-green-400' : 'text-gray-300'
@@ -146,7 +161,7 @@ export const ScanResiMenu: React.FC<ScanResiMenuProps> = ({
           <button
             onClick={() => {
               setActiveView('scan_resi_stage2');
-              setIsOpen(false);
+              setInternalIsOpen(false);
             }}
             className={`w-full px-4 py-3 text-left hover:bg-gray-700 transition-colors flex items-center gap-2 ${
               activeView === 'scan_resi_stage2' ? 'bg-gray-700 text-green-400' : 'text-gray-300'
@@ -159,7 +174,7 @@ export const ScanResiMenu: React.FC<ScanResiMenuProps> = ({
           <button
             onClick={() => {
               setActiveView('scan_resi_stage3');
-              setIsOpen(false);
+              setInternalIsOpen(false);
             }}
             className={`w-full px-4 py-3 text-left hover:bg-gray-700 transition-colors flex items-center gap-2 ${
               activeView === 'scan_resi_stage3' ? 'bg-gray-700 text-green-400' : 'text-gray-300'
@@ -172,7 +187,7 @@ export const ScanResiMenu: React.FC<ScanResiMenuProps> = ({
           <button
             onClick={() => {
               setActiveView('scan_resi_history');
-              setIsOpen(false);
+              setInternalIsOpen(false);
             }}
             className={`w-full px-4 py-3 text-left hover:bg-gray-700 transition-colors flex items-center gap-2 ${
               activeView === 'scan_resi_history' ? 'bg-gray-700 text-green-400' : 'text-gray-300'

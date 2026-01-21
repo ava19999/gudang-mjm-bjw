@@ -2,6 +2,8 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { Package, Plus, X, Search, Keyboard } from 'lucide-react';
 import { InventoryItem, OnlineProduct, ProdukKosong, TableMasuk, BaseWarehouseItem } from '../../types';
+import Autocomplete from '@mui/material/Autocomplete';
+import TextField from '@mui/material/TextField';
 import { generateId } from '../../utils';
 
 interface DataAgungViewProps {
@@ -825,18 +827,71 @@ export const DataAgungView: React.FC<DataAgungViewProps> = ({ items, onRefresh, 
                 <label className="block text-sm font-semibold text-gray-300 mb-2">
                   Pilih Produk dari Data Pusat (Base Warehouse)
                 </label>
-                <select
-                  value={selectedPartNumber}
-                  onChange={(e) => setSelectedPartNumber(e.target.value)}
-                  className="w-full bg-gray-900 text-gray-100 px-4 py-2 rounded-lg border border-gray-700 focus:outline-none focus:ring-2 focus:ring-green-500"
-                >
-                  <option value="">-- Pilih Produk --</option>
-                  {baseWarehouseItems.map(item => (
-                    <option key={item.id} value={item.partNumber}>
-                      {item.partNumber} - {item.name} (Qty: {item.quantity})
-                    </option>
-                  ))}
-                </select>
+                <Autocomplete
+                  options={baseWarehouseItems}
+                  getOptionLabel={(option) => option.partNumber ? `${option.partNumber} - ${option.name}` : ''}
+                  value={baseWarehouseItems.find(item => item.partNumber === selectedPartNumber) || null}
+                  onChange={(_, newValue) => {
+                    setSelectedPartNumber(newValue?.partNumber || '');
+                  }}
+                  filterOptions={(options, { inputValue }) => {
+                    const searchLower = inputValue.toLowerCase();
+                    return options.filter(option =>
+                      (option.partNumber || '').toLowerCase().includes(searchLower) ||
+                      (option.name || '').toLowerCase().includes(searchLower)
+                    ).slice(0, 50);
+                  }}
+                  renderOption={(props, option) => (
+                    <li {...props} key={option.id} className="px-3 py-2 hover:bg-gray-700 cursor-pointer border-b border-gray-700">
+                      <div>
+                        <div className="font-semibold text-gray-100">{option.partNumber}</div>
+                        <div className="text-xs text-gray-400">{option.name}</div>
+                        <div className="text-xs text-gray-500">Qty: <span className={option.quantity === 0 ? 'text-red-400' : 'text-green-400'}>{option.quantity}</span></div>
+                      </div>
+                    </li>
+                  )}
+                  renderInput={(params) => (
+                    <TextField
+                      {...params}
+                      placeholder="Ketik untuk mencari produk..."
+                      variant="outlined"
+                      size="small"
+                      sx={{
+                        '& .MuiOutlinedInput-root': {
+                          backgroundColor: '#111827',
+                          color: '#f3f4f6',
+                          borderRadius: '0.5rem',
+                          '& fieldset': { borderColor: '#374151' },
+                          '&:hover fieldset': { borderColor: '#4b5563' },
+                          '&.Mui-focused fieldset': { borderColor: '#22c55e' },
+                        },
+                        '& .MuiInputBase-input': { color: '#f3f4f6' },
+                        '& .MuiInputBase-input::placeholder': { color: '#9ca3af', opacity: 1 },
+                        '& .MuiSvgIcon-root': { color: '#9ca3af' },
+                      }}
+                    />
+                  )}
+                  componentsProps={{
+                    paper: {
+                      sx: {
+                        backgroundColor: '#1f2937',
+                        border: '1px solid #374151',
+                        borderRadius: '0.5rem',
+                        maxHeight: '300px',
+                        '& .MuiAutocomplete-listbox': {
+                          padding: 0,
+                          '& .MuiAutocomplete-option': {
+                            padding: 0,
+                            '&:hover': { backgroundColor: '#374151' },
+                            '&[aria-selected="true"]': { backgroundColor: '#374151' },
+                          },
+                        },
+                      },
+                    },
+                  }}
+                  noOptionsText={<span className="text-gray-400">Tidak ada produk ditemukan</span>}
+                  fullWidth
+                />
                 <p className="text-xs text-gray-500 mt-2">
                   * Hanya menampilkan produk dari Base Warehouse (Qty = 0)
                 </p>

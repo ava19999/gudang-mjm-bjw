@@ -2,8 +2,10 @@
 // Stage 2: Packing Verification - Camera barcode scanner
 // Updated: Custom TTS "Ini sudah di scan tolol" for double scan
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useStore } from '../../context/StoreContext';
+import Autocomplete from '@mui/material/Autocomplete';
+import TextField from '@mui/material/TextField';
 import {
   verifyResiStage2,
   verifyResiStage2Bulk,
@@ -94,7 +96,7 @@ export const ScanResiStage2: React.FC<ScanResiStage2Props> = ({ onRefresh }) => 
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'warning' } | null>(null);
   const [lastScannedResi, setLastScannedResi] = useState<string | null>(null);
   const [scanningEnabled, setScanningEnabled] = useState(true);
-  const [statusFilter, setStatusFilter] = useState('pending');
+  const [statusFilter, setStatusFilter] = useState('all');
   const [manualResi, setManualResi] = useState('');
   
   // Bulk Verify States
@@ -558,24 +560,107 @@ export const ScanResiStage2: React.FC<ScanResiStage2Props> = ({ onRefresh }) => 
       
       {/* Camera Scanner + Input Manual */}
       <div className="bg-gray-800 rounded-xl p-6 mb-6 shadow-lg border border-gray-700">
-        <form onSubmit={handleManualSubmit} className="flex flex-col md:flex-row gap-2 mb-4">
-          <input
-            type="text"
-            value={manualResi}
-            onChange={e => setManualResi(e.target.value)}
-            placeholder="Input manual nomor resi..."
-            className="flex-1 px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-lg font-mono"
-            autoComplete="off"
-          />
-          <button
-            type="submit"
-            className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors text-lg flex items-center gap-2 disabled:bg-gray-700 disabled:cursor-not-allowed"
-            disabled={loading || !manualResi.trim()}
-          >
-            <Check size={20} />
-            Verifikasi
-          </button>
-        </form>
+        {/* Dropdown Pilih Resi dari Stage 1 */}
+        <div className="mb-4">
+          <label className="block text-sm font-semibold text-gray-300 mb-2">
+            Pilih Resi dari Stage 1 (Pending Verifikasi)
+          </label>
+          <div className="flex flex-col md:flex-row gap-2">
+            <Autocomplete
+              options={pendingList.filter(r => !r.stage2_verified)}
+              getOptionLabel={(option) => option.resi || ''}
+              value={pendingList.find(r => r.resi === manualResi && !r.stage2_verified) || null}
+              onChange={(_, newValue) => {
+                setManualResi(newValue?.resi || '');
+              }}
+              filterOptions={(options, { inputValue }) => {
+                const searchLower = inputValue.toLowerCase();
+                return options.filter(option =>
+                  (option.resi || '').toLowerCase().includes(searchLower) ||
+                  (option.ecommerce || '').toLowerCase().includes(searchLower) ||
+                  (option.sub_toko || '').toLowerCase().includes(searchLower)
+                ).slice(0, 50);
+              }}
+              renderOption={(props, option) => (
+                <li {...props} key={option.id} className="px-3 py-2 hover:bg-gray-700 cursor-pointer border-b border-gray-700">
+                  <div className="flex items-center justify-between w-full">
+                    <div>
+                      <div className="font-mono font-semibold text-blue-400">{option.resi}</div>
+                      <div className="text-xs text-gray-400 flex gap-2">
+                        <span className="px-1.5 py-0.5 bg-orange-600/30 text-orange-300 rounded">{option.ecommerce}</span>
+                        <span className="px-1.5 py-0.5 bg-blue-600/30 text-blue-300 rounded">{option.sub_toko}</span>
+                      </div>
+                    </div>
+                    <div className="text-xs text-gray-500">
+                      {new Date(option.stage1_scanned_at || option.created_at).toLocaleDateString('id-ID', { day: '2-digit', month: 'short' })}
+                    </div>
+                  </div>
+                </li>
+              )}
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  placeholder="Ketik untuk mencari resi..."
+                  variant="outlined"
+                  size="small"
+                  sx={{
+                    '& .MuiOutlinedInput-root': {
+                      backgroundColor: '#374151',
+                      color: '#f3f4f6',
+                      borderRadius: '0.5rem',
+                      fontSize: '1rem',
+                      fontFamily: 'monospace',
+                      '& fieldset': { borderColor: '#4b5563' },
+                      '&:hover fieldset': { borderColor: '#6b7280' },
+                      '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
+                    },
+                    '& .MuiInputBase-input': { color: '#f3f4f6', padding: '12px 14px' },
+                    '& .MuiInputBase-input::placeholder': { color: '#9ca3af', opacity: 1 },
+                    '& .MuiSvgIcon-root': { color: '#9ca3af' },
+                  }}
+                />
+              )}
+              componentsProps={{
+                paper: {
+                  sx: {
+                    backgroundColor: '#1f2937',
+                    border: '1px solid #374151',
+                    borderRadius: '0.5rem',
+                    maxHeight: '300px',
+                    '& .MuiAutocomplete-listbox': {
+                      padding: 0,
+                      '& .MuiAutocomplete-option': {
+                        padding: 0,
+                        '&:hover': { backgroundColor: '#374151' },
+                        '&[aria-selected="true"]': { backgroundColor: '#374151' },
+                      },
+                    },
+                  },
+                },
+              }}
+              noOptionsText={<span className="text-gray-400 px-3 py-2">Tidak ada resi pending</span>}
+              fullWidth
+              freeSolo
+              onInputChange={(_, value) => {
+                setManualResi(value);
+              }}
+              inputValue={manualResi}
+              className="flex-1"
+            />
+            <button
+              type="button"
+              onClick={(e) => { e.preventDefault(); handleManualSubmit(e as any); }}
+              className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors text-lg flex items-center gap-2 disabled:bg-gray-700 disabled:cursor-not-allowed whitespace-nowrap"
+              disabled={loading || !manualResi.trim()}
+            >
+              <Check size={20} />
+              Verifikasi
+            </button>
+          </div>
+          <p className="text-xs text-gray-500 mt-2">
+            * Pilih dari dropdown atau ketik manual nomor resi. Total pending: <span className="text-yellow-400 font-semibold">{pendingList.filter(r => !r.stage2_verified).length}</span>
+          </p>
+        </div>
 
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold flex items-center gap-2">
