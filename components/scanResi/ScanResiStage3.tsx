@@ -182,12 +182,14 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
             getBulkPartNumberInfo(allParts, selectedStore)
         ]);
 
-        // Map by resi AND no_pesanan
+        // Map by resi AND no_pesanan (UPPERCASE untuk case-insensitive matching)
+        // PENTING: Untuk Sameday/Instant, No. Pesanan discan dan disimpan di kolom `resi`
+        // Jadi perlu juga map by resi untuk lookup by order_id
         const statusMapByResi = new Map();
         const statusMapByOrder = new Map();
         dbStatus.forEach((d: any) => {
-          if (d.resi) statusMapByResi.set(d.resi, d);
-          if (d.no_pesanan) statusMapByOrder.set(String(d.no_pesanan), d);
+          if (d.resi) statusMapByResi.set(d.resi.toUpperCase(), d);
+          if (d.no_pesanan) statusMapByOrder.set(String(d.no_pesanan).toUpperCase(), d);
         });
 
         const partMap = new Map();
@@ -199,10 +201,20 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
         const seenKeys = new Set<string>();
 
         for (const item of savedItems) {
-           // Cari di Stage 1 by resi ATAU by order_id (untuk instant/sameday)
-           let dbRow = statusMapByResi.get(item.resi);
+           // Cari di Stage 1 dengan urutan prioritas:
+           // 1. Match item.resi dengan scan.resi
+           // 2. Match item.order_id dengan scan.no_pesanan
+           // 3. Match item.order_id dengan scan.resi (untuk Sameday/Instant yang scan No. Pesanan)
+           // Normalisasi ke uppercase untuk matching
+           let dbRow = statusMapByResi.get((item.resi || '').toUpperCase());
            if (!dbRow && item.order_id) {
-             dbRow = statusMapByOrder.get(String(item.order_id));
+             // Coba match dengan no_pesanan dulu
+             dbRow = statusMapByOrder.get(String(item.order_id).toUpperCase());
+           }
+           if (!dbRow && item.order_id) {
+             // PENTING: Untuk Sameday/Instant, coba match order_id dengan resi
+             // Karena No. Pesanan discan dan disimpan di kolom resi
+             dbRow = statusMapByResi.get(String(item.order_id).toUpperCase());
            }
            
            const partInfo = partMap.get(item.part_number);

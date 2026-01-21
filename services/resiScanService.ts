@@ -485,6 +485,7 @@ export const checkResiStatus = async (resis: string[], store: string | null) => 
 /**
  * Cek status resi dengan matching ke resi ATAU no_pesanan
  * Untuk kasus instant/sameday yang scan pakai no pesanan
+ * CASE-INSENSITIVE matching dengan normalisasi uppercase
  */
 export const checkResiOrOrderStatus = async (
   resiOrOrders: string[], 
@@ -493,17 +494,36 @@ export const checkResiOrOrderStatus = async (
   const table = getTableName(store);
   if (resiOrOrders.length === 0) return [];
   
-  // Query dengan OR: resi IN (...) OR no_pesanan IN (...)
+  // Normalisasi ke uppercase dan trim, hapus yang kosong
+  const normalizedList = [...new Set(
+    resiOrOrders
+      .map(r => r?.toString().trim().toUpperCase())
+      .filter(Boolean)
+  )];
+  
+  if (normalizedList.length === 0) return [];
+  
+  // Ambil SEMUA data stage1_scanned dari database, lalu filter di client-side
+  // Ini lebih reliable untuk case-insensitive matching
   const { data, error } = await supabase
     .from(table)
     .select('resi, no_pesanan, stage1_scanned, stage2_verified, status, ecommerce, sub_toko')
-    .or(`resi.in.(${resiOrOrders.map(r => `"${r}"`).join(',')}),no_pesanan.in.(${resiOrOrders.map(r => `"${r}"`).join(',')})`);
+    .eq('stage1_scanned', 'true');
   
   if (error) {
     console.error('checkResiOrOrderStatus error:', error);
     return [];
   }
-  return data || [];
+  
+  // Filter di client-side dengan case-insensitive matching
+  const normalizedSet = new Set(normalizedList);
+  const filtered = (data || []).filter((row: any) => {
+    const resiUpper = (row.resi || '').toUpperCase().trim();
+    const orderUpper = (row.no_pesanan || '').toString().toUpperCase().trim();
+    return normalizedSet.has(resiUpper) || normalizedSet.has(orderUpper);
+  });
+  
+  return filtered;
 };
 
 /**
@@ -704,9 +724,9 @@ export const saveCSVToResiItems = async (
   if (!items || items.length === 0) return { success: false, message: 'Tidak ada data untuk disimpan', count: 0, skipped: 0 };
 
   try {
-    // Ambil semua resi dan order_id unik dari items yang akan diimport
-    const resiList = [...new Set(items.map(i => i.resi).filter(Boolean))];
-    const orderIdList = [...new Set(items.map(i => i.order_id).filter(Boolean))];
+    // Ambil semua resi dan order_id unik dari items yang akan diimport (UPPERCASE normalized)
+    const resiList = [...new Set(items.map(i => (i.resi || '').toUpperCase().trim()).filter(Boolean))];
+    const orderIdList = [...new Set(items.map(i => (i.order_id || '').toUpperCase().trim()).filter(Boolean))];
 
     // Cek data yang SUDAH DIPROSES di database (status = 'processed')
     // Item pending boleh di-replace, item processed tidak boleh di-import ulang
@@ -716,12 +736,14 @@ export const saveCSVToResiItems = async (
       .eq('status', 'processed')
       .or(`resi.in.(${resiList.map(r => `"${r}"`).join(',')}),order_id.in.(${orderIdList.map(o => `"${o}"`).join(',')})`);
 
-    // Buat set key untuk cek duplikat: resi + order_id + nama_produk (normalized)
+    // Buat set key untuk cek duplikat: resi + order_id + nama_produk (UPPERCASE normalized)
     // Hanya item yang sudah processed yang dianggap duplikat
     const processedKeys = new Set<string>();
     (processedData || []).forEach((row: any) => {
+      const resiNorm = (row.resi || '').toUpperCase().trim();
+      const orderNorm = (row.order_id || '').toUpperCase().trim();
       const namaNormalized = (row.nama_produk || '').toLowerCase().trim();
-      const key = `${row.resi || ''}||${row.order_id || ''}||${namaNormalized}`;
+      const key = `${resiNorm}||${orderNorm}||${namaNormalized}`;
       processedKeys.add(key);
     });
 
@@ -742,8 +764,10 @@ export const saveCSVToResiItems = async (
     const batchKeys = new Set<string>(); // Untuk cek duplikat dalam batch yang sama
 
     for (const item of items) {
+      const resiNorm = (item.resi || '').toUpperCase().trim();
+      const orderNorm = (item.order_id || '').toUpperCase().trim();
       const namaNormalized = (item.product_name || '').toLowerCase().trim();
-      const key = `${item.resi || ''}||${item.order_id || ''}||${namaNormalized}`;
+      const key = `${resiNorm}||${orderNorm}||${namaNormalized}`;
       
       // Skip jika sudah diproses sebelumnya
       if (processedKeys.has(key)) {
@@ -774,9 +798,9 @@ export const saveCSVToResiItems = async (
       const fixedToko = (item as any).sub_toko || store?.toUpperCase();
       
       return {
-        order_id: item.order_id,
+        order_id: (item.order_id || '').toUpperCase().trim(),
         status_pesanan: item.order_status,
-        resi: item.resi,
+        resi: (item.resi || '').toUpperCase().trim(),
         opsi_pengiriman: item.shipping_option,
         part_number: item.part_number,
         nama_produk: item.product_name,

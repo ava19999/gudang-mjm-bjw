@@ -117,16 +117,26 @@ export const parseShopeeCSV = (text: string): ParsedCSVItem[] => {
       : '';
     const statusLower = rawStatus.toLowerCase();
     
-    // SKIP: Batal atau Belum Bayar
-    if (statusLower.includes('batal') || statusLower.includes('belum bayar')) {
+    // SKIP: Batal, Belum Bayar, Dibatalkan
+    if (statusLower.includes('batal') || 
+        statusLower.includes('belum bayar') || 
+        statusLower.includes('dibatalkan') ||
+        statusLower.includes('cancelled') ||
+        statusLower.includes('cancel')) {
       return null;
     }
 
-    // Get resi - SKIP jika kosong
+    // Get resi dan order_id
     const resi = (idxResi !== -1 && cols[idxResi]) 
       ? cols[idxResi].replace(/["']/g, '').trim() 
       : '';
-    if (!resi) return null;
+    const orderId = (idxOrder !== -1 && cols[idxOrder]) 
+      ? cols[idxOrder].replace(/["']/g, '').trim() 
+      : '';
+    
+    // SKIP jika KEDUA resi DAN order_id kosong
+    // Untuk Sameday/Instant, resi mungkin kosong tapi order_id ada
+    if (!resi && !orderId) return null;
 
     // Format customer
     const customer = formatCustomer(cols[idxUser] || '');
@@ -136,8 +146,9 @@ export const parseShopeeCSV = (text: string): ParsedCSVItem[] => {
     const namaVariasi = (idxNamaVariasi !== -1) ? cols[idxNamaVariasi] : '';
     const productName = formatNamaProduk(namaProduk, namaVariasi);
     
-    // Dedupe check
-    const dedupeKey = `${resi}||${customer}||${productName}`;
+    // Dedupe check - gunakan resi ATAU order_id sebagai key utama
+    const primaryKey = resi || orderId;
+    const dedupeKey = `${primaryKey}||${customer}||${productName}`;
     if (seenKeys.has(dedupeKey)) return null;
     seenKeys.add(dedupeKey);
 
@@ -145,8 +156,8 @@ export const parseShopeeCSV = (text: string): ParsedCSVItem[] => {
     const totalPriceIDR = (idxTotal !== -1) ? parseCurrencyIDR(cols[idxTotal]) : 0;
 
     return {
-      resi,
-      order_id: (idxOrder !== -1 && cols[idxOrder]) ? cols[idxOrder].replace(/["']/g, '') : '',
+      resi: resi || orderId, // Jika resi kosong, gunakan order_id sebagai resi (untuk Sameday/Instant)
+      order_id: orderId,
       order_status: rawStatus,
       shipping_option: (idxOpsiKirim !== -1 && cols[idxOpsiKirim]) ? cols[idxOpsiKirim].replace(/["']/g, '') : '',
       customer,
