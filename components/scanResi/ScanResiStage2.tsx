@@ -6,6 +6,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useStore } from '../../context/StoreContext';
 import {
   verifyResiStage2,
+  verifyResiStage2Bulk,
   getPendingStage2List,
   getResiStage1List
 } from '../../services/resiScanService';
@@ -25,7 +26,12 @@ import {
   RefreshCw,
   Search,
   X,
-  Check
+  Check,
+  List,
+  Save,
+  AlertTriangle,
+  Trash2,
+  Plus
 } from 'lucide-react';
 
 // Import audio file untuk notifikasi duplikat
@@ -90,6 +96,14 @@ export const ScanResiStage2: React.FC<ScanResiStage2Props> = ({ onRefresh }) => 
   const [scanningEnabled, setScanningEnabled] = useState(true);
   const [statusFilter, setStatusFilter] = useState('pending');
   const [manualResi, setManualResi] = useState('');
+  
+  // Bulk Verify States
+  const [showBulkVerifyModal, setShowBulkVerifyModal] = useState(false);
+  const [bulkResiList, setBulkResiList] = useState<Array<{ id: string; resi: string; isDuplicate: boolean }>>([
+    { id: '1', resi: '', isDuplicate: false }
+  ]);
+  const [bulkSaving, setBulkSaving] = useState(false);
+  const bulkInputRefs = useRef<{ [key: string]: HTMLInputElement | null }>({});
   
   const scannerRef = useRef<HTMLDivElement>(null);
   const scanCooldownRef = useRef<NodeJS.Timeout | null>(null);
@@ -253,6 +267,180 @@ export const ScanResiStage2: React.FC<ScanResiStage2Props> = ({ onRefresh }) => 
     }
   };
 
+  // ============================================================================
+  // BULK VERIFY FUNCTIONS
+  // ============================================================================
+  
+  const checkBulkDuplicates = (list: typeof bulkResiList) => {
+    const seen = new Set<string>();
+    return list.map(item => {
+      const resiClean = item.resi.trim().toUpperCase();
+      if (!resiClean) return { ...item, isDuplicate: false };
+      
+      const isDupe = seen.has(resiClean);
+      seen.add(resiClean);
+      return { ...item, isDuplicate: isDupe };
+    });
+  };
+
+  const handleBulkResiChange = (id: string, value: string) => {
+    setBulkResiList(prev => {
+      const updated = prev.map(item => 
+        item.id === id ? { ...item, resi: value } : item
+      );
+      return checkBulkDuplicates(updated);
+    });
+  };
+
+  const handleBulkResiKeyDown = (e: React.KeyboardEvent, id: string, index: number) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const currentResi = bulkResiList.find(r => r.id === id)?.resi.trim();
+      
+      if (currentResi && index === bulkResiList.length - 1) {
+        const newId = Date.now().toString();
+        setBulkResiList(prev => [...prev, { id: newId, resi: '', isDuplicate: false }]);
+        setTimeout(() => {
+          bulkInputRefs.current[newId]?.focus();
+        }, 50);
+      } else if (index < bulkResiList.length - 1) {
+        const nextId = bulkResiList[index + 1].id;
+        bulkInputRefs.current[nextId]?.focus();
+      }
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (index < bulkResiList.length - 1) {
+        const nextId = bulkResiList[index + 1].id;
+        bulkInputRefs.current[nextId]?.focus();
+      }
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (index > 0) {
+        const prevId = bulkResiList[index - 1].id;
+        bulkInputRefs.current[prevId]?.focus();
+      }
+    }
+  };
+
+  const handleAddBulkRow = () => {
+    const newId = Date.now().toString();
+    setBulkResiList(prev => [...prev, { id: newId, resi: '', isDuplicate: false }]);
+    setTimeout(() => {
+      bulkInputRefs.current[newId]?.focus();
+    }, 50);
+  };
+
+  const handleRemoveBulkRow = (id: string) => {
+    if (bulkResiList.length <= 1) return;
+    setBulkResiList(prev => {
+      const filtered = prev.filter(item => item.id !== id);
+      return checkBulkDuplicates(filtered);
+    });
+  };
+
+  const handleClearBulkList = () => {
+    setBulkResiList([{ id: '1', resi: '', isDuplicate: false }]);
+  };
+
+  const handlePasteFromExcel = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    e.preventDefault();
+    const pastedText = e.clipboardData.getData('text');
+    
+    const lines = pastedText
+      .split(/[\r\n\t]+/)
+      .map(line => line.trim())
+      .filter(line => line.length > 0);
+    
+    if (lines.length === 0) return;
+    
+    const newResiList = lines.map((resi, index) => ({
+      id: `paste-${Date.now()}-${index}`,
+      resi: resi,
+      isDuplicate: false
+    }));
+    
+    setBulkResiList(prev => {
+      const existingNonEmpty = prev.filter(r => r.resi.trim());
+      const merged = [...existingNonEmpty, ...newResiList];
+      return checkBulkDuplicates(merged);
+    });
+    
+    showToast(`${lines.length} resi berhasil di-paste dari Excel`);
+  };
+
+  const handleBulkInputPaste = (e: React.ClipboardEvent<HTMLInputElement>, id: string) => {
+    const pastedText = e.clipboardData.getData('text');
+    
+    if (pastedText.includes('\n') || pastedText.includes('\r') || pastedText.includes('\t')) {
+      e.preventDefault();
+      
+      const lines = pastedText
+        .split(/[\r\n\t]+/)
+        .map(line => line.trim())
+        .filter(line => line.length > 0);
+      
+      if (lines.length > 1) {
+        const newResiList = lines.map((resi, index) => ({
+          id: `paste-${Date.now()}-${index}`,
+          resi: resi,
+          isDuplicate: false
+        }));
+        
+        setBulkResiList(prev => {
+          const currentIndex = prev.findIndex(r => r.id === id);
+          const before = prev.slice(0, currentIndex).filter(r => r.resi.trim());
+          const after = prev.slice(currentIndex + 1).filter(r => r.resi.trim());
+          const merged = [...before, ...newResiList, ...after];
+          return checkBulkDuplicates(merged);
+        });
+        
+        showToast(`${lines.length} resi berhasil di-paste`);
+        return;
+      }
+    }
+  };
+
+  const handleSaveBulkVerify = async () => {
+    const validResis = bulkResiList.filter(r => r.resi.trim() && !r.isDuplicate).map(r => r.resi.trim());
+    
+    if (validResis.length === 0) {
+      showToast('Tidak ada resi valid untuk diverifikasi!', 'error');
+      return;
+    }
+
+    setBulkSaving(true);
+
+    const result = await verifyResiStage2Bulk(validResis, userName || 'Admin', selectedStore);
+
+    if (result.success) {
+      showToast(result.message);
+      
+      // Reload list
+      setLoading(true);
+      let data: ResiScanStage[] = [];
+      if (showAllStage1) {
+        data = await getResiStage1List(selectedStore);
+      } else {
+        data = await getPendingStage2List(selectedStore);
+      }
+      setPendingList(data);
+      setLoading(false);
+      
+      if (onRefresh) onRefresh();
+      
+      // Reset bulk list
+      setBulkResiList([{ id: '1', resi: '', isDuplicate: false }]);
+      setShowBulkVerifyModal(false);
+    } else {
+      showToast(result.message, 'error');
+    }
+
+    setBulkSaving(false);
+  };
+
+  const validBulkCount = bulkResiList.filter(r => r.resi.trim() && !r.isDuplicate).length;
+  const duplicateBulkCount = bulkResiList.filter(r => r.isDuplicate).length;
+
   const startCamera = async () => {
     setCameraError(null);
     setCameraInitialized(false);
@@ -348,14 +536,23 @@ export const ScanResiStage2: React.FC<ScanResiStage2Props> = ({ onRefresh }) => 
               <p className="text-sm text-gray-400">Scan resi dengan kamera untuk verifikasi</p>
             </div>
           </div>
-          <button
-            onClick={loadPendingList}
-            className="flex items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg transition-colors"
-            disabled={loading}
-          >
-            <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
-            Refresh
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowBulkVerifyModal(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 rounded-lg transition-colors font-semibold"
+            >
+              <List size={16} />
+              Verifikasi Masal
+            </button>
+            <button
+              onClick={loadPendingList}
+              className="flex items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg transition-colors"
+              disabled={loading}
+            >
+              <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
+              Refresh
+            </button>
+          </div>
         </div>
       </div>
       
@@ -584,6 +781,158 @@ export const ScanResiStage2: React.FC<ScanResiStage2Props> = ({ onRefresh }) => 
           </table>
         </div>
       </div>
+
+      {/* Bulk Verify Modal (Verifikasi Masal) */}
+      {showBulkVerifyModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+          <div className="bg-gray-800 rounded-xl max-w-3xl w-full border border-gray-700 shadow-2xl max-h-[90vh] flex flex-col">
+            {/* Modal Header */}
+            <div className="p-4 border-b border-gray-700 flex items-center justify-between flex-shrink-0">
+              <h3 className="text-xl font-semibold flex items-center gap-2">
+                <List size={24} className="text-purple-400" />
+                Verifikasi Masal - Input Banyak Resi
+              </h3>
+              <button
+                onClick={() => setShowBulkVerifyModal(false)}
+                className="p-2 hover:bg-gray-700 rounded-lg transition-colors"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Paste from Excel Area */}
+            <div className="px-4 py-3 border-b border-gray-700 bg-blue-900/20 flex-shrink-0">
+              <label className="block text-sm font-medium mb-2 text-blue-300">📋 Paste dari Excel</label>
+              <textarea
+                onPaste={handlePasteFromExcel}
+                placeholder="Klik di sini lalu Ctrl+V untuk paste banyak resi dari Excel..."
+                className="w-full px-3 py-2 bg-gray-700 border border-blue-600/50 rounded-lg text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+                rows={2}
+              />
+              <p className="text-[10px] text-gray-500 mt-1">Copy kolom resi dari Excel, lalu paste di sini. Setiap baris akan menjadi 1 resi.</p>
+            </div>
+
+            {/* Table Header */}
+            <div className="px-4 py-2 bg-gray-700/50 border-b border-gray-600 flex items-center gap-4 text-sm font-medium text-gray-300 flex-shrink-0">
+              <div className="w-12 text-center">#</div>
+              <div className="flex-1">Nomor Resi</div>
+              <div className="w-24 text-center">Status</div>
+              <div className="w-16 text-center">Aksi</div>
+            </div>
+
+            {/* Scrollable Table Body */}
+            <div className="flex-1 overflow-auto p-2">
+              {bulkResiList.map((item, index) => (
+                <div 
+                  key={item.id} 
+                  className={`flex items-center gap-4 px-2 py-1.5 rounded ${
+                    item.isDuplicate ? 'bg-red-900/30' : 'hover:bg-gray-700/30'
+                  }`}
+                >
+                  <div className="w-12 text-center text-sm text-gray-400 font-mono">
+                    {index + 1}
+                  </div>
+                  <div className="flex-1">
+                    <input
+                      ref={(el) => { bulkInputRefs.current[item.id] = el; }}
+                      type="text"
+                      value={item.resi}
+                      onChange={(e) => handleBulkResiChange(item.id, e.target.value)}
+                      onKeyDown={(e) => handleBulkResiKeyDown(e, item.id, index)}
+                      onPaste={(e) => handleBulkInputPaste(e, item.id)}
+                      placeholder="Scan atau ketik resi (bisa paste dari Excel)..."
+                      className={`w-full px-3 py-2 bg-gray-700 border rounded-lg text-sm font-mono focus:ring-2 focus:ring-purple-500 focus:border-transparent ${
+                        item.isDuplicate ? 'border-red-500 text-red-300' : 'border-gray-600'
+                      }`}
+                      autoFocus={index === 0}
+                    />
+                  </div>
+                  <div className="w-24 text-center">
+                    {item.isDuplicate ? (
+                      <span className="px-2 py-1 bg-red-600/30 text-red-300 rounded text-xs flex items-center gap-1 justify-center">
+                        <AlertTriangle size={12} /> Double
+                      </span>
+                    ) : item.resi.trim() ? (
+                      <span className="px-2 py-1 bg-green-600/30 text-green-300 rounded text-xs flex items-center gap-1 justify-center">
+                        <Check size={12} /> OK
+                      </span>
+                    ) : (
+                      <span className="text-gray-500 text-xs">-</span>
+                    )}
+                  </div>
+                  <div className="w-16 text-center">
+                    <button
+                      onClick={() => handleRemoveBulkRow(item.id)}
+                      disabled={bulkResiList.length <= 1}
+                      className="p-1.5 text-red-400 hover:bg-red-600/20 rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Footer */}
+            <div className="p-4 border-t border-gray-700 flex-shrink-0">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-4 text-sm">
+                  <span className="text-gray-400">
+                    Total: <span className="font-semibold text-white">{bulkResiList.filter(r => r.resi.trim()).length}</span>
+                  </span>
+                  <span className="text-green-400">
+                    Valid: <span className="font-semibold">{validBulkCount}</span>
+                  </span>
+                  {duplicateBulkCount > 0 && (
+                    <span className="text-red-400">
+                      Duplikat: <span className="font-semibold">{duplicateBulkCount}</span>
+                    </span>
+                  )}
+                </div>
+                <button
+                  onClick={handleAddBulkRow}
+                  className="flex items-center gap-1 px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm transition-colors"
+                >
+                  <Plus size={14} />
+                  Tambah Baris
+                </button>
+              </div>
+              
+              <div className="flex gap-2">
+                <button
+                  onClick={handleClearBulkList}
+                  className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors text-sm"
+                >
+                  Bersihkan
+                </button>
+                <button
+                  onClick={() => setShowBulkVerifyModal(false)}
+                  className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors text-sm"
+                >
+                  Batal
+                </button>
+                <button
+                  onClick={handleSaveBulkVerify}
+                  disabled={bulkSaving || validBulkCount === 0}
+                  className="flex-1 px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-700 disabled:cursor-not-allowed rounded-lg font-semibold transition-colors flex items-center justify-center gap-2"
+                >
+                  {bulkSaving ? (
+                    <>
+                      <RefreshCw size={16} className="animate-spin" />
+                      Memverifikasi...
+                    </>
+                  ) : (
+                    <>
+                      <Save size={16} />
+                      Verifikasi {validBulkCount} Resi
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

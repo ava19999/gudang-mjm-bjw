@@ -384,6 +384,72 @@ export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh }) => 
     setBulkSaving(false);
   };
 
+  // Handle paste dari Excel - parse multiple lines
+  const handlePasteFromExcel = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    e.preventDefault();
+    const pastedText = e.clipboardData.getData('text');
+    
+    // Split by newline, tab, atau comma - handle berbagai format Excel
+    const lines = pastedText
+      .split(/[\r\n\t]+/)
+      .map(line => line.trim())
+      .filter(line => line.length > 0);
+    
+    if (lines.length === 0) return;
+    
+    // Convert to bulk list format
+    const newResiList = lines.map((resi, index) => ({
+      id: `paste-${Date.now()}-${index}`,
+      resi: resi,
+      isDuplicate: false
+    }));
+    
+    // Merge dengan list yang sudah ada (hapus row kosong di awal)
+    setBulkResiList(prev => {
+      const existingNonEmpty = prev.filter(r => r.resi.trim());
+      const merged = [...existingNonEmpty, ...newResiList];
+      return checkBulkDuplicates(merged);
+    });
+    
+    showToast(`${lines.length} resi berhasil di-paste dari Excel`);
+  };
+
+  // Handle paste di input field biasa
+  const handleBulkInputPaste = (e: React.ClipboardEvent<HTMLInputElement>, id: string) => {
+    const pastedText = e.clipboardData.getData('text');
+    
+    // Jika paste mengandung multiple lines, handle sebagai bulk paste
+    if (pastedText.includes('\n') || pastedText.includes('\r') || pastedText.includes('\t')) {
+      e.preventDefault();
+      
+      const lines = pastedText
+        .split(/[\r\n\t]+/)
+        .map(line => line.trim())
+        .filter(line => line.length > 0);
+      
+      if (lines.length > 1) {
+        const newResiList = lines.map((resi, index) => ({
+          id: `paste-${Date.now()}-${index}`,
+          resi: resi,
+          isDuplicate: false
+        }));
+        
+        setBulkResiList(prev => {
+          // Hapus row current yang kosong, tambahkan paste result
+          const currentIndex = prev.findIndex(r => r.id === id);
+          const before = prev.slice(0, currentIndex).filter(r => r.resi.trim());
+          const after = prev.slice(currentIndex + 1).filter(r => r.resi.trim());
+          const merged = [...before, ...newResiList, ...after];
+          return checkBulkDuplicates(merged);
+        });
+        
+        showToast(`${lines.length} resi berhasil di-paste`);
+        return;
+      }
+    }
+    // Jika single line, biarkan default behavior
+  };
+
   const validBulkCount = bulkResiList.filter(r => r.resi.trim() && !r.isDuplicate).length;
   const duplicateBulkCount = bulkResiList.filter(r => r.isDuplicate).length;
   
@@ -789,6 +855,18 @@ export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh }) => 
               </div>
             </div>
 
+            {/* Paste from Excel Area */}
+            <div className="px-4 py-3 border-b border-gray-700 bg-blue-900/20 flex-shrink-0">
+              <label className="block text-sm font-medium mb-2 text-blue-300">📋 Paste dari Excel</label>
+              <textarea
+                onPaste={handlePasteFromExcel}
+                placeholder="Klik di sini lalu Ctrl+V untuk paste banyak resi dari Excel..."
+                className="w-full px-3 py-2 bg-gray-700 border border-blue-600/50 rounded-lg text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+                rows={2}
+              />
+              <p className="text-[10px] text-gray-500 mt-1">Copy kolom resi dari Excel, lalu paste di sini. Setiap baris akan menjadi 1 resi.</p>
+            </div>
+
             {/* Table Header */}
             <div className="px-4 py-2 bg-gray-700/50 border-b border-gray-600 flex items-center gap-4 text-sm font-medium text-gray-300 flex-shrink-0">
               <div className="w-12 text-center">#</div>
@@ -816,7 +894,8 @@ export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh }) => 
                       value={item.resi}
                       onChange={(e) => handleBulkResiChange(item.id, e.target.value)}
                       onKeyDown={(e) => handleBulkResiKeyDown(e, item.id, index)}
-                      placeholder="Scan atau ketik resi..."
+                      onPaste={(e) => handleBulkInputPaste(e, item.id)}
+                      placeholder="Scan atau ketik resi (bisa paste dari Excel)..."
                       className={`w-full px-3 py-2 bg-gray-700 border rounded-lg text-sm font-mono focus:ring-2 focus:ring-purple-500 focus:border-transparent ${
                         item.isDuplicate ? 'border-red-500 text-red-300' : 'border-gray-600'
                       }`}

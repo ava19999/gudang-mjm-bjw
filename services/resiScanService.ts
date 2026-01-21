@@ -362,6 +362,85 @@ export const verifyResiStage2 = async (
 };
 
 // ============================================================================
+// STAGE 2: BULK VERIFY (VERIFIKASI MASAL)
+// ============================================================================
+export const verifyResiStage2Bulk = async (
+  resiList: string[],
+  verified_by: string,
+  store: string | null
+): Promise<{ success: boolean; message: string; verified: number; failed: number; failedResis: string[] }> => {
+  const table = getTableName(store);
+  
+  // Filter resi kosong dan duplikat
+  const uniqueResis = [...new Set(resiList.map(r => r.trim().toUpperCase()).filter(r => r.length > 0))];
+  
+  if (uniqueResis.length === 0) {
+    return { success: false, message: 'Tidak ada resi valid untuk diverifikasi', verified: 0, failed: 0, failedResis: [] };
+  }
+  
+  let verifiedCount = 0;
+  let failedCount = 0;
+  const failedResis: string[] = [];
+  
+  for (const resi of uniqueResis) {
+    // Cek apakah resi ada di Stage 1 dan belum diverifikasi Stage 2
+    const { data: rows } = await supabase
+      .from(table)
+      .select('id, stage2_verified')
+      .ilike('resi', resi)
+      .eq('stage1_scanned', 'true');
+    
+    if (!rows || rows.length === 0) {
+      // Resi tidak ditemukan atau belum scan Stage 1
+      failedResis.push(resi);
+      failedCount++;
+      continue;
+    }
+    
+    // Cek apakah sudah diverifikasi
+    const unverified = rows.filter(r => r.stage2_verified !== 'true');
+    if (unverified.length === 0) {
+      // Sudah diverifikasi sebelumnya
+      failedResis.push(resi);
+      failedCount++;
+      continue;
+    }
+    
+    // Update ke Stage 2
+    const ids = unverified.map(r => r.id);
+    const { error } = await supabase
+      .from(table)
+      .update({
+        stage2_verified: 'true',
+        stage2_verified_at: getWIBDate().toISOString(),
+        stage2_verified_by: verified_by,
+        status: 'stage2'
+      })
+      .in('id', ids);
+    
+    if (error) {
+      failedResis.push(resi);
+      failedCount++;
+    } else {
+      verifiedCount++;
+    }
+  }
+  
+  let message = `Berhasil verifikasi ${verifiedCount} resi`;
+  if (failedCount > 0) {
+    message += `, ${failedCount} gagal (tidak ditemukan/sudah diverifikasi)`;
+  }
+  
+  return { 
+    success: verifiedCount > 0, 
+    message, 
+    verified: verifiedCount, 
+    failed: failedCount, 
+    failedResis 
+  };
+};
+
+// ============================================================================
 // STAGE 3: DATA ENTRY & FINALISASI
 // ============================================================================
 
