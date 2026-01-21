@@ -77,6 +77,9 @@ import {
   AlertTriangle
 } from 'lucide-react';
 
+// Import audio file untuk notifikasi duplikat
+import duplicateAudioFile from './sudah di scan.mp3';
+
 interface ScanResiStage1Props {
   onRefresh?: () => void;
 }
@@ -206,10 +209,12 @@ export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh }) => 
       setResiInput(''); // KOSONGKAN INPUT JIKA DOUBLE/ERROR
       // Mainkan audio sudah di scan.mp3 jika error/double
       try {
-        const audio = new Audio(require('./sudah di scan.mp3'));
+        const audio = new Audio(duplicateAudioFile);
         audio.volume = 1.0;
-        audio.play().catch(() => {});
-      } catch {}
+        audio.play().catch((e) => console.error('Audio play failed:', e));
+      } catch (e) {
+        console.error('Audio error:', e);
+      }
       // Tetap fokus ke input jika error
       setTimeout(() => {
         if (resiInputRef.current) {

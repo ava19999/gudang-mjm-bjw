@@ -28,6 +28,9 @@ import {
   Check
 } from 'lucide-react';
 
+// Import audio file untuk notifikasi duplikat
+import duplicateAudioFile from './sudah di scan.mp3';
+
 // --- AUDIO ASSETS (Base64) ---
 // Nada 'Ting' (Sukses)
 const AUDIO_SUCCESS = 'data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBSuBzvLZiTYIG2m98OmfTgwOUKnk875qHgU7k9X0y3ksBS2Ax/DagjEIF2Kz6OyrUQ8IRp/g8r5sIAUsgs/y2Yg2CBxqvfDpn04MDlCq5PS+aiEGPJLU9Mt5LAUugcbw2oM';
@@ -182,12 +185,13 @@ export const ScanResiStage2: React.FC<ScanResiStage2Props> = ({ onRefresh }) => 
 
     // 2. CEK DOUBLE SCAN
     if (decodedText === lastScannedResi) {
-      // Mainkan audio custom "sudah di scan.mp3" jika ada
+      // Mainkan audio custom "sudah di scan.mp3"
       try {
-        const audio = new Audio(require('./sudah di scan.mp3'));
+        const audio = new Audio(duplicateAudioFile);
         audio.volume = 1.0;
-        audio.play().catch(() => {});
-      } catch {
+        audio.play().catch((e) => console.error('Audio play failed:', e));
+      } catch (e) {
+        console.error('Audio error:', e);
         playBeep('error');
       }
       showToast('Resi sudah discan barusan!', 'warning');
@@ -235,8 +239,16 @@ export const ScanResiStage2: React.FC<ScanResiStage2Props> = ({ onRefresh }) => 
       setLoading(false);
       if (onRefresh) onRefresh();
     } else {
-      // Jika error dari server (misal resi tidak ditemukan)
-      playBeep('error');
+      // Jika error dari server (misal resi tidak ditemukan atau sudah diverifikasi)
+      // Mainkan audio duplikat
+      try {
+        const audio = new Audio(duplicateAudioFile);
+        audio.volume = 1.0;
+        audio.play().catch((e) => console.error('Audio play failed:', e));
+      } catch (e) {
+        console.error('Audio error:', e);
+        playBeep('error');
+      }
       showToast(result.message, 'error');
     }
   };
