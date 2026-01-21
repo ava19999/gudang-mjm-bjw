@@ -111,7 +111,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
 
   // UPLOAD SETTINGS STATES (Seperti Stage 1)
   const [uploadEcommerce, setUploadEcommerce] = useState<EcommercePlatform>('SHOPEE');
-  const [uploadSubToko, setUploadSubToko] = useState<SubToko>('MJM');
+  const [uploadSubToko, setUploadSubToko] = useState<SubToko>(selectedStore === 'bjw' ? 'BJW' : 'MJM');
   const [uploadNegara, setUploadNegara] = useState<NegaraEkspor>('PH');
 
   // RESI SEARCH STATE
@@ -139,6 +139,11 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
       setPartOptions(parts);
     };
     loadParts();
+  }, [selectedStore]);
+
+  // Update uploadSubToko ketika selectedStore berubah
+  useEffect(() => {
+    setUploadSubToko(selectedStore === 'bjw' ? 'BJW' : 'MJM');
   }, [selectedStore]);
 
   // Load Stage 1 resi list untuk dropdown search
@@ -182,14 +187,12 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
             getBulkPartNumberInfo(allParts, selectedStore)
         ]);
 
-        // Map by resi AND no_pesanan (UPPERCASE untuk case-insensitive matching)
-        // PENTING: Untuk Sameday/Instant, No. Pesanan discan dan disimpan di kolom `resi`
-        // Jadi perlu juga map by resi untuk lookup by order_id
+        // Map by resi AND no_pesanan
         const statusMapByResi = new Map();
         const statusMapByOrder = new Map();
         dbStatus.forEach((d: any) => {
-          if (d.resi) statusMapByResi.set(d.resi.toUpperCase(), d);
-          if (d.no_pesanan) statusMapByOrder.set(String(d.no_pesanan).toUpperCase(), d);
+          if (d.resi) statusMapByResi.set(d.resi, d);
+          if (d.no_pesanan) statusMapByOrder.set(String(d.no_pesanan), d);
         });
 
         const partMap = new Map();
@@ -201,20 +204,10 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
         const seenKeys = new Set<string>();
 
         for (const item of savedItems) {
-           // Cari di Stage 1 dengan urutan prioritas:
-           // 1. Match item.resi dengan scan.resi
-           // 2. Match item.order_id dengan scan.no_pesanan
-           // 3. Match item.order_id dengan scan.resi (untuk Sameday/Instant yang scan No. Pesanan)
-           // Normalisasi ke uppercase untuk matching
-           let dbRow = statusMapByResi.get((item.resi || '').toUpperCase());
+           // Cari di Stage 1 by resi ATAU by order_id (untuk instant/sameday)
+           let dbRow = statusMapByResi.get(item.resi);
            if (!dbRow && item.order_id) {
-             // Coba match dengan no_pesanan dulu
-             dbRow = statusMapByOrder.get(String(item.order_id).toUpperCase());
-           }
-           if (!dbRow && item.order_id) {
-             // PENTING: Untuk Sameday/Instant, coba match order_id dengan resi
-             // Karena No. Pesanan discan dan disimpan di kolom resi
-             dbRow = statusMapByResi.get(String(item.order_id).toUpperCase());
+             dbRow = statusMapByOrder.get(String(item.order_id));
            }
            
            const partInfo = partMap.get(item.part_number);
@@ -222,9 +215,9 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
            let statusMsg = 'Ready';
            let verified = true;
            
-           // Prioritas Ecom/Toko: Dari Item CSV -> Dari DB Stage 1 -> Default
+           // Prioritas Ecom/Toko: Dari Item CSV -> Dari DB Stage 1 -> Default berdasarkan selectedStore
            let ecommerceDB = item.ecommerce || (dbRow?.ecommerce) || '-';
-           let subToko = item.toko || (dbRow?.sub_toko) || (selectedStore === 'mjm' ? 'MJM' : 'BJW');
+           let subToko = item.toko || (dbRow?.sub_toko) || (selectedStore === 'bjw' ? 'BJW' : 'MJM');
 
            // CHECK 1: Belum Scan Stage 1
            if (!dbRow) { 
@@ -423,12 +416,8 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
       });
 
       if (correctedItems.length > 0) {
-          const result = await saveCSVToResiItems(correctedItems, selectedStore);
-          if (result.skipped > 0) {
-            alert(`Import selesai:\n• ${result.count} item baru ditambahkan\n• ${result.skipped} item dilewati (sudah ada di database)`);
-          } else {
-            alert(`Berhasil import ${result.count} item sebagai ${uploadEcommerce} (${uploadSubToko}).`);
-          }
+          await saveCSVToResiItems(correctedItems, selectedStore);
+          alert(`Berhasil import ${correctedItems.length} item sebagai ${uploadEcommerce} (${uploadSubToko}).`);
       }
 
       await loadSavedDataFromDB();
@@ -502,7 +491,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
       tanggal: new Date(item.stage2_verified_at || item.created_at).toISOString().split('T')[0],
       resi: item.resi,
       ecommerce: item.ecommerce || '-',
-      sub_toko: item.sub_toko || 'MJM',
+      sub_toko: item.sub_toko || (selectedStore === 'bjw' ? 'BJW' : 'MJM'),
       part_number: '', 
       nama_barang_csv: 'Menunggu Input...',
       nama_barang_base: '',
@@ -647,13 +636,6 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
     if (filterStatus !== 'all' && row.status_message !== filterStatus) return false;
     if (filterEcommerce && row.ecommerce !== filterEcommerce) return false;
     if (filterSubToko && row.sub_toko !== filterSubToko) return false;
-    // Filter by resi search query - mencari di semua resi yang ada di Stage 3
-    if (resiSearchQuery) {
-      const query = resiSearchQuery.toLowerCase();
-      const matchResi = row.resi?.toLowerCase().includes(query);
-      const matchOrder = row.no_pesanan?.toLowerCase().includes(query);
-      if (!matchResi && !matchOrder) return false;
-    }
     return true;
   });
 
@@ -795,7 +777,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                             value={resiSearchQuery}
                             onChange={e => { setResiSearchQuery(e.target.value); setShowResiDropdown(true); }}
                             onFocus={() => setShowResiDropdown(true)}
-                            placeholder="Cari Resi..."
+                            placeholder="Cari Resi S1..."
                             className="bg-gray-800 border border-gray-600 rounded px-2 py-0.5 text-[10px] md:text-xs text-gray-300 w-28 md:w-40 focus:border-blue-500 outline-none"
                         />
                     </div>

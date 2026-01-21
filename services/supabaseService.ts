@@ -386,7 +386,8 @@ export const fetchShopItems = async (
 export const updateOfflineOrder = async (
   id: string,
   updates: { partNumber: string; quantity: number; price: number; nama_barang?: string },
-  store: string | null
+  store: string | null,
+  originalItem?: { tanggal: string; customer: string; part_number: string } // Untuk BJW yang tidak punya id
 ): Promise<{ success: boolean; msg: string }> => {
   const table = store === 'mjm' ? 'orders_mjm' : (store === 'bjw' ? 'orders_bjw' : null);
   if (!table) return { success: false, msg: 'Toko tidak valid' };
@@ -401,10 +402,20 @@ export const updateOfflineOrder = async (
     };
     if (updates.nama_barang) updatePayload.nama_barang = updates.nama_barang;
 
-    const { error } = await supabase
-      .from(table)
-      .update(updatePayload)
-      .eq('id', id);
+    let query = supabase.from(table).update(updatePayload);
+    
+    // BJW tidak punya kolom id, gunakan kombinasi unik
+    if (store === 'bjw' && originalItem) {
+      query = query
+        .eq('tanggal', originalItem.tanggal)
+        .eq('customer', originalItem.customer)
+        .eq('part_number', originalItem.part_number);
+    } else {
+      // MJM punya kolom id
+      query = query.eq('id', id);
+    }
+
+    const { error } = await query;
 
     if (error) throw error;
     return { success: true, msg: 'Data pesanan berhasil diupdate.' };
@@ -486,10 +497,23 @@ export const processOfflineOrderItem = async (
 
   if (!orderTable || !stockTable || !outTable) return { success: false, msg: 'Toko tidak valid' };
 
+  // Helper untuk query berdasarkan store (BJW tidak punya id)
+  const buildWhereQuery = (query: any) => {
+    if (store === 'bjw') {
+      return query
+        .eq('tanggal', item.tanggal)
+        .eq('customer', item.customer)
+        .eq('part_number', item.part_number);
+    }
+    return query.eq('id', item.id);
+  };
+
   try {
     // --- TOLAK = HAPUS (DELETE) ---
     if (action === 'Tolak') {
-      const { error } = await supabase.from(orderTable).delete().eq('id', item.id);
+      let deleteQuery = supabase.from(orderTable).delete();
+      deleteQuery = buildWhereQuery(deleteQuery);
+      const { error } = await deleteQuery;
       if (error) throw error;
       return { success: true, msg: 'Pesanan ditolak dan dihapus.' };
     }
@@ -529,7 +553,9 @@ export const processOfflineOrderItem = async (
     await supabase.from(outTable).insert([logPayload]);
 
     // 4. Update Status Order jadi 'Proses' (Agar hilang dari list Belum Diproses)
-    await supabase.from(orderTable).update({ status: 'Proses' }).eq('id', item.id);
+    let updateQuery = supabase.from(orderTable).update({ status: 'Proses' });
+    updateQuery = buildWhereQuery(updateQuery);
+    await updateQuery;
 
     return { success: true, msg: 'Pesanan diproses & stok dipotong.' };
   } catch (error: any) {

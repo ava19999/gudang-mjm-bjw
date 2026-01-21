@@ -101,7 +101,7 @@ export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh }) => 
   
   // State untuk scanning
   const [ecommerce, setEcommerce] = useState<EcommercePlatform>('SHOPEE');
-  const [subToko, setSubToko] = useState<SubToko>('MJM');
+  const [subToko, setSubToko] = useState<SubToko>(selectedStore === 'bjw' ? 'BJW' : 'MJM');
   const [negaraEkspor, setNegaraEkspor] = useState<NegaraEkspor>('PH');
   const [resiInput, setResiInput] = useState('');
   const [selectedReseller, setSelectedReseller] = useState('');
@@ -128,7 +128,7 @@ export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh }) => 
   // State untuk Bulk Scan (Scan Masal)
   const [showBulkScanModal, setShowBulkScanModal] = useState(false);
   const [bulkEcommerce, setBulkEcommerce] = useState<EcommercePlatform>('SHOPEE');
-  const [bulkSubToko, setBulkSubToko] = useState<SubToko>('MJM');
+  const [bulkSubToko, setBulkSubToko] = useState<SubToko>(selectedStore === 'bjw' ? 'BJW' : 'MJM');
   const [bulkNegaraEkspor, setBulkNegaraEkspor] = useState<NegaraEkspor>('PH');
   const [bulkResiList, setBulkResiList] = useState<Array<{ id: string; resi: string; isDuplicate: boolean }>>([
     { id: '1', resi: '', isDuplicate: false }
@@ -147,6 +147,13 @@ export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh }) => 
   useEffect(() => {
     loadResiList();
     loadResellers();
+  }, [selectedStore]);
+
+  // Update subToko dan bulkSubToko ketika selectedStore berubah
+  useEffect(() => {
+    const defaultToko = selectedStore === 'bjw' ? 'BJW' : 'MJM';
+    setSubToko(defaultToko as SubToko);
+    setBulkSubToko(defaultToko as SubToko);
   }, [selectedStore]);
   
   // Auto focus on resi input

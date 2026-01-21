@@ -41,24 +41,46 @@ export const OrderManagement: React.FC = () => {
   const [editForm, setEditForm] = useState({ partNumber: '', quantity: 0, price: 0 });
 
   // Inventory for Autocomplete
-  const [inventory, setInventory] = useState([]);
-  const [selectedItem, setSelectedItem] = useState(null);
+  const [inventory, setInventory] = useState<any[]>([]);
+  const [selectedItem, setSelectedItem] = useState<any>(null);
+  const [inventoryLoading, setInventoryLoading] = useState(false);
 
-
-  // Fetch inventory for Autocomplete dari kedua toko
+  // Load inventory langsung saat komponen mount - TANPA CACHE untuk menghindari masalah
   useEffect(() => {
-    if (editingId) {
-      Promise.all([
-        fetchInventory('mjm'),
-        fetchInventory('bjw')
-      ]).then(([invMjm, invBjw]) => {
-        // Gabungkan, hilangkan duplikat berdasarkan partNumber
-        const all = [...invMjm, ...invBjw];
-        const unique = Array.from(new Map(all.map(item => [item.partNumber, item])).values());
-        setInventory(unique);
-      });
-    }
-  }, [editingId]);
+    const loadInventory = async () => {
+      setInventoryLoading(true);
+      try {
+        console.log('=== LOADING INVENTORY ===');
+        const [invMjm, invBjw] = await Promise.all([
+          fetchInventory('mjm'),
+          fetchInventory('bjw')
+        ]);
+        
+        console.log('MJM items:', invMjm?.length || 0);
+        console.log('BJW items:', invBjw?.length || 0);
+        
+        // Log sample dari setiap toko
+        if (invMjm?.length > 0) {
+          console.log('Sample MJM:', invMjm[0]);
+        }
+        if (invBjw?.length > 0) {
+          console.log('Sample BJW:', invBjw[0]);
+        }
+        
+        // Gabungkan semua
+        const all = [...(invMjm || []), ...(invBjw || [])];
+        console.log('Total inventory:', all.length);
+        
+        setInventory(all);
+      } catch (err) {
+        console.error("Error fetching inventory:", err);
+      } finally {
+        setInventoryLoading(false);
+      }
+    };
+    
+    loadInventory();
+  }, []); // Load sekali saat mount
 
   // Update selectedItem when partNumber changes
   useEffect(() => {
@@ -107,8 +129,12 @@ export const OrderManagement: React.FC = () => {
   // --- HANDLERS ---
 
   // 1. EDIT HANDLERS
+  // Simpan item original untuk BJW (yang tidak punya id)
+  const [editingOriginalItem, setEditingOriginalItem] = useState<OfflineOrderRow | null>(null);
+  
   const startEdit = (item: OfflineOrderRow) => {
     setEditingId(item.id);
+    setEditingOriginalItem(item); // Simpan item asli untuk BJW
     setEditForm({
       partNumber: item.part_number,
       quantity: item.quantity,
@@ -118,6 +144,7 @@ export const OrderManagement: React.FC = () => {
 
   const cancelEdit = () => {
     setEditingId(null);
+    setEditingOriginalItem(null);
   };
 
   const saveEdit = async (id: string) => {
@@ -129,12 +156,21 @@ export const OrderManagement: React.FC = () => {
       namaBarang = found.nama_barang || found.name || editForm.partNumber;
     }
     const formWithName = { ...editForm, nama_barang: namaBarang };
-    const res = await updateOfflineOrder(id, formWithName, selectedStore);
+    
+    // Untuk BJW, kirim originalItem karena tidak punya id
+    const originalItemForBJW = editingOriginalItem ? {
+      tanggal: editingOriginalItem.tanggal,
+      customer: editingOriginalItem.customer,
+      part_number: editingOriginalItem.part_number
+    } : undefined;
+    
+    const res = await updateOfflineOrder(id, formWithName, selectedStore, originalItemForBJW);
     setLoading(false);
     
     if (res.success) {
       showToast('Item berhasil diupdate');
       setEditingId(null);
+      setEditingOriginalItem(null);
       loadData();
     } else {
       showToast(res.msg, 'error');
@@ -328,15 +364,65 @@ export const OrderManagement: React.FC = () => {
                                         <Autocomplete
                                           size="small"
                                           options={inventory}
-                                          getOptionLabel={(option) => option.partNumber || ''}
-                                          value={inventory.find((item) => item.partNumber === editForm.partNumber) || null}
+                                          getOptionLabel={(option) => option?.partNumber || ''}
+                                          filterOptions={(options, { inputValue }) => {
+                                            console.log('=== FILTER OPTIONS ===');
+                                            console.log('Total options available:', options.length);
+                                            console.log('Input value:', inputValue);
+                                            
+                                            if (!inputValue || inputValue.length < 1) {
+                                              const result = options.slice(0, 50);
+                                              console.log('No input, returning first 50:', result.length);
+                                              return result;
+                                            }
+                                            
+                                            const search = inputValue.toLowerCase();
+                                            
+                                            const filtered = options.filter(opt => {
+                                              if (!opt) return false;
+                                              const pn = String(opt.partNumber || '').toLowerCase();
+                                              const nm = String(opt.name || '').toLowerCase();
+                                              const br = String(opt.brand || '').toLowerCase();
+                                              const ap = String(opt.application || '').toLowerCase();
+                                              
+                                              return pn.includes(search) || nm.includes(search) || br.includes(search) || ap.includes(search);
+                                            });
+                                            
+                                            console.log('Filtered count:', filtered.length);
+                                            return filtered.slice(0, 50);
+                                          }}
+                                          value={inventory.find((inv) => inv?.partNumber === editForm.partNumber) || null}
                                           onChange={(_, newValue) => {
                                             setEditForm({ ...editForm, partNumber: newValue ? newValue.partNumber : '' });
                                           }}
+                                          renderOption={(props, option, { index }) => (
+                                            <li {...props} key={`${option.partNumber}-${index}`}>
+                                              <div className="flex flex-col w-full py-1">
+                                                <div className="flex justify-between items-center">
+                                                  <span className="font-bold text-sm text-blue-600">{option.partNumber}</span>
+                                                  <span className="text-xs text-gray-500 ml-2">Stok: {option.quantity ?? 0}</span>
+                                                </div>
+                                                <span className="text-xs text-gray-700 truncate">{option.name || '-'}</span>
+                                                <div className="flex gap-2 text-[10px] text-gray-500">
+                                                  <span>Brand: {option.brand || '-'}</span>
+                                                  <span>|</span>
+                                                  <span>Aplikasi: {option.application || '-'}</span>
+                                                </div>
+                                              </div>
+                                            </li>
+                                          )}
                                           renderInput={(params) => (
-                                            <TextField {...params} variant="outlined" className="bg-gray-700 border border-gray-600 rounded text-xs text-white" />
+                                            <TextField {...params} variant="outlined" placeholder={inventoryLoading ? "Memuat data..." : "Ketik Part Number, Nama, atau Brand..."} className="bg-gray-700 border border-gray-600 rounded text-xs text-white" />
                                           )}
                                           isOptionEqualToValue={(option, value) => option.partNumber === value.partNumber}
+                                          noOptionsText={inventoryLoading ? "Memuat data..." : "Tidak ada data ditemukan"}
+                                          loading={inventoryLoading}
+                                          loadingText="Memuat data..."
+                                          sx={{
+                                            '& .MuiAutocomplete-listbox': {
+                                              maxHeight: '300px',
+                                            },
+                                          }}
                                         />
                                     </div>
                                     {/* Detail info kanan */}
