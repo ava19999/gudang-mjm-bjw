@@ -254,15 +254,35 @@ export const getResiStage1List = async (store: string | null) => {
 
 export const deleteResiStage1 = async (id: string, store: string | null) => {
   const table = getTableName(store);
-  const { data } = await supabase.from(table).select('stage2_verified').eq('id', id).single();
+  const resiItemsTable = store === 'mjm' ? 'resi_items_mjm' : 'resi_items_bjw';
   
-  if (data?.stage2_verified === 'true') {
+  // Ambil data resi terlebih dahulu untuk mendapatkan nomor resi
+  const { data: resiData } = await supabase.from(table).select('resi, stage2_verified').eq('id', id).single();
+  
+  if (resiData?.stage2_verified === 'true') {
     return { success: false, message: 'Tidak bisa dihapus, sudah masuk Stage 2!' };
   }
 
+  const resiNumber = resiData?.resi;
+
+  // Hapus dari tabel scan_resi
   const { error } = await supabase.from(table).delete().eq('id', id);
   if (error) return { success: false, message: error.message };
-  return { success: true, message: 'Resi dihapus.' };
+
+  // Hapus juga data terkait di resi_items (CSV Stage 3) jika ada
+  if (resiNumber) {
+    const { error: resiItemsError } = await supabase
+      .from(resiItemsTable)
+      .delete()
+      .eq('resi', resiNumber)
+      .eq('status', 'pending'); // Hanya hapus yang masih pending, jangan yang sudah processed
+
+    if (resiItemsError) {
+      console.warn('Warning: Gagal menghapus data resi_items terkait:', resiItemsError.message);
+    }
+  }
+
+  return { success: true, message: 'Resi dan data terkait berhasil dihapus.' };
 };
 
 // --- FUNGSI RESELLER ---
