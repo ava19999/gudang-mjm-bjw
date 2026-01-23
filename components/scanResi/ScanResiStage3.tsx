@@ -285,7 +285,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
              qty_keluar: qty,
              harga_total: Number(item.total_harga_produk || 0),
              harga_satuan: qty > 0 ? (Number(item.total_harga_produk || 0) / qty) : 0,
-             no_pesanan: item.order_id || '',
+             no_pesanan: item.order_id ? String(item.order_id).trim() : '',
              customer: item.customer || '-',
              is_db_verified: verified,
              is_stock_valid: stockValid,
@@ -416,6 +416,39 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                 if (cell.w) delete cell.w;
             }
         }
+
+        // Override Resi dengan Order ID untuk Instant/Sameday (Opsi Pengiriman)
+        if (worksheet['!ref']) {
+            const range = XLSX.utils.decode_range(worksheet['!ref']);
+            let colOpsi = -1, colResi = -1, colOrder = -1;
+
+            // Cari Header di baris pertama range
+            for (let C = range.s.c; C <= range.e.c; ++C) {
+                const cell = worksheet[XLSX.utils.encode_cell({ r: range.s.r, c: C })];
+                if (cell && cell.v) {
+                    const h = String(cell.v).trim().toLowerCase();
+                    if (h === 'opsi pengiriman' || h === 'shipping option') colOpsi = C;
+                    else if (h === 'no. resi' || h === 'tracking no' || h === 'tracking number') colResi = C;
+                    else if (h === 'no. pesanan' || h === 'order id' || h === 'order sn') colOrder = C;
+                }
+            }
+
+            if (colOpsi !== -1 && colResi !== -1 && colOrder !== -1) {
+                for (let R = range.s.r + 1; R <= range.e.r; ++R) {
+                    const cellOpsi = worksheet[XLSX.utils.encode_cell({ r: R, c: colOpsi })];
+                    const cellOrder = worksheet[XLSX.utils.encode_cell({ r: R, c: colOrder })];
+                    
+                    if (cellOpsi && cellOrder) {
+                        const val = String(cellOpsi.v || '').toLowerCase();
+                        if (val.includes('instant') || val.includes('same day') || val.includes('sameday')) {
+                            const cellResiRef = XLSX.utils.encode_cell({ r: R, c: colResi });
+                            // Override Resi dengan Order ID
+                            worksheet[cellResiRef] = { t: 's', v: String(cellOrder.v), w: String(cellOrder.v) };
+                        }
+                    }
+                }
+            }
+        }
       }
 
       const csvText = XLSX.utils.sheet_to_csv(worksheet);
@@ -445,9 +478,9 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
           const resi = item.resi;
           if (!resi || resi === '' || resi === '-' || resi === '0') return false;
 
-          // Skip jika resi sama dengan order_id (indikasi resi kosong di CSV dan parser mengambil order_id sebagai fallback)
-          const orderId = item.order_id || item.no_pesanan || item['No. Pesanan'] || item['Order ID'] || '';
-          if (orderId && resi === String(orderId).trim()) return false;
+          // [FIX] Filter ini dihapus agar Instant/Sameday yang Resi-nya kita override dengan Order ID tetap masuk
+          // const orderId = item.order_id || item.no_pesanan || item['No. Pesanan'] || item['Order ID'] || '';
+          // if (orderId && resi === String(orderId).trim()) return false;
 
           return true;
       });
@@ -988,8 +1021,13 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                   </td>
 
                   {/* RESI (READONLY) */}
-                  <td className="border border-gray-600 px-1 py-1 font-mono text-blue-300 select-all truncate text-[11px]" title={row.resi}>
-                    {row.resi}
+                  <td className="border border-gray-600 px-1 py-1 text-[11px]">
+                    <div className="flex items-center justify-between gap-1">
+                        <span className="font-mono text-blue-300 select-all truncate flex-1" title={row.resi}>{row.resi}</span>
+                        {row.resi && row.no_pesanan && row.resi === row.no_pesanan && (
+                            <span className="flex-shrink-0 px-1 py-0.5 rounded bg-purple-600 text-white text-[8px] font-bold cursor-help" title="Resi hasil override dari No. Pesanan (Instant/Sameday)">INSTANT</span>
+                        )}
+                    </div>
                   </td>
 
                   {/* ECOMM & TOKO (FROM UPLOAD/DB) */}
