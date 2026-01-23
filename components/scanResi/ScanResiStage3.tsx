@@ -108,6 +108,9 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [filterEcommerce, setFilterEcommerce] = useState<string>('');
   const [filterSubToko, setFilterSubToko] = useState<string>('');
+  const [filterPartNumber, setFilterPartNumber] = useState<string>('');
+  const [showPartNumberDropdown, setShowPartNumberDropdown] = useState(false);
+  const partNumberSearchRef = useRef<HTMLDivElement>(null);
 
   // UPLOAD SETTINGS STATES (Seperti Stage 1)
   const [uploadEcommerce, setUploadEcommerce] = useState<EcommercePlatform>('SHOPEE');
@@ -160,6 +163,9 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
     const handler = (e: MouseEvent) => {
       if (resiSearchRef.current && !resiSearchRef.current.contains(e.target as Node)) {
         setShowResiDropdown(false);
+      }
+      if (partNumberSearchRef.current && !partNumberSearchRef.current.contains(e.target as Node)) {
+        setShowPartNumberDropdown(false);
       }
     };
     document.addEventListener('mousedown', handler);
@@ -293,6 +299,37 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
              force_override_double: false  // FITUR 1: Default false
            });
         }
+
+        // === OPSI 3: AGGREGATE CHECK ===
+        // Hitung total qty yang dibutuhkan per part_number
+        const aggregateQtyMap = new Map<string, { totalNeeded: number; stock: number }>();
+        loadedRows.forEach(row => {
+          if (row.part_number) {
+            const existing = aggregateQtyMap.get(row.part_number);
+            if (existing) {
+              existing.totalNeeded += row.qty_keluar;
+            } else {
+              aggregateQtyMap.set(row.part_number, { 
+                totalNeeded: row.qty_keluar, 
+                stock: row.stock_saat_ini 
+              });
+            }
+          }
+        });
+
+        // Update status untuk item yang total qty melebihi stok
+        loadedRows.forEach(row => {
+          if (row.part_number) {
+            const aggregate = aggregateQtyMap.get(row.part_number);
+            if (aggregate && aggregate.totalNeeded > aggregate.stock) {
+              // Hanya update jika status sebelumnya Ready atau Stok Kurang
+              if (row.status_message === 'Ready' || row.status_message === 'Stok Kurang') {
+                row.status_message = `Stok Total Kurang`;
+                row.is_stock_valid = false;
+              }
+            }
+          }
+        });
 
         setRows(prev => {
             const newMap = new Map();
@@ -637,6 +674,14 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
     if (filterEcommerce && row.ecommerce !== filterEcommerce) return false;
     if (filterSubToko && row.sub_toko !== filterSubToko) return false;
     
+    // Filter by part number - HANYA tampilkan yang part_number cocok
+    if (filterPartNumber) {
+      // Jika part_number kosong, jangan tampilkan
+      if (!row.part_number) return false;
+      // Jika tidak cocok, jangan tampilkan
+      if (!row.part_number.toLowerCase().includes(filterPartNumber.toLowerCase())) return false;
+    }
+    
     // Filter by search query - mencari di resi, no_pesanan, customer, part_number
     if (resiSearchQuery) {
       const query = resiSearchQuery.toLowerCase();
@@ -778,6 +823,85 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                     <option value="RESELLER">RESELLER</option>
                     <option value="EKSPOR">EKSPOR</option>
                 </select>
+                
+                {/* FILTER PART NUMBER dengan Dropdown */}
+                <div className="relative" ref={partNumberSearchRef}>
+                    <div className="flex items-center gap-1">
+                        <input
+                            type="text"
+                            value={filterPartNumber}
+                            onChange={e => { setFilterPartNumber(e.target.value); setShowPartNumberDropdown(true); }}
+                            onFocus={() => setShowPartNumberDropdown(true)}
+                            placeholder="Cari Part No..."
+                            className="bg-gray-800 border border-gray-600 rounded px-2 py-0.5 text-[10px] md:text-xs text-yellow-400 w-28 md:w-36 focus:border-yellow-500 outline-none font-mono"
+                        />
+                        {filterPartNumber && (
+                            <button 
+                                onClick={() => { setFilterPartNumber(''); setShowPartNumberDropdown(false); }}
+                                className="text-gray-400 hover:text-white text-xs"
+                                title="Hapus filter"
+                            >
+                                ✕
+                            </button>
+                        )}
+                    </div>
+                    {showPartNumberDropdown && (
+                        <div className="absolute left-0 top-full mt-1 w-64 bg-gray-800 border border-gray-600 rounded shadow-lg max-h-60 overflow-auto z-50">
+                            <div className="p-1.5 text-[9px] text-yellow-400 border-b border-gray-700 bg-yellow-900/20 font-semibold sticky top-0 z-10">
+                                📦 Part Number di Tabel ({(() => {
+                                    const uniqueParts = [...new Set(rows.filter(r => r.part_number).map(r => r.part_number))];
+                                    const filtered = filterPartNumber 
+                                        ? uniqueParts.filter(p => p.toLowerCase().includes(filterPartNumber.toLowerCase()))
+                                        : uniqueParts;
+                                    return filtered.length;
+                                })()})
+                            </div>
+                            {(() => {
+                                const uniqueParts = [...new Set(rows.filter(r => r.part_number).map(r => r.part_number))];
+                                const filtered = filterPartNumber 
+                                    ? uniqueParts.filter(p => p.toLowerCase().includes(filterPartNumber.toLowerCase()))
+                                    : uniqueParts;
+                                return filtered.slice(0, 30).map((pn, i) => {
+                                    // Hitung berapa baris yang punya part number ini
+                                    const count = rows.filter(r => r.part_number === pn).length;
+                                    const totalQty = rows.filter(r => r.part_number === pn).reduce((sum, r) => sum + r.qty_keluar, 0);
+                                    const stock = rows.find(r => r.part_number === pn)?.stock_saat_ini || 0;
+                                    return (
+                                        <div 
+                                            key={i} 
+                                            className="px-2 py-1.5 hover:bg-yellow-900/30 cursor-pointer border-b border-gray-700/50 text-[10px]"
+                                            onClick={() => {
+                                                setFilterPartNumber(pn);
+                                                setShowPartNumberDropdown(false);
+                                            }}
+                                        >
+                                            <div className="flex justify-between items-center">
+                                                <span className="font-mono text-yellow-400 truncate max-w-[140px]">{pn}</span>
+                                                <span className={`px-1 rounded text-[9px] ${totalQty > stock ? 'bg-pink-600/30 text-pink-300' : 'bg-green-600/30 text-green-300'}`}>
+                                                    {count} resi
+                                                </span>
+                                            </div>
+                                            <div className="flex gap-2 text-gray-500 mt-0.5">
+                                                <span>Total Qty: {totalQty}</span>
+                                                <span>Stok: {stock}</span>
+                                                {totalQty > stock && <span className="text-pink-400">⚠️ Kurang {totalQty - stock}</span>}
+                                            </div>
+                                        </div>
+                                    );
+                                });
+                            })()}
+                            {(() => {
+                                const uniqueParts = [...new Set(rows.filter(r => r.part_number).map(r => r.part_number))];
+                                const filtered = filterPartNumber 
+                                    ? uniqueParts.filter(p => p.toLowerCase().includes(filterPartNumber.toLowerCase()))
+                                    : uniqueParts;
+                                return filtered.length === 0 && (
+                                    <div className="p-3 text-center text-gray-500 text-[10px]">Tidak ada part number</div>
+                                );
+                            })()}
+                        </div>
+                    )}
+                </div>
                 
                 {/* FILTER TOKO */}
                 <select value={filterSubToko} onChange={e => setFilterSubToko(e.target.value)} className="bg-gray-800 border border-gray-600 rounded px-1.5 md:px-2 py-0.5 text-[10px] md:text-xs text-gray-300 focus:border-blue-500 outline-none flex-shrink-0">
@@ -964,7 +1088,11 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
               <tr><td colSpan={17} className="text-center py-10 text-gray-500 italic">Data Kosong. Silakan Import atau Load Pending.</td></tr>
             ) : (
               displayedRows.map((row, idx) => (
-                <tr key={row.id} className={`group hover:bg-gray-800 transition-colors ${!row.is_db_verified ? 'bg-red-900/10' : !row.is_stock_valid ? 'bg-yellow-900/10' : ''}`}>
+                <tr key={row.id} className={`group hover:bg-gray-800 transition-colors ${
+                  !row.is_db_verified ? 'bg-red-900/10' : 
+                  row.status_message === 'Stok Total Kurang' ? 'bg-pink-900/20' :
+                  !row.is_stock_valid ? 'bg-yellow-900/10' : ''
+                }`}>
                   
                   {/* STATUS */}
                   <td className="border border-gray-600 p-0 text-center align-middle">
@@ -972,6 +1100,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                        <div className={`text-[10px] font-bold py-0.5 px-1 mx-1 rounded ${
                           row.status_message === 'Ready' ? 'bg-green-600 text-white' : 
                           row.status_message === 'Stok Kurang' ? 'bg-red-600 text-white' :
+                          row.status_message === 'Stok Total Kurang' ? 'bg-pink-600 text-white' :
                           row.status_message === 'Double' ? (row.force_override_double ? 'bg-green-600 text-white' : 'bg-orange-600 text-white') :
                           row.status_message === 'Base Kosong' ? 'bg-purple-600 text-white' :
                           row.status_message === 'Belum Scan S1' ? 'bg-red-800 text-red-200' :
@@ -981,6 +1110,17 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                        }`}>
                           {row.status_message === 'Double' && row.force_override_double ? 'Ready*' : row.status_message}
                        </div>
+                       
+                       {/* Info tooltip untuk Stok Total Kurang */}
+                       {row.status_message === 'Stok Total Kurang' && (
+                         <div className="text-[8px] text-pink-300 px-1">
+                           {(() => {
+                             // Hitung total yang dibutuhkan untuk part ini
+                             const totalNeeded = rows.filter(r => r.part_number === row.part_number).reduce((sum, r) => sum + r.qty_keluar, 0);
+                             return `Total: ${totalNeeded}, Stok: ${row.stock_saat_ini}`;
+                           })()}
+                         </div>
+                       )}
                        
                        {/* FITUR 1: Checkbox Override untuk status Double */}
                        {row.status_message === 'Double' && (
