@@ -407,10 +407,13 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                 delete cell.w;
             }
             
-            // 2. Fix Column Shifting: Hapus koma di dalam text agar tidak merusak format CSV
-            // (Misal: "Kebayoran Baru, Jakarta" -> "Kebayoran Baru Jakarta")
-            if (cell && cell.v && typeof cell.v === 'string' && cell.v.includes(',')) {
-                cell.v = cell.v.replace(/,/g, ' ');
+            // 2. Fix Column Shifting & Broken Rows:
+            // Hapus Koma (,) dan Enter (\n, \r) agar tidak merusak format CSV atau memecah baris
+            if (cell && cell.v && typeof cell.v === 'string') {
+                // Ganti koma dan enter dengan spasi
+                cell.v = cell.v.replace(/[,]/g, ' ').replace(/[\n\r]+/g, ' ').trim();
+                // [FIX] Hapus formatted text (w) agar perubahan di value (v) yang dipakai saat convert ke CSV
+                if (cell.w) delete cell.w;
             }
         }
       }
@@ -440,7 +443,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
       
       parsedItems = parsedItems.filter(item => {
           const resi = item.resi;
-          if (!resi || resi === '' || resi === '-') return false;
+          if (!resi || resi === '' || resi === '-' || resi === '0') return false;
 
           // Skip jika resi sama dengan order_id (indikasi resi kosong di CSV dan parser mengambil order_id sebagai fallback)
           const orderId = item.order_id || item.no_pesanan || item['No. Pesanan'] || item['Order ID'] || '';

@@ -74,6 +74,7 @@ const mapItemFromDB = (item: any, photoData?: any): InventoryItem => {
     price: 0, 
     costPrice: 0, 
     imageUrl: finalImages[0] || item.image_url || '',
+    image_url: finalImages[0] || item.image_url || '',
     images: finalImages,
     ecommerce: '', 
     initialStock: 0, 
@@ -124,9 +125,23 @@ const fetchPhotosForItems = async (items: any[]) => {
   const partNumbers = items.map(i => i.part_number || i.partNumber).filter(Boolean);
   if (partNumbers.length === 0) return {};
   try {
-    const { data } = await supabase.from('foto').select('*').in('part_number', partNumbers);
+    // Batching request to avoid URL length limit
+    const batchSize = 100;
+    const batches = [];
+    for (let i = 0; i < partNumbers.length; i += batchSize) {
+      batches.push(partNumbers.slice(i, i + batchSize));
+    }
+
+    const results = await Promise.all(batches.map(batch => 
+      supabase.from('foto').select('*').in('part_number', batch)
+    ));
+
     const photoMap: Record<string, any> = {};
-    (data || []).forEach((row: any) => { if (row.part_number) photoMap[row.part_number] = row; });
+    results.forEach(res => {
+      if (res.data) {
+        res.data.forEach((row: any) => { if (row.part_number) photoMap[row.part_number] = row; });
+      }
+    });
     return photoMap;
   } catch (e) { return {}; }
 };

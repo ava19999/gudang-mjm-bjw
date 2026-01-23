@@ -96,6 +96,7 @@ export const parseShopeeCSV = (text: string): ParsedCSVItem[] => {
   const idxStatus = headers.findIndex(h => h.includes('Status Pesanan'));
   const idxOpsiKirim = headers.findIndex(h => h.includes('Opsi Pengiriman'));
   const idxUser = headers.findIndex(h => h.includes('Username (Pembeli)'));
+  const idxPenerima = headers.findIndex(h => h.includes('Nama Penerima')); // [FIX] Fallback nama
   const idxSKU = headers.findIndex(h => 
     h.includes('Nomor Referensi SKU') || h.includes('SKU Induk') || h === 'SKU'
   );
@@ -120,9 +121,11 @@ export const parseShopeeCSV = (text: string): ParsedCSVItem[] => {
     // SKIP: Batal, Belum Bayar, Dibatalkan
     if (statusLower.includes('batal') || 
         statusLower.includes('belum bayar') || 
+        statusLower.includes('unpaid') ||
         statusLower.includes('dibatalkan') ||
         statusLower.includes('cancelled') ||
-        statusLower.includes('cancel')) {
+        statusLower.includes('cancel') ||
+        statusLower.includes('pengembalian')) {
       return null;
     }
 
@@ -134,12 +137,22 @@ export const parseShopeeCSV = (text: string): ParsedCSVItem[] => {
       ? cols[idxOrder].replace(/["']/g, '').trim() 
       : '';
     
-    // SKIP jika KEDUA resi DAN order_id kosong
-    // Untuk Sameday/Instant, resi mungkin kosong tapi order_id ada
-    if (!resi && !orderId) return null;
+    // [FIX] Safeguard: Jika resi terlihat seperti alamat (karena parsing error), skip
+    // Cek panjang karakter atau kata kunci alamat umum
+    if (resi.length > 50 || /jakarta|jawa|sumatera|jalan|kecamatan|kabupaten|provinsi|kota|kebayoran|selatan|utara|barat|timur|pusat/i.test(resi)) {
+      return null;
+    }
+
+    // [FIX] Jika kolom resi kosong, skip baris ini (jangan fallback ke order_id)
+    if (!resi) return null;
 
     // Format customer
-    const customer = formatCustomer(cols[idxUser] || '');
+    // [FIX] Coba ambil Username, jika kosong ambil Nama Penerima
+    let rawCustomer = (idxUser !== -1) ? cols[idxUser] : '';
+    if ((!rawCustomer || rawCustomer.trim() === '') && idxPenerima !== -1) {
+        rawCustomer = cols[idxPenerima];
+    }
+    const customer = formatCustomer(rawCustomer || '');
     
     // Format nama produk
     const namaProduk = (idxNamaProduk !== -1) ? cols[idxNamaProduk] : '';
@@ -156,7 +169,7 @@ export const parseShopeeCSV = (text: string): ParsedCSVItem[] => {
     const totalPriceIDR = (idxTotal !== -1) ? parseCurrencyIDR(cols[idxTotal]) : 0;
 
     return {
-      resi: resi || orderId, // Jika resi kosong, gunakan order_id sebagai resi (untuk Sameday/Instant)
+      resi: resi,
       order_id: orderId,
       order_status: rawStatus,
       shipping_option: (idxOpsiKirim !== -1 && cols[idxOpsiKirim]) ? cols[idxOpsiKirim].replace(/["']/g, '') : '',
@@ -217,7 +230,8 @@ export const parseTikTokCSV = (text: string): ParsedCSVItem[] => {
 
     // SKIP: Dibatalkan atau Belum dibayar/Unpaid
     if (statusLower.includes('dibatalkan') || statusLower.includes('cancelled') ||
-        statusLower.includes('belum dibayar') || statusLower.includes('unpaid')) {
+        statusLower.includes('belum dibayar') || statusLower.includes('unpaid') ||
+        statusLower.includes('awaiting collection') || statusLower.includes('pengembalian')) {
       return null;
     }
 
@@ -226,6 +240,11 @@ export const parseTikTokCSV = (text: string): ParsedCSVItem[] => {
       ? cols[idxResi].replace(/["']/g, '').trim() 
       : '';
     if (!resi) return null;
+
+    // [FIX] Safeguard TikTok: Cek jika resi berisi alamat
+    if (resi.length > 50 || /jakarta|jawa|sumatera|jalan|kecamatan|kabupaten|provinsi|kota|kebayoran/i.test(resi)) {
+      return null;
+    }
 
     // Format customer
     const customer = formatCustomer(cols[idxUser] || '');
