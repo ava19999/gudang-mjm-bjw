@@ -406,10 +406,13 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
     
     try {
       const data = await file.arrayBuffer();
-      const workbook = XLSX.read(data, { type: 'array' });
+      // Tambahkan opsi cellText: true dan cellDates: true untuk mempertahankan format asli
+      const workbook = XLSX.read(data, { type: 'array', cellText: true, cellDates: true });
       const sheetName = workbook.SheetNames[0];
       const worksheet = workbook.Sheets[sheetName];
-      const csvText = XLSX.utils.sheet_to_csv(worksheet);
+      
+      // Konversi ke CSV dengan rawNumbers: true agar angka panjang tidak jadi scientific notation
+      const csvText = XLSX.utils.sheet_to_csv(worksheet, { rawNumbers: true });
 
       const platform = detectCSVPlatform(csvText);
       let parsedItems: any[] = [];

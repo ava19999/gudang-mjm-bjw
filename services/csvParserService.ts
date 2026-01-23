@@ -5,6 +5,28 @@ import { ParsedCSVItem } from '../types';
 // HELPER FUNCTIONS
 // ============================================================================
 
+// Konversi scientific notation ke string angka penuh
+// Contoh: "1.10032E+13" -> "11003200000000" atau "1.10032055095560E13" -> "11003205509556"
+const fixScientificNotation = (val: string): string => {
+  if (!val) return '';
+  const trimmed = val.trim();
+  
+  // Cek apakah dalam format scientific notation (mengandung E atau e)
+  if (/[eE][+-]?\d+/.test(trimmed)) {
+    try {
+      // Parse sebagai number lalu konversi ke string tanpa scientific notation
+      const num = parseFloat(trimmed);
+      if (!isNaN(num)) {
+        // Gunakan toFixed(0) untuk mendapat integer, atau toLocaleString untuk format penuh
+        return num.toLocaleString('fullwide', { useGrouping: false });
+      }
+    } catch (e) {
+      // Jika gagal, kembalikan nilai asli
+    }
+  }
+  return trimmed;
+};
+
 // Format customer: UPPERCASE, ambil sampai karakter sebelum (
 const formatCustomer = (val: string): string => {
   if (!val) return '-';
@@ -96,7 +118,6 @@ export const parseShopeeCSV = (text: string): ParsedCSVItem[] => {
   const idxStatus = headers.findIndex(h => h.includes('Status Pesanan'));
   const idxOpsiKirim = headers.findIndex(h => h.includes('Opsi Pengiriman'));
   const idxUser = headers.findIndex(h => h.includes('Username (Pembeli)'));
-  const idxPenerima = headers.findIndex(h => h.includes('Nama Penerima')); // [FIX] Fallback nama
   const idxSKU = headers.findIndex(h => 
     h.includes('Nomor Referensi SKU') || h.includes('SKU Induk') || h === 'SKU'
   );
@@ -118,50 +139,35 @@ export const parseShopeeCSV = (text: string): ParsedCSVItem[] => {
       : '';
     const statusLower = rawStatus.toLowerCase();
     
-    // SKIP: Batal, Belum Bayar, Dibatalkan
-    if (statusLower.includes('batal') || 
-        statusLower.includes('belum bayar') || 
-        statusLower.includes('unpaid') ||
-        statusLower.includes('dibatalkan') ||
-        statusLower.includes('cancelled') ||
-        statusLower.includes('cancel') ||
-        statusLower.includes('pengembalian')) {
+    // SKIP: Batal atau Belum Bayar
+    if (statusLower.includes('batal') || statusLower.includes('belum bayar')) {
       return null;
     }
 
-    // Get resi dan order_id
-    const resi = (idxResi !== -1 && cols[idxResi]) 
+    // Get resi - SKIP jika kosong
+    // Gunakan fixScientificNotation untuk menangani kasus 1.10032E+13 -> 11003205509556
+    let resi = (idxResi !== -1 && cols[idxResi]) 
       ? cols[idxResi].replace(/["']/g, '').trim() 
       : '';
-    const orderId = (idxOrder !== -1 && cols[idxOrder]) 
+    resi = fixScientificNotation(resi);
+    if (!resi) return null;
+    
+    // Get order_id - juga fix scientific notation
+    let orderId = (idxOrder !== -1 && cols[idxOrder]) 
       ? cols[idxOrder].replace(/["']/g, '').trim() 
       : '';
-    
-    // [FIX] Safeguard: Jika resi terlihat seperti alamat (karena parsing error), skip
-    // Cek panjang karakter atau kata kunci alamat umum
-    if (resi.length > 50 || /jakarta|jawa|sumatera|jalan|kecamatan|kabupaten|provinsi|kota|kebayoran|selatan|utara|barat|timur|pusat/i.test(resi)) {
-      return null;
-    }
-
-    // [FIX] Jika kolom resi kosong, skip baris ini (jangan fallback ke order_id)
-    if (!resi) return null;
+    orderId = fixScientificNotation(orderId);
 
     // Format customer
-    // [FIX] Coba ambil Username, jika kosong ambil Nama Penerima
-    let rawCustomer = (idxUser !== -1) ? cols[idxUser] : '';
-    if ((!rawCustomer || rawCustomer.trim() === '') && idxPenerima !== -1) {
-        rawCustomer = cols[idxPenerima];
-    }
-    const customer = formatCustomer(rawCustomer || '');
+    const customer = formatCustomer(cols[idxUser] || '');
     
     // Format nama produk
     const namaProduk = (idxNamaProduk !== -1) ? cols[idxNamaProduk] : '';
     const namaVariasi = (idxNamaVariasi !== -1) ? cols[idxNamaVariasi] : '';
     const productName = formatNamaProduk(namaProduk, namaVariasi);
     
-    // Dedupe check - gunakan resi ATAU order_id sebagai key utama
-    const primaryKey = resi || orderId;
-    const dedupeKey = `${primaryKey}||${customer}||${productName}`;
+    // Dedupe check
+    const dedupeKey = `${resi}||${customer}||${productName}`;
     if (seenKeys.has(dedupeKey)) return null;
     seenKeys.add(dedupeKey);
 
@@ -169,7 +175,7 @@ export const parseShopeeCSV = (text: string): ParsedCSVItem[] => {
     const totalPriceIDR = (idxTotal !== -1) ? parseCurrencyIDR(cols[idxTotal]) : 0;
 
     return {
-      resi: resi,
+      resi,
       order_id: orderId,
       order_status: rawStatus,
       shipping_option: (idxOpsiKirim !== -1 && cols[idxOpsiKirim]) ? cols[idxOpsiKirim].replace(/["']/g, '') : '',
@@ -230,21 +236,23 @@ export const parseTikTokCSV = (text: string): ParsedCSVItem[] => {
 
     // SKIP: Dibatalkan atau Belum dibayar/Unpaid
     if (statusLower.includes('dibatalkan') || statusLower.includes('cancelled') ||
-        statusLower.includes('belum dibayar') || statusLower.includes('unpaid') ||
-        statusLower.includes('awaiting collection') || statusLower.includes('pengembalian')) {
+        statusLower.includes('belum dibayar') || statusLower.includes('unpaid')) {
       return null;
     }
 
     // Get resi (Tracking ID) - SKIP jika kosong
-    const resi = (idxResi !== -1 && cols[idxResi]) 
+    // Gunakan fixScientificNotation untuk menangani kasus scientific notation
+    let resi = (idxResi !== -1 && cols[idxResi]) 
       ? cols[idxResi].replace(/["']/g, '').trim() 
       : '';
+    resi = fixScientificNotation(resi);
     if (!resi) return null;
-
-    // [FIX] Safeguard TikTok: Cek jika resi berisi alamat
-    if (resi.length > 50 || /jakarta|jawa|sumatera|jalan|kecamatan|kabupaten|provinsi|kota|kebayoran/i.test(resi)) {
-      return null;
-    }
+    
+    // Get order_id - juga fix scientific notation
+    let orderId = (idxOrder !== -1 && cols[idxOrder]) 
+      ? cols[idxOrder].replace(/["']/g, '').trim() 
+      : '';
+    orderId = fixScientificNotation(orderId);
 
     // Format customer
     const customer = formatCustomer(cols[idxUser] || '');
@@ -264,7 +272,7 @@ export const parseTikTokCSV = (text: string): ParsedCSVItem[] => {
 
     return {
       resi,
-      order_id: (idxOrder !== -1 && cols[idxOrder]) ? cols[idxOrder].replace(/["']/g, '') : '',
+      order_id: orderId,
       order_status: rawStatus,
       shipping_option: (idxShipping !== -1 && cols[idxShipping]) ? cols[idxShipping].replace(/["']/g, '') : '',
       customer,
