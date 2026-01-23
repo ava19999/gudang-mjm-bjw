@@ -273,7 +273,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
            loadedRows.push({
              id: `db-${item.id}`,
              tanggal: item.created_at ? item.created_at.split('T')[0] : new Date().toISOString().split('T')[0],
-             resi: item.resi ? String(item.resi).trim() : '',
+             resi: item.resi,
              ecommerce: ecommerceDB,
              sub_toko: subToko,
              part_number: item.part_number || '',
@@ -285,7 +285,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
              qty_keluar: qty,
              harga_total: Number(item.total_harga_produk || 0),
              harga_satuan: qty > 0 ? (Number(item.total_harga_produk || 0) / qty) : 0,
-             no_pesanan: item.order_id ? String(item.order_id).trim() : '',
+             no_pesanan: item.order_id || '',
              customer: item.customer || '-',
              is_db_verified: verified,
              is_stock_valid: stockValid,
@@ -295,39 +295,18 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
         }
 
         setRows(prev => {
-            // Group incoming rows by Resi (normalized)
-            const incomingByResi = new Map<string, Stage3Row[]>();
-            loadedRows.forEach(r => {
-                const key = String(r.resi).trim();
-                if (!incomingByResi.has(key)) incomingByResi.set(key, []);
-                incomingByResi.get(key)?.push(r);
-            });
-
-            const newRows: Stage3Row[] = [];
-            
-            // Iterate existing rows to merge/replace
-            prev.forEach(existingRow => {
-                const resiKey = String(existingRow.resi).trim();
-                
-                if (incomingByResi.has(resiKey)) {
-                    const candidates = incomingByResi.get(resiKey)!;
-                    // Replace if placeholder or empty part number
-                    if ((existingRow.nama_barang_csv === 'Menunggu Input...' || !existingRow.part_number) && candidates.length > 0) {
-                        newRows.push(candidates.shift()!);
-                    } else {
-                        newRows.push(existingRow);
-                    }
-                } else {
-                    newRows.push(existingRow);
+            const newMap = new Map();
+            loadedRows.forEach(r => newMap.set(r.resi + r.part_number, r));
+            const mergedRows = prev.map(existingRow => {
+                const key = existingRow.resi + existingRow.part_number;
+                if (newMap.has(key)) {
+                    const freshData = newMap.get(key);
+                    newMap.delete(key);
+                    return freshData;
                 }
+                return existingRow;
             });
-
-            // Add remaining new rows
-            incomingByResi.forEach((candidates) => {
-                candidates.forEach(r => newRows.push(r));
-            });
-            
-            return newRows;
+            return [...mergedRows, ...Array.from(newMap.values()) as Stage3Row[]];
         });
       }
     } catch (e) {
@@ -390,67 +369,9 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
     
     try {
       const data = await file.arrayBuffer();
-      const workbook = XLSX.read(data, { type: 'array', raw: true });
+      const workbook = XLSX.read(data, { type: 'array' });
       const sheetName = workbook.SheetNames[0];
       const worksheet = workbook.Sheets[sheetName];
-      
-      // FIX: Hapus formatting agar angka panjang (Resi) tidak jadi scientific notation (1.10E+13)
-      if (worksheet) {
-        for (const key in worksheet) {
-            if (key.startsWith('!')) continue;
-            const cell = worksheet[key];
-            
-            // 1. Fix Scientific Notation (1.10E+13 -> "110...")
-            if (cell && cell.t === 'n') {
-                cell.t = 's';
-                cell.v = String(cell.v);
-                delete cell.w;
-            }
-            
-            // 2. Fix Column Shifting & Broken Rows:
-            // Hapus Koma (,) dan Enter (\n, \r) agar tidak merusak format CSV atau memecah baris
-            if (cell && cell.v && typeof cell.v === 'string') {
-                // Ganti koma dan enter dengan spasi
-                cell.v = cell.v.replace(/[,]/g, ' ').replace(/[\n\r]+/g, ' ').trim();
-                // [FIX] Hapus formatted text (w) agar perubahan di value (v) yang dipakai saat convert ke CSV
-                if (cell.w) delete cell.w;
-            }
-        }
-
-        // Override Resi dengan Order ID untuk Instant/Sameday (Opsi Pengiriman)
-        if (worksheet['!ref']) {
-            const range = XLSX.utils.decode_range(worksheet['!ref']);
-            let colOpsi = -1, colResi = -1, colOrder = -1;
-
-            // Cari Header di baris pertama range
-            for (let C = range.s.c; C <= range.e.c; ++C) {
-                const cell = worksheet[XLSX.utils.encode_cell({ r: range.s.r, c: C })];
-                if (cell && cell.v) {
-                    const h = String(cell.v).trim().toLowerCase();
-                    if (h === 'opsi pengiriman' || h === 'shipping option') colOpsi = C;
-                    else if (h === 'no. resi' || h === 'tracking no' || h === 'tracking number') colResi = C;
-                    else if (h === 'no. pesanan' || h === 'order id' || h === 'order sn') colOrder = C;
-                }
-            }
-
-            if (colOpsi !== -1 && colResi !== -1 && colOrder !== -1) {
-                for (let R = range.s.r + 1; R <= range.e.r; ++R) {
-                    const cellOpsi = worksheet[XLSX.utils.encode_cell({ r: R, c: colOpsi })];
-                    const cellOrder = worksheet[XLSX.utils.encode_cell({ r: R, c: colOrder })];
-                    
-                    if (cellOpsi && cellOrder) {
-                        const val = String(cellOpsi.v || '').toLowerCase();
-                        if (val.includes('instant') || val.includes('same day') || val.includes('sameday')) {
-                            const cellResiRef = XLSX.utils.encode_cell({ r: R, c: colResi });
-                            // Override Resi dengan Order ID
-                            worksheet[cellResiRef] = { t: 's', v: String(cellOrder.v), w: String(cellOrder.v) };
-                        }
-                    }
-                }
-            }
-        }
-      }
-
       const csvText = XLSX.utils.sheet_to_csv(worksheet);
 
       const platform = detectCSVPlatform(csvText);
@@ -470,21 +391,6 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
         }
       }
 
-      // FILTER: Skip item yang tidak ada resinya (kosong atau strip)
-      const initialCount = parsedItems.length;
-      parsedItems = parsedItems.map(item => ({...item, resi: item.resi ? String(item.resi).trim() : ''}));
-      
-      parsedItems = parsedItems.filter(item => {
-          const resi = item.resi;
-          if (!resi || resi === '' || resi === '-' || resi === '0') return false;
-
-          // [FIX] Filter ini dihapus agar Instant/Sameday yang Resi-nya kita override dengan Order ID tetap masuk
-          // const orderId = item.order_id || item.no_pesanan || item['No. Pesanan'] || item['Order ID'] || '';
-          // if (orderId && resi === String(orderId).trim()) return false;
-
-          return true;
-      });
-
       if (parsedItems.length === 0) {
         alert('Tidak ada data valid (Mungkin status Batal/Belum Bayar?).');
         setLoading(false);
@@ -501,14 +407,6 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
         item.ecommerce = uploadEcommerce;
         item.sub_toko = uploadSubToko;
         
-        // CLEANUP NUMBERS: Buang titik dan koma, convert ke number
-        const cleanNumber = (val: any) => parseFloat(String(val).replace(/[.,]/g, '')) || 0;
-        
-        item.jumlah = cleanNumber(item.jumlah || item.quantity || 1);
-        item.total_harga_produk = cleanNumber(item.total_harga_produk || 0);
-        item.harga_satuan = cleanNumber(item.harga_satuan || 0);
-        if (item.jumlah > 0 && item.total_harga_produk > 0) item.harga_satuan = item.total_harga_produk / item.jumlah;
-
         // Handle Ekspor (tambah suffix negara)
         if (uploadEcommerce === 'EKSPOR') {
             item.ecommerce = `EKSPOR - ${uploadNegara}`;
@@ -519,7 +417,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
 
       if (correctedItems.length > 0) {
           await saveCSVToResiItems(correctedItems, selectedStore);
-          alert(`Berhasil import ${correctedItems.length} item (dari total ${initialCount} baris) sebagai ${uploadEcommerce} (${uploadSubToko}).`);
+          alert(`Berhasil import ${correctedItems.length} item sebagai ${uploadEcommerce} (${uploadSubToko}).`);
       }
 
       await loadSavedDataFromDB();
@@ -591,7 +489,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
     const dbRows: Stage3Row[] = pendingData.map(item => ({
       id: Math.random().toString(36).substr(2, 9), 
       tanggal: new Date(item.stage2_verified_at || item.created_at).toISOString().split('T')[0],
-      resi: item.resi ? item.resi.trim() : '',
+      resi: item.resi,
       ecommerce: item.ecommerce || '-',
       sub_toko: item.sub_toko || (selectedStore === 'bjw' ? 'BJW' : 'MJM'),
       part_number: '', 
@@ -738,6 +636,17 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
     if (filterStatus !== 'all' && row.status_message !== filterStatus) return false;
     if (filterEcommerce && row.ecommerce !== filterEcommerce) return false;
     if (filterSubToko && row.sub_toko !== filterSubToko) return false;
+    
+    // Filter by search query - mencari di resi, no_pesanan, customer, part_number
+    if (resiSearchQuery) {
+      const query = resiSearchQuery.toLowerCase();
+      const matchResi = row.resi.toLowerCase().includes(query);
+      const matchOrder = row.no_pesanan && row.no_pesanan.toLowerCase().includes(query);
+      const matchCustomer = row.customer && row.customer.toLowerCase().includes(query);
+      const matchPart = row.part_number && row.part_number.toLowerCase().includes(query);
+      if (!matchResi && !matchOrder && !matchCustomer && !matchPart) return false;
+    }
+    
     return true;
   });
 
@@ -768,6 +677,14 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                 </div>
 
                 <div className="flex gap-1 md:gap-2 items-center">
+                     <button 
+                        onClick={() => { loadSavedDataFromDB(); }} 
+                        disabled={loading}
+                        className="bg-gray-600 hover:bg-gray-500 px-2 md:px-3 py-1 md:py-1.5 rounded text-[10px] md:text-xs flex gap-1 items-center transition-colors disabled:opacity-50"
+                        title="Refresh Data"
+                     >
+                        <RefreshCw size={12} className={loading ? 'animate-spin' : ''}/> <span className="hidden sm:inline">Refresh</span>
+                    </button>
                      <button onClick={handleLoadPending} className="bg-yellow-700/80 hover:bg-yellow-600 px-2 md:px-3 py-1 md:py-1.5 rounded text-[10px] md:text-xs flex gap-1 items-center transition-colors">
                         <DownloadCloud size={12}/> <span className="hidden sm:inline">DB</span> Pending
                     </button>
@@ -870,7 +787,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                     ))}
                 </select>
                 
-                {/* SEARCH RESI DROPDOWN */}
+                {/* SEARCH RESI DROPDOWN - Mencari di Stage 1 DAN Tabel S3 */}
                 <div className="relative ml-auto" ref={resiSearchRef}>
                     <div className="flex items-center gap-1">
                         <Search size={12} className="text-gray-400" />
@@ -879,14 +796,79 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                             value={resiSearchQuery}
                             onChange={e => { setResiSearchQuery(e.target.value); setShowResiDropdown(true); }}
                             onFocus={() => setShowResiDropdown(true)}
-                            placeholder="Cari Resi S1..."
+                            placeholder="Cari Resi..."
                             className="bg-gray-800 border border-gray-600 rounded px-2 py-0.5 text-[10px] md:text-xs text-gray-300 w-28 md:w-40 focus:border-blue-500 outline-none"
                         />
+                        {/* Tombol Clear Search */}
+                        {resiSearchQuery && (
+                            <button 
+                                onClick={() => { setResiSearchQuery(''); setShowResiDropdown(false); }}
+                                className="text-gray-400 hover:text-white text-xs px-1"
+                                title="Hapus pencarian"
+                            >
+                                ✕
+                            </button>
+                        )}
                     </div>
-                    {showResiDropdown && (
-                        <div className="absolute right-0 top-full mt-1 w-72 bg-gray-800 border border-gray-600 rounded shadow-lg max-h-60 overflow-auto z-50">
-                            <div className="p-1 text-[9px] text-gray-500 border-b border-gray-700">
-                                Resi dari Stage 1 ({stage1ResiList.filter(r => 
+                    {showResiDropdown && resiSearchQuery && (
+                        <div className="absolute right-0 top-full mt-1 w-80 bg-gray-800 border border-gray-600 rounded shadow-lg max-h-72 overflow-auto z-50">
+                            {/* SECTION 1: Hasil dari Tabel Stage 3 (rows) */}
+                            {(() => {
+                                const filteredTableRows = rows.filter(r => 
+                                    resiSearchQuery && (
+                                        r.resi.toLowerCase().includes(resiSearchQuery.toLowerCase()) ||
+                                        (r.no_pesanan && r.no_pesanan.toLowerCase().includes(resiSearchQuery.toLowerCase())) ||
+                                        (r.customer && r.customer.toLowerCase().includes(resiSearchQuery.toLowerCase())) ||
+                                        (r.part_number && r.part_number.toLowerCase().includes(resiSearchQuery.toLowerCase()))
+                                    )
+                                );
+                                return filteredTableRows.length > 0 && (
+                                    <>
+                                        <div className="p-1.5 text-[9px] text-green-400 border-b border-gray-700 bg-green-900/20 font-semibold sticky top-0 z-10">
+                                            📋 Hasil di Tabel S3 ({filteredTableRows.length})
+                                        </div>
+                                        {filteredTableRows.slice(0, 20).map((r, i) => {
+                                            const rowIndex = displayedRows.indexOf(r);
+                                            return (
+                                                <div 
+                                                    key={`table-${i}`} 
+                                                    className="px-2 py-1.5 hover:bg-green-900/30 cursor-pointer border-b border-gray-700/50 text-[10px]"
+                                                    onClick={() => {
+                                                        // Scroll ke row di tabel - tetap buka dropdown
+                                                        if (rowIndex >= 0) {
+                                                            const el = document.getElementById(`input-${rowIndex}-part_number`);
+                                                            el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                                            el?.focus();
+                                                        }
+                                                        // Tidak menutup dropdown dan tidak mengubah query
+                                                    }}
+                                                >
+                                                    <div className="flex justify-between items-center">
+                                                        <span className="font-mono text-green-300 truncate max-w-[130px]">{r.resi}</span>
+                                                        <span className={`px-1 rounded text-[9px] ${
+                                                            r.status_message === 'Ready' ? 'bg-green-600/30 text-green-300' : 
+                                                            r.status_message === 'Stok Kurang' ? 'bg-red-600/30 text-red-300' :
+                                                            'bg-yellow-600/30 text-yellow-300'
+                                                        }`}>
+                                                            {r.status_message}
+                                                        </span>
+                                                    </div>
+                                                    <div className="flex gap-2 text-gray-500 mt-0.5">
+                                                        <span>{r.ecommerce}</span>
+                                                        <span>{r.sub_toko}</span>
+                                                        <span className="text-gray-400 truncate max-w-[80px]">{r.customer}</span>
+                                                        {r.part_number && <span className="text-yellow-400 font-mono">{r.part_number}</span>}
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </>
+                                );
+                            })()}
+                            
+                            {/* SECTION 2: Hasil dari Stage 1 (untuk referensi) */}
+                            <div className="p-1.5 text-[9px] text-blue-400 border-b border-gray-700 bg-blue-900/20 font-semibold sticky top-0 z-10">
+                                🔍 Resi Stage 1 ({stage1ResiList.filter(r => 
                                     !resiSearchQuery || 
                                     r.resi.toLowerCase().includes(resiSearchQuery.toLowerCase()) ||
                                     (r.no_pesanan && r.no_pesanan.toLowerCase().includes(resiSearchQuery.toLowerCase()))
@@ -898,28 +880,33 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                                     r.resi.toLowerCase().includes(resiSearchQuery.toLowerCase()) ||
                                     (r.no_pesanan && r.no_pesanan.toLowerCase().includes(resiSearchQuery.toLowerCase()))
                                 )
-                                .slice(0, 50)
+                                .slice(0, 30)
                                 .map((r, i) => (
                                     <div 
-                                        key={i} 
-                                        className="px-2 py-1.5 hover:bg-gray-700 cursor-pointer border-b border-gray-700/50 text-[10px]"
+                                        key={`s1-${i}`} 
+                                        className="px-2 py-1.5 hover:bg-blue-900/30 cursor-pointer border-b border-gray-700/50 text-[10px]"
                                         onClick={() => {
-                                            // Scroll ke resi tersebut jika ada di tabel
-                                            const foundRow = rows.find(row => row.resi === r.resi || row.no_pesanan === r.no_pesanan);
-                                            if (foundRow) {
-                                                const el = document.getElementById(`input-${rows.indexOf(foundRow)}-part_number`);
+                                            // Cek apakah resi ini sudah ada di tabel S3
+                                            const foundRowIndex = displayedRows.findIndex(row => row.resi === r.resi || row.no_pesanan === r.no_pesanan);
+                                            if (foundRowIndex >= 0) {
+                                                const el = document.getElementById(`input-${foundRowIndex}-part_number`);
                                                 el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
                                                 el?.focus();
                                             }
-                                            setResiSearchQuery(r.resi);
-                                            setShowResiDropdown(false);
+                                            // Tidak menutup dropdown, tetap buka untuk navigasi
                                         }}
                                     >
                                         <div className="flex justify-between items-center">
-                                            <span className="font-mono text-blue-300 truncate max-w-[120px]">{r.resi}</span>
-                                            <span className={`px-1 rounded text-[9px] ${r.stage2_verified ? 'bg-green-600/30 text-green-300' : 'bg-yellow-600/30 text-yellow-300'}`}>
-                                                {r.stage2_verified ? 'S2 ✓' : 'S1 only'}
-                                            </span>
+                                            <span className="font-mono text-blue-300 truncate max-w-[130px]">{r.resi}</span>
+                                            <div className="flex gap-1">
+                                                {/* Indikator apakah sudah ada di tabel S3 */}
+                                                {rows.some(row => row.resi === r.resi) && (
+                                                    <span className="px-1 rounded text-[9px] bg-green-600/30 text-green-300">Di S3</span>
+                                                )}
+                                                <span className={`px-1 rounded text-[9px] ${r.stage2_verified ? 'bg-green-600/30 text-green-300' : 'bg-yellow-600/30 text-yellow-300'}`}>
+                                                    {r.stage2_verified ? 'S2 ✓' : 'S1 only'}
+                                                </span>
+                                            </div>
                                         </div>
                                         <div className="flex gap-2 text-gray-500 mt-0.5">
                                             <span>{r.ecommerce}</span>
@@ -932,6 +919,8 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                             {stage1ResiList.filter(r => 
                                 !resiSearchQuery || 
                                 r.resi.toLowerCase().includes(resiSearchQuery.toLowerCase())
+                            ).length === 0 && rows.filter(r => 
+                                resiSearchQuery && r.resi.toLowerCase().includes(resiSearchQuery.toLowerCase())
                             ).length === 0 && (
                                 <div className="p-3 text-center text-gray-500 text-[10px]">Tidak ditemukan</div>
                             )}
@@ -949,25 +938,25 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
       {/* EXCEL-LIKE TABLE */}
       <div className="flex-1 overflow-x-auto overflow-y-auto border border-gray-600 bg-gray-800 shadow-inner custom-scrollbar">
         <table className="border-collapse text-[10px] md:text-xs min-w-[1000px] md:w-full md:table-fixed">
-          <thead className="sticky top-0 z-10 shadow-sm">
+          <thead className="sticky top-0 z-20 shadow-md">
             <tr className="bg-gray-700 text-gray-200 font-semibold">
-              <th className="border border-gray-600 px-1 py-1 text-center w-[55px] md:w-[5%]">Status</th>
-              <th className="border border-gray-600 px-1 py-1 text-center w-[75px] md:w-[6%]">Tanggal</th>
-              <th className="border border-gray-600 px-1 py-1 text-left w-[80px] md:w-[7%]">Resi</th>
-              <th className="border border-gray-600 px-1 py-1 text-center w-[55px] md:w-[5%]">E-Comm</th>
-              <th className="border border-gray-600 px-1 py-1 text-center w-[45px] md:w-[4%]">Toko</th>
-              <th className="border border-gray-600 px-1 py-1 text-left bg-gray-700/50 w-[70px] md:w-[7%]">Customer</th>
-              <th className="border border-gray-600 px-1 py-1 text-left bg-gray-700/80 border-b-2 border-b-yellow-600/50 w-[90px] md:w-[8%]">Part No.</th>
-              <th className="border border-gray-600 px-1 py-1 text-left w-[110px] md:w-[11%]">Nama (CSV)</th>
-              <th className="border border-gray-600 px-1 py-1 text-left w-[110px] md:w-[11%]">Nama (Base)</th>
-              <th className="border border-gray-600 px-1 py-1 text-left w-[55px] md:w-[5%]">Brand</th>
-              <th className="border border-gray-600 px-1 py-1 text-left w-[70px] md:w-[7%]">Aplikasi</th>
-              <th className="border border-gray-600 px-1 py-1 text-center w-[40px] md:w-[3%]">Stok</th>
-              <th className="border border-gray-600 px-1 py-1 text-center bg-gray-700/80 border-b-2 border-b-yellow-600/50 w-[40px] md:w-[3%]">Qty</th>
-              <th className="border border-gray-600 px-1 py-1 text-right bg-gray-700/80 border-b-2 border-b-yellow-600/50 w-[70px] md:w-[6%]">Total</th>
-              <th className="border border-gray-600 px-1 py-1 text-right w-[60px] md:w-[5%]">Satuan</th>
-              <th className="border border-gray-600 px-1 py-1 text-left w-[60px] md:w-[5%]">No. Pesanan</th>
-              <th className="border border-gray-600 px-1 py-1 text-center w-[35px] md:w-[2%]">#</th>
+              <th className="border border-gray-600 px-1 py-1 text-center w-[55px] md:w-[5%] bg-gray-700">Status</th>
+              <th className="border border-gray-600 px-1 py-1 text-center w-[75px] md:w-[6%] bg-gray-700">Tanggal</th>
+              <th className="border border-gray-600 px-1 py-1 text-left w-[80px] md:w-[7%] bg-gray-700">Resi</th>
+              <th className="border border-gray-600 px-1 py-1 text-center w-[55px] md:w-[5%] bg-gray-700">E-Comm</th>
+              <th className="border border-gray-600 px-1 py-1 text-center w-[45px] md:w-[4%] bg-gray-700">Toko</th>
+              <th className="border border-gray-600 px-1 py-1 text-left w-[70px] md:w-[7%] bg-gray-600">Customer</th>
+              <th className="border border-gray-600 px-1 py-1 text-left border-b-2 border-b-yellow-600/50 w-[90px] md:w-[8%] bg-gray-600">Part No.</th>
+              <th className="border border-gray-600 px-1 py-1 text-left w-[110px] md:w-[11%] bg-gray-700">Nama (CSV)</th>
+              <th className="border border-gray-600 px-1 py-1 text-left w-[110px] md:w-[11%] bg-gray-700">Nama (Base)</th>
+              <th className="border border-gray-600 px-1 py-1 text-left w-[55px] md:w-[5%] bg-gray-700">Brand</th>
+              <th className="border border-gray-600 px-1 py-1 text-left w-[70px] md:w-[7%] bg-gray-700">Aplikasi</th>
+              <th className="border border-gray-600 px-1 py-1 text-center w-[40px] md:w-[3%] bg-gray-700">Stok</th>
+              <th className="border border-gray-600 px-1 py-1 text-center border-b-2 border-b-yellow-600/50 w-[40px] md:w-[3%] bg-gray-600">Qty</th>
+              <th className="border border-gray-600 px-1 py-1 text-right border-b-2 border-b-yellow-600/50 w-[70px] md:w-[6%] bg-gray-600">Total</th>
+              <th className="border border-gray-600 px-1 py-1 text-right w-[60px] md:w-[5%] bg-gray-700">Satuan</th>
+              <th className="border border-gray-600 px-1 py-1 text-left w-[60px] md:w-[5%] bg-gray-700">No. Pesanan</th>
+              <th className="border border-gray-600 px-1 py-1 text-center w-[35px] md:w-[2%] bg-gray-700">#</th>
             </tr>
           </thead>
           <tbody className="bg-gray-900 text-gray-300">
@@ -1021,17 +1010,21 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                   </td>
 
                   {/* RESI (READONLY) */}
-                  <td className="border border-gray-600 px-1 py-1 text-[11px]">
-                    <div className="flex items-center justify-between gap-1">
-                        <span className="font-mono text-blue-300 select-all truncate flex-1" title={row.resi}>{row.resi}</span>
-                        {row.resi && row.no_pesanan && row.resi === row.no_pesanan && (
-                            <span className="flex-shrink-0 px-1 py-0.5 rounded bg-purple-600 text-white text-[8px] font-bold cursor-help" title="Resi hasil override dari No. Pesanan (Instant/Sameday)">INSTANT</span>
-                        )}
-                    </div>
+                  <td className="border border-gray-600 px-1 py-1 font-mono text-blue-300 select-all truncate text-[11px]" title={row.resi}>
+                    {row.resi}
                   </td>
 
                   {/* ECOMM & TOKO (FROM UPLOAD/DB) */}
-                  <td className="border border-gray-600 px-1 text-center text-[11px]">{row.ecommerce}</td>
+                  <td className="border border-gray-600 px-1 text-center text-[11px]">
+                    <div className="flex flex-col items-center gap-0.5">
+                      <span>{row.ecommerce}</span>
+                      {/* Badge INSTANT di bawah ecommerce jika resi === no_pesanan (kecuali RESELLER dan EKSPOR) */}
+                      {row.resi && row.no_pesanan && row.resi === row.no_pesanan && 
+                       row.ecommerce !== 'RESELLER' && !row.ecommerce?.startsWith('EKSPOR') && (
+                        <span className="px-1 py-0.5 bg-orange-500 text-white text-[8px] font-bold rounded">INSTANT</span>
+                      )}
+                    </div>
+                  </td>
                   <td className="border border-gray-600 px-1 text-center text-[11px]">{row.sub_toko}</td>
 
                   {/* CUSTOMER (INPUT) */}

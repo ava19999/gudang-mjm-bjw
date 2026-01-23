@@ -50,12 +50,28 @@ export const OrderManagement: React.FC = () => {
     const loadInventory = async () => {
       setInventoryLoading(true);
       try {
-        console.log(`=== LOADING INVENTORY FOR ${selectedStore.toUpperCase()} ===`);
-        // Ambil inventory sesuai toko yang dipilih agar saran part number sesuai base masing-masing
-        const data = await fetchInventory(selectedStore);
+        console.log('=== LOADING INVENTORY ===');
+        const [invMjm, invBjw] = await Promise.all([
+          fetchInventory('mjm'),
+          fetchInventory('bjw')
+        ]);
         
-        console.log(`${selectedStore.toUpperCase()} items:`, data?.length || 0);
-        setInventory(data || []);
+        console.log('MJM items:', invMjm?.length || 0);
+        console.log('BJW items:', invBjw?.length || 0);
+        
+        // Log sample dari setiap toko
+        if (invMjm?.length > 0) {
+          console.log('Sample MJM:', invMjm[0]);
+        }
+        if (invBjw?.length > 0) {
+          console.log('Sample BJW:', invBjw[0]);
+        }
+        
+        // Gabungkan semua
+        const all = [...(invMjm || []), ...(invBjw || [])];
+        console.log('Total inventory:', all.length);
+        
+        setInventory(all);
       } catch (err) {
         console.error("Error fetching inventory:", err);
       } finally {
@@ -64,7 +80,7 @@ export const OrderManagement: React.FC = () => {
     };
     
     loadInventory();
-  }, [selectedStore]); // Reload saat ganti toko
+  }, []); // Load sekali saat mount
 
   // Update selectedItem when partNumber changes
   useEffect(() => {
@@ -96,7 +112,7 @@ export const OrderManagement: React.FC = () => {
   const groupedOfflineOrders = useMemo(() => {
     const groups: Record<string, { id: string, customer: string, tempo: string, date: string, items: OfflineOrderRow[], totalAmount: number }> = {};
     offlineData.forEach(item => {
-      const safeCustomer = (item.customer || 'Tanpa Nama').trim().toUpperCase();
+      const safeCustomer = (item.customer || 'Tanpa Nama').trim();
       const safeTempo = (item.tempo || 'CASH').trim();
       const key = `${safeCustomer}-${safeTempo}`;
       if (!groups[key]) {
@@ -218,10 +234,7 @@ export const OrderManagement: React.FC = () => {
       (item.customer || '').toLowerCase().includes(lower) ||
       (item.nama_barang || item.name || '').toLowerCase().includes(lower) ||
       (item.resi || '').toLowerCase().includes(lower) ||
-      (item.part_number || '').toLowerCase().includes(lower) ||
-      (item.ecommerce || '').toLowerCase().includes(lower) ||
-      (item.toko || '').toLowerCase().includes(lower) ||
-      (item.tempo || '').toLowerCase().includes(lower)
+      (item.part_number || '').toLowerCase().includes(lower)
     );
   };
 
@@ -268,7 +281,7 @@ export const OrderManagement: React.FC = () => {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
           <input 
             type="text" 
-            placeholder="Cari Customer, Barang, Resi, Part No, E-comm..." 
+            placeholder="Cari Customer, Barang, Resi..." 
             className="w-full pl-10 pr-4 py-3 bg-gray-800 border border-gray-700 rounded-xl text-sm focus:ring-2 focus:ring-purple-500 outline-none text-white placeholder-gray-500"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
