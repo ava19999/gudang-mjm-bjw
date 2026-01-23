@@ -9,6 +9,11 @@ interface LoginPageProps {
   onBack: () => void;
 }
 
+const ALLOWED_ADMINS = [
+  "Anan", "Agung", "A'A", "Mas Rudi", "Rifat", 
+  "Taqim", "Bryan", "Tion", "Teguh", "Ikbar", "Ava", "BOS"
+];
+
 export const LoginPage: React.FC<LoginPageProps> = ({ store, onLogin, onBack }) => {
   const [mode, setMode] = useState<'guest' | 'admin'>('guest');
   const [name, setName] = useState('');
@@ -29,18 +34,39 @@ export const LoginPage: React.FC<LoginPageProps> = ({ store, onLogin, onBack }) 
       return;
     }
 
+    let loginName = name.trim();
+    const matchedAdmin = ALLOWED_ADMINS.find(admin => admin.toLowerCase() === loginName.toLowerCase());
+
+    // Jika user mencoba masuk sebagai Pengunjung dengan nama Admin, tolak dan arahkan ke mode Admin
+    if (mode === 'guest' && matchedAdmin) {
+      setError('Nama ini terdaftar sebagai Admin. Silakan masuk sebagai Admin.');
+      return;
+    }
+
     if (mode === 'admin') {
       if (!password) {
         setError('Password harus diisi untuk Admin');
         return;
       }
-      if (password !== storeConfig.adminPassword) {
+
+      if (!matchedAdmin) {
+        setError('ID Admin tidak terdaftar');
+        return;
+      }
+
+      const expectedPassword = matchedAdmin === 'BOS' ? 'BOS86' : `${matchedAdmin}1`;
+      const inputPassword = password.trim();
+
+      // Validasi password: case-insensitive (huruf besar/kecil tidak masalah)
+      if (inputPassword !== expectedPassword && inputPassword.toLowerCase() !== expectedPassword.toLowerCase()) {
         setError('Password salah');
         return;
       }
+
+      loginName = matchedAdmin;
     }
 
-    onLogin(mode, name.trim(), password);
+    onLogin(mode, loginName, password);
   };
 
   return (
