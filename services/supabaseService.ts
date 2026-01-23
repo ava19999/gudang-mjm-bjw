@@ -74,7 +74,6 @@ const mapItemFromDB = (item: any, photoData?: any): InventoryItem => {
     price: 0, 
     costPrice: 0, 
     imageUrl: finalImages[0] || item.image_url || '',
-    image_url: finalImages[0] || item.image_url || '',
     images: finalImages,
     ecommerce: '', 
     initialStock: 0, 
@@ -125,23 +124,9 @@ const fetchPhotosForItems = async (items: any[]) => {
   const partNumbers = items.map(i => i.part_number || i.partNumber).filter(Boolean);
   if (partNumbers.length === 0) return {};
   try {
-    // Batching request to avoid URL length limit
-    const batchSize = 100;
-    const batches = [];
-    for (let i = 0; i < partNumbers.length; i += batchSize) {
-      batches.push(partNumbers.slice(i, i + batchSize));
-    }
-
-    const results = await Promise.all(batches.map(batch => 
-      supabase.from('foto').select('*').in('part_number', batch)
-    ));
-
+    const { data } = await supabase.from('foto').select('*').in('part_number', partNumbers);
     const photoMap: Record<string, any> = {};
-    results.forEach(res => {
-      if (res.data) {
-        res.data.forEach((row: any) => { if (row.part_number) photoMap[row.part_number] = row; });
-      }
-    });
+    (data || []).forEach((row: any) => { if (row.part_number) photoMap[row.part_number] = row; });
     return photoMap;
   } catch (e) { return {}; }
 };
@@ -200,11 +185,50 @@ export const fetchInventoryPaginated = async (store: string | null, page: number
 };
 
 export const fetchInventoryStats = async (store: string | null): Promise<any> => {
-  const items = await fetchInventory(store); 
+  const table = getTableName(store);
+  
+  // 1. Get total items and total stock from inventory
+  const { data: items, error } = await supabase.from(table).select('quantity, part_number');
+  if (error || !items) return { totalItems: 0, totalStock: 0, totalAsset: 0, todayIn: 0, todayOut: 0 };
+  
   const totalItems = items.length;
-  const totalValue = items.reduce((acc, item) => acc + (item.price * item.quantity), 0);
-  const lowStock = items.filter(item => item.quantity < 5).length; 
-  return { totalItems, totalValue, lowStock };
+  const totalStock = items.reduce((acc, item) => acc + (Number(item.quantity) || 0), 0);
+  
+  // 2. Get today's start timestamp (WIB timezone)
+  const now = new Date();
+  const wibOffset = 7 * 60; // WIB = UTC+7
+  const localOffset = now.getTimezoneOffset();
+  const wibNow = new Date(now.getTime() + (localOffset + wibOffset) * 60000);
+  const startOfDayWIB = new Date(wibNow.getFullYear(), wibNow.getMonth(), wibNow.getDate(), 0, 0, 0, 0);
+  // Convert back to UTC for database query
+  const startOfDayUTC = new Date(startOfDayWIB.getTime() - (localOffset + wibOffset) * 60000);
+  const todayStart = startOfDayUTC.toISOString();
+  
+  // 3. Get today's incoming qty from barang_masuk
+  const inTable = getLogTableName('barang_masuk', store);
+  const { data: inData } = await supabase
+    .from(inTable)
+    .select('qty_masuk')
+    .gte('created_at', todayStart);
+  const todayIn = (inData || []).reduce((acc, row) => acc + (Number(row.qty_masuk) || 0), 0);
+  
+  // 4. Get today's outgoing qty from barang_keluar
+  const outTable = getLogTableName('barang_keluar', store);
+  const { data: outData } = await supabase
+    .from(outTable)
+    .select('qty_keluar')
+    .gte('created_at', todayStart);
+  const todayOut = (outData || []).reduce((acc, row) => acc + (Number(row.qty_keluar) || 0), 0);
+  
+  // 5. Calculate total asset (need prices)
+  const priceMap = await fetchLatestPricesForItems(items, store);
+  const totalAsset = items.reduce((acc, item) => {
+    const pk = (item.part_number || '').trim();
+    const price = priceMap[pk]?.harga || 0;
+    return acc + (price * (Number(item.quantity) || 0));
+  }, 0);
+  
+  return { totalItems, totalStock, totalAsset, todayIn, todayOut };
 };
 
 export const fetchInventoryAllFiltered = async (store: string | null, filters?: any): Promise<InventoryItem[]> => {
@@ -733,7 +757,97 @@ export const deleteBarangLog = async (
 
 export const fetchHistory = async () => [];
 export const fetchItemHistory = async () => [];
-export const fetchHistoryLogsPaginated = async () => ({ data: [], total: 0 });
+
+// FETCH HISTORY LOGS PAGINATED - untuk modal detail Masuk/Keluar di Dashboard
+export const fetchHistoryLogsPaginated = async (
+  type: 'in' | 'out',
+  page: number = 1,
+  perPage: number = 50,
+  search: string = '',
+  store?: string | null
+): Promise<{ data: any[]; count: number }> => {
+  // Determine store from context if not provided
+  const effectiveStore = store || 'mjm';
+  const tableName = type === 'in' 
+    ? getLogTableName('barang_masuk', effectiveStore)
+    : getLogTableName('barang_keluar', effectiveStore);
+  
+  try {
+    // Build query
+    let query = supabase
+      .from(tableName)
+      .select('*', { count: 'exact' });
+    
+    // Add search filter if provided
+    if (search && search.trim()) {
+      const searchTerm = `%${search.trim()}%`;
+      if (type === 'in') {
+        query = query.or(`nama_barang.ilike.${searchTerm},part_number.ilike.${searchTerm},customer.ilike.${searchTerm}`);
+      } else {
+        query = query.or(`name.ilike.${searchTerm},part_number.ilike.${searchTerm},customer.ilike.${searchTerm},resi.ilike.${searchTerm}`);
+      }
+    }
+    
+    // Order by created_at desc and apply pagination
+    const start = (page - 1) * perPage;
+    query = query
+      .order('created_at', { ascending: false })
+      .range(start, start + perPage - 1);
+    
+    const { data, error, count } = await query;
+    
+    if (error) {
+      console.error('fetchHistoryLogsPaginated Error:', error);
+      return { data: [], count: 0 };
+    }
+    
+    // Map data ke format StockHistory yang dipakai HistoryTable
+    const mappedData = (data || []).map((row: any) => {
+      const isIn = type === 'in';
+      const ecommerce = row.ecommerce || '-';
+      const customer = row.customer || '-';
+      const resi = row.resi || '-';
+      const toko = row.kode_toko || row.toko || '-';
+      
+      // Build reason string that parseHistoryReason can understand
+      let reasonParts: string[] = [];
+      if (customer !== '-') reasonParts.push(customer);
+      if (resi !== '-') reasonParts.push(`(Resi: ${resi})`);
+      if (ecommerce !== '-') reasonParts.push(`(Via: ${ecommerce})`);
+      if (isIn && row.tempo === 'RETUR') reasonParts.push('(RETUR)');
+      const reason = reasonParts.join(' ') || (isIn ? 'Restock' : 'Penjualan');
+      
+      // Build tempo with toko info for subInfo
+      let tempoVal = row.tempo || '-';
+      if (resi !== '-' && toko !== '-') {
+        tempoVal = `${resi}/${toko}`;
+      }
+      
+      return {
+        id: row.id?.toString() || '',
+        itemId: row.part_number || '',
+        partNumber: row.part_number || '',
+        name: isIn ? (row.nama_barang || '') : (row.name || ''),
+        type: type,
+        quantity: isIn ? (row.qty_masuk || 0) : (row.qty_keluar || 0),
+        previousStock: 0,
+        currentStock: isIn ? (row.stok_akhir || 0) : (row.stock_ahir || 0),
+        price: row.harga_satuan || 0,
+        totalPrice: row.harga_total || 0,
+        timestamp: row.created_at ? new Date(row.created_at).getTime() : null,
+        reason: reason,
+        resi: resi,
+        tempo: tempoVal,
+        customer: customer
+      };
+    });
+    
+    return { data: mappedData, count: count || 0 };
+  } catch (e) {
+    console.error('fetchHistoryLogsPaginated Exception:', e);
+    return { data: [], count: 0 };
+  }
+};
 export const addBarangMasuk = async () => {};
 export const addBarangKeluar = async () => {};
 export const fetchBarangMasuk = async () => [];

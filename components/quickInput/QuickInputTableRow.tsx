@@ -20,11 +20,12 @@ interface QuickInputTableRowProps {
     highlightedIndex: number;
     onSearchKeyDown: (e: React.KeyboardEvent, id: number) => void;
     onGridKeyDown: (e: React.KeyboardEvent, globalRefIndex: number) => void;
+    mode: 'in' | 'out'; // Add mode prop
 }
 
 export const QuickInputTableRow: React.FC<QuickInputTableRowProps> = ({
     row, index, globalIndex, activeSearchIndex, suggestions, inputRefs,
-    onPartNumberChange, onSelectItem, onUpdateRow, onRemoveRow, highlightedIndex, onSearchKeyDown, onGridKeyDown
+    onPartNumberChange, onSelectItem, onUpdateRow, onRemoveRow, highlightedIndex, onSearchKeyDown, onGridKeyDown, mode
 }) => {
     const isComplete = checkIsRowComplete(row);
     const activeItemRef = useRef<HTMLDivElement>(null);
@@ -39,18 +40,29 @@ export const QuickInputTableRow: React.FC<QuickInputTableRowProps> = ({
 
     // --- CALCULATION LOGIC ---
     
-    // When Qty Keluar changes -> recalculate Harga Satuan
-    const handleQtyKeluarChange = (valStr: string) => {
+    // Get current qty based on mode
+    const currentQty = mode === 'in' ? row.qtyMasuk : row.qtyKeluar;
+    
+    // When Qty changes -> recalculate Harga Satuan
+    const handleQtyChange = (valStr: string) => {
         const cleanVal = valStr.replace(/[^0-9]/g, '');
         const newQty = cleanVal === '' ? 0 : parseInt(cleanVal, 10);
         
         const currentTotal = row.totalHarga || 0;
         const newUnitPrice = newQty > 0 ? (currentTotal / newQty) : 0;
 
-        onUpdateRow(row.id, {
-            qtyKeluar: newQty,
-            hargaSatuan: newUnitPrice
-        });
+        // Update the correct field based on mode
+        if (mode === 'in') {
+            onUpdateRow(row.id, {
+                qtyMasuk: newQty,
+                hargaSatuan: newUnitPrice
+            });
+        } else {
+            onUpdateRow(row.id, {
+                qtyKeluar: newQty,
+                hargaSatuan: newUnitPrice
+            });
+        }
     };
 
     // When Total Harga changes -> recalculate Harga Satuan
@@ -58,15 +70,15 @@ export const QuickInputTableRow: React.FC<QuickInputTableRowProps> = ({
         const cleanVal = valStr.replace(/[^0-9]/g, '');
         const newTotal = cleanVal === '' ? 0 : parseInt(cleanVal, 10);
         
-        // Only calculate if qtyKeluar > 0 to avoid division by zero
-        if (row.qtyKeluar > 0) {
-            const newUnitPrice = newTotal / row.qtyKeluar;
+        // Only calculate if qty > 0 to avoid division by zero
+        if (currentQty > 0) {
+            const newUnitPrice = newTotal / currentQty;
             onUpdateRow(row.id, {
                 totalHarga: newTotal,
                 hargaSatuan: newUnitPrice
             });
         } else {
-            // If qtyKeluar is 0, just update totalHarga
+            // If qty is 0, just update totalHarga
             onUpdateRow(row.id, {
                 totalHarga: newTotal,
                 hargaSatuan: 0
@@ -173,15 +185,15 @@ export const QuickInputTableRow: React.FC<QuickInputTableRowProps> = ({
                     </div>
                 </td>
 
-                {/* COL 4: Qty Keluar */}
+                {/* COL 4: Qty (Masuk/Keluar based on mode) */}
                 <td className="px-2 py-1.5">
                     <input
                         ref={el => { inputRefs.current[baseRefIndex + 4] = el; }}
                         type="text"
                         inputMode="numeric"
                         className="w-full bg-transparent px-1 py-1 text-xs font-bold text-right font-mono text-green-400 focus:outline-none focus:text-green-300 placeholder-gray-600"
-                        value={row.qtyKeluar || ''}
-                        onChange={(e) => handleQtyKeluarChange(e.target.value)}
+                        value={currentQty || ''}
+                        onChange={(e) => handleQtyChange(e.target.value)}
                         onKeyDown={(e) => onGridKeyDown(e, baseRefIndex + 4)}
                         placeholder="0"
                     />

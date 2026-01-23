@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { InventoryItem, Order, StockHistory } from '../types';
 // Pastikan import ini sesuai
-import { fetchInventoryPaginated, fetchInventoryStats, fetchInventoryAllFiltered, fetchInventory } from '../services/supabaseService';
+import { fetchInventoryPaginated, fetchInventoryStats, fetchInventoryAllFiltered } from '../services/supabaseService';
 import { ItemForm } from './ItemForm';
 import { DashboardStats } from './DashboardStats';
 import { DashboardFilterBar } from './DashboardFilterBar';
@@ -35,12 +35,15 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   
-  // Filter States
-  const [searchTerm, setSearchTerm] = useState('');
-  const [debouncedSearch, setDebouncedSearch] = useState('');
+  // Filter States (now with dropdowns)
+  const [partNumber, setPartNumber] = useState('');
+  const [nameSearch, setNameSearch] = useState('');
   const [brandSearch, setBrandSearch] = useState('');
-  const [debouncedBrand, setDebouncedBrand] = useState('');
   const [appSearch, setAppSearch] = useState('');
+  // Debounced for server fetch
+  const [debouncedPartNumber, setDebouncedPartNumber] = useState('');
+  const [debouncedName, setDebouncedName] = useState('');
+  const [debouncedBrand, setDebouncedBrand] = useState('');
   const [debouncedApp, setDebouncedApp] = useState('');
   const [filterType, setFilterType] = useState<'all' | 'low' | 'empty'>('all');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
@@ -57,114 +60,96 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   // --- EFFECTS ---
   useEffect(() => {
-    const timer = setTimeout(() => { 
-        setDebouncedSearch(searchTerm); 
-        setDebouncedBrand(brandSearch);
-        setDebouncedApp(appSearch);
+    const timer = setTimeout(() => {
+      setDebouncedPartNumber(partNumber);
+      setDebouncedName(nameSearch);
+      setDebouncedBrand(brandSearch);
+      setDebouncedApp(appSearch);
     }, 500);
     return () => clearTimeout(timer);
-  }, [searchTerm, brandSearch, appSearch]);
+  }, [partNumber, nameSearch, brandSearch, appSearch]);
 
   // Reset page when filters or sort changes
   useEffect(() => {
     setPage(1);
-  }, [debouncedSearch, filterType, debouncedBrand, debouncedApp, priceSort]);
+  }, [debouncedPartNumber, debouncedName, filterType, debouncedBrand, debouncedApp, priceSort]);
 
   // --- DATA LOADING (BAGIAN YANG DIPERBAIKI) ---
   const loadData = useCallback(async () => {
     setLoading(true);
-
+    // Kita bungkus filter jadi satu objek
+    const filters = {
+      partNumber: debouncedPartNumber,
+      name: debouncedName,
+      brand: debouncedBrand,
+      app: debouncedApp,
+      type: filterType
+    };
     try {
-        // PERBAIKAN: Menggunakan strategi Client-Side Filtering (seperti di Tab Beranda/OrderManagement)
-        // Ini memastikan filter Aplikasi berfungsi karena backend mungkin tidak mendukung filter tersebut secara native.
-        const allData = await fetchInventory(selectedStore);
-        
-        let filtered = allData || [];
-
-        // 1. Filter Search (Nama / Part Number)
-        if (debouncedSearch) {
-            const lower = debouncedSearch.toLowerCase();
-            filtered = filtered.filter(item => 
-                (item.name || '').toLowerCase().includes(lower) || 
-                (item.partNumber || '').toLowerCase().includes(lower)
-            );
-        }
-
-        // 2. Filter Brand
-        if (debouncedBrand) {
-            const lower = debouncedBrand.toLowerCase();
-            filtered = filtered.filter(item => (item.brand || '').toLowerCase().includes(lower));
-        }
-
-        // 3. Filter Aplikasi (Cek field application dan aplikasi)
-        if (debouncedApp) {
-            const lower = debouncedApp.toLowerCase();
-            filtered = filtered.filter(item => 
-                (item.application || '').toLowerCase().includes(lower) ||
-                (item.aplikasi || '').toLowerCase().includes(lower)
-            );
-        }
-
-        // 4. Filter Type
-        if (filterType === 'low') {
-            filtered = filtered.filter(item => (item.quantity || 0) < 5);
-        } else if (filterType === 'empty') {
-            filtered = filtered.filter(item => (item.quantity || 0) === 0);
-        }
-
-        setAllItems(filtered);
-        setTotalPages(Math.ceil(filtered.length / 50));
-        
+      // If price sorting is active, fetch all data
+      if (priceSort !== 'none') {
+        // PERBAIKAN: Kirim store dulu, baru filters
+        const allData = await fetchInventoryAllFiltered(selectedStore, filters);
+        setAllItems(allData);
+        setTotalPages(Math.ceil(allData.length / 50));
+      } else {
+        // Otherwise, use paginated fetch
+        // PERBAIKAN: Urutan argumen disesuaikan dengan supabaseService.ts
+        // (store, page, perPage, filters)
+        const result = await fetchInventoryPaginated(selectedStore, page, 50, filters);
+        setLocalItems(result.data);
+        setAllItems([]); // Clear all items when not sorting
+        // Gunakan result.total dari service baru (sebelumnya mungkin result.count)
+        const totalCount = result.total || 0;
+        setTotalPages(Math.ceil(totalCount / 50));
+      }
     } catch (error) {
-        console.error("Gagal memuat data dashboard:", error);
+      console.error("Gagal memuat data dashboard:", error);
     }
-    
     setLoading(false);
-  }, [debouncedSearch, filterType, debouncedBrand, debouncedApp, selectedStore]);
+  }, [page, debouncedPartNumber, debouncedName, filterType, debouncedBrand, debouncedApp, priceSort, selectedStore]);
 
   const loadStats = useCallback(async () => {
-    // Bagian ini sudah benar karena fetchInventoryStats hanya butuh parameter store
+    // fetchInventoryStats sekarang sudah menghitung semua: totalItems, totalStock, totalAsset, todayIn, todayOut
     const invStats = await fetchInventoryStats(selectedStore);
-    
-    const startOfDay = new Date();
-    startOfDay.setHours(0, 0, 0, 0);
-    const todayIn = history
-      .filter(h => h.type === 'in' && h.timestamp && h.timestamp >= startOfDay.getTime())
-      .reduce((acc, h) => acc + (Number(h.quantity) || 0), 0);
-    const todayOut = history
-      .filter(h => h.type === 'out' && h.timestamp && h.timestamp >= startOfDay.getTime())
-      .reduce((acc, h) => acc + (Number(h.quantity) || 0), 0);
-
-    setStats({ ...invStats, todayIn, todayOut });
-  }, [history, selectedStore]);
+    setStats({
+      totalItems: invStats.totalItems || 0,
+      totalStock: invStats.totalStock || 0,
+      totalAsset: invStats.totalAsset || 0,
+      todayIn: invStats.todayIn || 0,
+      todayOut: invStats.todayOut || 0
+    });
+  }, [selectedStore]);
 
   useEffect(() => { loadData(); }, [loadData, refreshTrigger]);
   useEffect(() => { loadStats(); }, [loadStats, refreshTrigger]);
 
   // --- SORTING ---
   const sortedItems = useMemo(() => {
-    // Selalu gunakan allItems (hasil filter client-side)
-    const sorted = [...allItems];
+    // Determine which dataset to use
+    const itemsToSort = priceSort !== 'none' ? allItems : localItems;
     
-    if (priceSort !== 'none') {
-      sorted.sort((a, b) => {
-        const priceA = a.costPrice || a.price || 0;
-        const priceB = b.costPrice || b.price || 0;
-        
-        if (priceSort === 'asc') {
-          return priceA - priceB; // Termurah ke Termahal
-        } else {
-          return priceB - priceA; // Termahal ke Termurah
-        }
-      });
-    }
+    // Jika tidak ada sort harga, langsung return data dari server (sudah dipaginasi)
+    if (priceSort === 'none') return itemsToSort;
     
-    // Apply pagination manual
+    // Jika sort harga aktif (pakai allItems), kita sort manual di client
+    const sorted = [...itemsToSort].sort((a, b) => {
+      const priceA = a.costPrice || a.price || 0;
+      const priceB = b.costPrice || b.price || 0;
+      
+      if (priceSort === 'asc') {
+        return priceA - priceB; // Termurah ke Termahal
+      } else {
+        return priceB - priceA; // Termahal ke Termurah
+      }
+    });
+    
+    // Apply pagination manual untuk data yang disort di client
     const pageSize = 50;
     const startIdx = (page - 1) * pageSize;
     const endIdx = startIdx + pageSize;
     return sorted.slice(startIdx, endIdx);
-  }, [allItems, priceSort, page]);
+  }, [localItems, allItems, priceSort, page]);
 
   // --- HANDLERS ---
   const handleEditClick = (item: InventoryItem) => { setEditingItem(item); setShowItemForm(true); };
@@ -186,6 +171,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
       }
   };
 
+  // --- Unique options for dropdowns ---
+  const allItemsForOptions = priceSort !== 'none' ? allItems : localItems;
+  const partNumberOptions = useMemo(() => Array.from(new Set(allItemsForOptions.map(i => i.partNumber).filter(Boolean))).sort(), [allItemsForOptions]);
+  const nameOptions = useMemo(() => Array.from(new Set(allItemsForOptions.map(i => i.name).filter(Boolean))).sort(), [allItemsForOptions]);
+  const brandOptions = useMemo(() => Array.from(new Set(allItemsForOptions.map(i => i.brand).filter(Boolean))).sort(), [allItemsForOptions]);
+  const appOptions = useMemo(() => Array.from(new Set(allItemsForOptions.map(i => i.application).filter(Boolean))).sort(), [allItemsForOptions]);
+
   // --- RENDER ---
   return (
     <div className="bg-gray-900 min-h-screen pb-24 md:pb-4 font-sans text-gray-100">
@@ -198,9 +190,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
       {/* 2. FILTER BAR */}
       <DashboardFilterBar 
-        searchTerm={searchTerm} setSearchTerm={setSearchTerm}
-        brandSearch={brandSearch} setBrandSearch={setBrandSearch}
-        appSearch={appSearch} setAppSearch={setAppSearch}
+        partNumber={partNumber} setPartNumber={setPartNumber} partNumberOptions={partNumberOptions}
+        nameSearch={nameSearch} setNameSearch={setNameSearch} nameOptions={nameOptions}
+        brandSearch={brandSearch} setBrandSearch={setBrandSearch} brandOptions={brandOptions}
+        appSearch={appSearch} setAppSearch={setAppSearch} appOptions={appOptions}
         filterType={filterType} setFilterType={setFilterType}
         viewMode={viewMode} setViewMode={setViewMode}
         priceSort={priceSort} setPriceSort={setPriceSort}

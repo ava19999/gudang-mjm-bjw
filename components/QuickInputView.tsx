@@ -72,20 +72,29 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
   };
 
   const handleGridKeyDown = (e: React.KeyboardEvent, currentIndex: number) => {
-    // ... (Sama seperti sebelumnya)
+    // Skip jika ada modifier key (kecuali Shift untuk Tab)
     if (e.ctrlKey || e.altKey || e.metaKey) return;
+    
     let nextIndex = currentIndex;
     const totalInputs = rows.length * COLUMNS_COUNT;
+    const target = e.target as HTMLInputElement;
 
     switch (e.key) {
+        case 'Tab':
+            // Tab = maju, Shift+Tab = mundur
+            e.preventDefault();
+            nextIndex = e.shiftKey ? currentIndex - 1 : currentIndex + 1;
+            break;
         case 'ArrowRight':
-            if ((e.target as HTMLInputElement).selectionStart === (e.target as HTMLInputElement).value.length) {
+            // Pindah ke kanan jika cursor di akhir teks atau input kosong
+            if (target.selectionStart === target.value.length || target.value === '') {
                 e.preventDefault();
                 nextIndex = currentIndex + 1;
             }
             break;
         case 'ArrowLeft':
-            if ((e.target as HTMLInputElement).selectionStart === 0) {
+            // Pindah ke kiri jika cursor di awal teks atau input kosong
+            if (target.selectionStart === 0 || target.value === '') {
                 e.preventDefault();
                 nextIndex = currentIndex - 1;
             }
@@ -100,15 +109,21 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
             break;
         case 'Enter':
             e.preventDefault();
+            // Enter = pindah ke kolom berikutnya, atau baris berikutnya jika di kolom terakhir
             nextIndex = currentIndex + 1;
             break;
         default: return;
     }
-    if (nextIndex >= 0 && nextIndex < totalInputs) {
-        const target = inputRefs.current[nextIndex];
-        if (target) {
-            target.focus();
-            setTimeout(() => target.select(), 0); 
+    
+    // Batasi index dalam range valid
+    if (nextIndex < 0) nextIndex = 0;
+    if (nextIndex >= totalInputs) nextIndex = totalInputs - 1;
+    
+    if (nextIndex !== currentIndex && nextIndex >= 0 && nextIndex < totalInputs) {
+        const targetEl = inputRefs.current[nextIndex];
+        if (targetEl) {
+            targetEl.focus();
+            setTimeout(() => targetEl.select(), 0); 
         }
     }
   };
@@ -231,7 +246,7 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
       // 3. Siapkan Transaction Data
       const transactionData = { 
         type: mode, // 'in' or 'out'
-        qty: row.qtyKeluar, // Field di UI tetap qtyKeluar, backend membacanya sebagai qty transaksi
+        qty: row.qtyMasuk, // Gunakan qtyMasuk untuk mode 'in'
         ecommerce: row.via || '-', 
         resiTempo: row.resiTempo || '-', 
         customer: row.customer, 
@@ -241,7 +256,7 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
       };
       
       // 4. Hitung Stok Baru (hanya untuk 'in')
-      const newQuantity = existingItem.quantity + row.qtyKeluar;
+      const newQuantity = existingItem.quantity + row.qtyMasuk;
 
       // 5. Update Database
       const updatedItem = await updateInventory({
@@ -427,7 +442,7 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
           highlightedIndex={highlightedIndex}
           onSearchKeyDown={handleSearchKeyDown}
           onGridKeyDown={handleGridKeyDown}
-          
+          mode={mode}
         />
 
         <QuickInputFooter 

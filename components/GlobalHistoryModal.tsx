@@ -4,6 +4,7 @@ import { StockHistory } from '../types';
 import { fetchHistoryLogsPaginated } from '../services/supabaseService';
 import { HistoryTable } from './HistoryTable';
 import { Loader2, X, ChevronLeft, ChevronRight, TrendingUp, TrendingDown } from 'lucide-react';
+import { useStore } from '../context/StoreContext';
 
 interface GlobalHistoryModalProps {
   type: 'in' | 'out';
@@ -11,22 +12,25 @@ interface GlobalHistoryModalProps {
 }
 
 export const GlobalHistoryModal: React.FC<GlobalHistoryModalProps> = ({ type, onClose }) => {
+  const { selectedStore } = useStore();
   const [data, setData] = useState<StockHistory[]>([]);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     setLoading(true);
     const timer = setTimeout(async () => {
-      const { data, count } = await fetchHistoryLogsPaginated(type, page, 50, search);
-      setData(data);
+      const { data: result, count } = await fetchHistoryLogsPaginated(type, page, 50, search, selectedStore);
+      setData(result);
+      setTotalCount(count);
       setTotalPages(Math.ceil(count / 50));
       setLoading(false);
     }, 500);
     return () => clearTimeout(timer);
-  }, [type, page, search]);
+  }, [type, page, search, selectedStore]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm animate-in fade-in">
@@ -45,8 +49,11 @@ export const GlobalHistoryModal: React.FC<GlobalHistoryModalProps> = ({ type, on
             </div>
             <div className="p-3 border-t border-gray-700 flex justify-between items-center bg-gray-800 rounded-b-2xl">
                 <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} className="p-1 bg-gray-700 rounded disabled:opacity-30"><ChevronLeft size={18}/></button>
-                <span className="text-xs text-gray-400">Hal {page} / {totalPages}</span>
-                <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages} className="p-1 bg-gray-700 rounded disabled:opacity-30"><ChevronRight size={18}/></button>
+                <div className="text-center">
+                  <span className="text-xs text-gray-400">Hal {page} / {totalPages}</span>
+                  <span className="text-[10px] text-gray-500 ml-2">({totalCount} item)</span>
+                </div>
+                <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages || totalPages === 0} className="p-1 bg-gray-700 rounded disabled:opacity-30"><ChevronRight size={18}/></button>
             </div>
         </div>
     </div>

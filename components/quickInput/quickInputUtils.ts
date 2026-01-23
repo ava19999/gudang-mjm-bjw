@@ -18,7 +18,8 @@ export const createEmptyRow = (id: number): QuickInputRow => ({
     brand: '',
     aplikasi: '',
     qtySaatIni: 0,
-    qtyMasuk: 0, 
+    qtyMasuk: 0,
+    qtyKeluar: 0,
     totalHarga: 0,
     hargaSatuan: 0,
     hargaJual: 0,
@@ -28,13 +29,16 @@ export const createEmptyRow = (id: number): QuickInputRow => ({
 });
 
 export const checkIsRowComplete = (row: QuickInputRow) => {
-    // Required fields for Input Barang:
+    // Required fields:
     // - Tanggal (Date)
     // - Tempo (Payment terms)
     // - Customer
     // - Part Number & Nama Barang
-    // - Qty Masuk (Must be > 0)
-    // - Total Harga (Must be > 0)
+    // - Qty (Must be > 0) - qtyMasuk for 'in', qtyKeluar for 'out'
+    // - Total Harga (Boleh 0)
+    
+    // Cek qty berdasarkan mode operasi
+    const qty = row.operation === 'in' ? row.qtyMasuk : row.qtyKeluar;
     
     return (
         !!row.tanggal &&
@@ -42,7 +46,6 @@ export const checkIsRowComplete = (row: QuickInputRow) => {
         !!row.customer.trim() &&
         !!row.partNumber && 
         !!row.namaBarang && 
-        row.qtyMasuk > 0 &&
-        row.totalHarga > 0
+        qty > 0
     );
 };
