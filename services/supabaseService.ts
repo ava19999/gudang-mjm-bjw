@@ -494,7 +494,7 @@ export const fetchOnlineOrders = async (store: string | null): Promise<OnlineOrd
   return data || [];
 };
 
-// 4. FETCH SOLD ITEMS
+// 4. FETCH SOLD ITEMS (no limit, pagination handled in component)
 export const fetchSoldItems = async (store: string | null): Promise<SoldItemRow[]> => {
   const table = store === 'mjm' ? 'barang_keluar_mjm' : (store === 'bjw' ? 'barang_keluar_bjw' : null);
   if (!table) return [];
@@ -502,8 +502,7 @@ export const fetchSoldItems = async (store: string | null): Promise<SoldItemRow[
   const { data, error } = await supabase
     .from(table)
     .select('*')
-    .order('created_at', { ascending: false })
-    .limit(100);
+    .order('created_at', { ascending: false });
 
   if (error) { console.error('Fetch Sold Error:', error); return []; }
   return data || [];
@@ -871,3 +870,242 @@ export const duplicateScanResiLog = async () => {};
 export const processShipmentToOrders = async () => {};
 export const importScanResiFromExcel = async () => ({ success: true, skippedCount: 0 });
 export const saveItemImages = async (itemId: string, images: string[], store?: string | null): Promise<void> => { };
+
+// --- RETUR FUNCTIONS ---
+
+const getReturTableName = (store: string | null | undefined) => {
+  if (store === 'mjm') return 'retur_mjm';
+  if (store === 'bjw') return 'retur_bjw';
+  return 'retur_mjm';
+};
+
+// Create retur from sold item
+export const createReturFromSold = async (
+  soldItem: any,
+  tipeRetur: 'BALIK_STOK' | 'RUSAK' | 'TUKAR_SUPPLIER',
+  qty: number,
+  keterangan: string,
+  store: string | null
+): Promise<{ success: boolean; msg: string }> => {
+  const returTable = getReturTableName(store);
+  const stockTable = getTableName(store);
+  const outTable = getLogTableName('barang_keluar', store);
+  
+  // Get part_number from soldItem (field bisa 'part_number' atau lainnya)
+  const partNum = (soldItem.part_number || '').trim();
+  const namaBarang = soldItem.name || soldItem.nama_barang || '';
+  const hargaSatuan = soldItem.qty_keluar > 0 ? (soldItem.harga_total / soldItem.qty_keluar) : 0;
+  
+  console.log('createReturFromSold: Processing', {
+    part_number: partNum,
+    nama_barang: namaBarang,
+    qty_retur: qty,
+    tipe: tipeRetur
+  });
+  
+  try {
+    // 1. Insert retur record sesuai skema database retur_bjw/retur_mjm
+    const returPayload = {
+      tanggal_retur: getWIBDate().toISOString(),
+      tanggal_pemesanan: soldItem.created_at || getWIBDate().toISOString(),
+      resi: soldItem.resi || '-',
+      toko: store?.toUpperCase() || '-', // Kolom 'toko' ada di skema
+      customer: soldItem.customer || '-',
+      part_number: partNum,
+      nama_barang: namaBarang,
+      quantity: qty,
+      harga_satuan: hargaSatuan,
+      harga_total: hargaSatuan * qty,
+      tipe_retur: tipeRetur,
+      status: tipeRetur === 'BALIK_STOK' ? 'Selesai' : 'Pending',
+      keterangan: keterangan || '-',
+      ecommerce: soldItem.ecommerce || 'OFFLINE'
+    };
+    
+    console.log('createReturFromSold: Inserting retur', returPayload);
+    
+    const { error: insertError } = await supabase.from(returTable).insert([returPayload]);
+    if (insertError) throw new Error('Gagal insert retur: ' + insertError.message);
+    
+    // 2. Hapus atau kurangi qty dari barang_keluar
+    if (qty >= soldItem.qty_keluar) {
+      // Hapus seluruh record jika retur semua qty
+      await supabase.from(outTable).delete().eq('id', soldItem.id);
+    } else {
+      // Kurangi qty jika retur sebagian
+      const newQtyKeluar = soldItem.qty_keluar - qty;
+      const newHargaTotal = (soldItem.harga_total / soldItem.qty_keluar) * newQtyKeluar;
+      await supabase.from(outTable).update({
+        qty_keluar: newQtyKeluar,
+        harga_total: newHargaTotal
+      }).eq('id', soldItem.id);
+    }
+    
+    // 3. Jika BALIK_STOK, kembalikan ke inventory (base_bjw/base_mjm)
+    if (tipeRetur === 'BALIK_STOK') {
+      console.log('BALIK_STOK: Looking for part_number:', partNum, 'in table:', stockTable);
+      
+      if (!partNum) {
+        console.error('BALIK_STOK: part_number is empty!');
+        return { success: true, msg: `Retur tercatat, tapi part_number kosong!` };
+      }
+      
+      // Query dengan ilike untuk case-insensitive match
+      const { data: currentItem, error: fetchError } = await supabase
+        .from(stockTable)
+        .select('quantity, name, part_number')
+        .ilike('part_number', partNum)
+        .single();
+      
+      if (fetchError) {
+        console.error('BALIK_STOK: Error fetching item:', fetchError);
+        return { success: true, msg: `Retur tercatat, tapi gagal update stok: ${fetchError.message}` };
+      }
+      
+      if (currentItem) {
+        const newQty = (currentItem.quantity || 0) + qty;
+        console.log('BALIK_STOK: Updating quantity from', currentItem.quantity, 'to', newQty);
+        
+        // Use the actual part_number from database to ensure exact match
+        const actualPartNumber = currentItem.part_number || partNum;
+        
+        // Note: base_bjw/base_mjm hanya punya kolom: part_number, name, application, quantity, shelf, brand, created_at
+        const { error: updateError } = await supabase
+          .from(stockTable)
+          .update({ quantity: newQty })
+          .eq('part_number', actualPartNumber);
+        
+        if (updateError) {
+          console.error('BALIK_STOK: Error updating stock:', updateError);
+          return { success: true, msg: `Retur tercatat, tapi gagal update stok: ${updateError.message}` };
+        }
+        
+        // Log to barang_masuk sesuai skema: part_number, nama_barang, qty_masuk, harga_satuan, harga_total, customer, ecommerce, tempo, stok_akhir
+        const inTable = getLogTableName('barang_masuk', store);
+        await supabase.from(inTable).insert([{
+          part_number: actualPartNumber,
+          nama_barang: namaBarang || currentItem.name || '',
+          qty_masuk: qty,
+          stok_akhir: newQty,
+          harga_satuan: hargaSatuan,
+          harga_total: hargaSatuan * qty,
+          customer: soldItem.customer || '-',
+          tempo: 'RETUR',
+          ecommerce: soldItem.ecommerce || 'OFFLINE'
+        }]);
+        
+        return { success: true, msg: `Barang dikembalikan ke stok (+${qty}), total: ${newQty}` };
+      } else {
+        console.error('BALIK_STOK: Item not found for part_number:', partNum);
+        return { success: true, msg: `Retur tercatat, tapi item tidak ditemukan di inventory` };
+      }
+    }
+    
+    // 4. Jika RUSAK, tidak ada aksi stok
+    if (tipeRetur === 'RUSAK') {
+      return { success: true, msg: `Retur rusak tercatat (tidak balik stok)` };
+    }
+    
+    // 5. Jika TUKAR_SUPPLIER, pending sampai dikonfirmasi
+    if (tipeRetur === 'TUKAR_SUPPLIER') {
+      return { success: true, msg: `Retur dikirim ke supplier (menunggu penukaran)` };
+    }
+    
+    return { success: true, msg: 'Retur berhasil' };
+  } catch (e: any) {
+    console.error('createReturFromSold Error:', e);
+    return { success: false, msg: e.message || 'Gagal proses retur' };
+  }
+};
+
+// Update retur status (for TUKAR_SUPPLIER when exchanged)
+export const updateReturStatus = async (
+  returId: number,
+  newStatus: string,
+  store: string | null
+): Promise<{ success: boolean; msg: string }> => {
+  const returTable = getReturTableName(store);
+  const stockTable = getTableName(store);
+  
+  try {
+    // Get retur data first
+    const { data: returData, error: fetchError } = await supabase
+      .from(returTable)
+      .select('*')
+      .eq('id', returId)
+      .single();
+    
+    if (fetchError || !returData) {
+      return { success: false, msg: 'Retur tidak ditemukan' };
+    }
+    
+    // Update status
+    const { error: updateError } = await supabase
+      .from(returTable)
+      .update({ status: newStatus })
+      .eq('id', returId);
+    
+    if (updateError) throw new Error('Gagal update status: ' + updateError.message);
+    
+    // If "Sudah Ditukar", return item to stock
+    if (newStatus === 'Sudah Ditukar' && returData.tipe_retur === 'TUKAR_SUPPLIER') {
+      const partNum = (returData.part_number || '').trim();
+      console.log('TUKAR_SUPPLIER: Looking for part_number:', partNum, 'in table:', stockTable);
+      
+      if (!partNum) {
+        return { success: true, msg: `Status diupdate, tapi part_number kosong!` };
+      }
+      
+      // Cari item berdasarkan part_number (case-insensitive) - base table punya kolom: name bukan nama_barang
+      const { data: currentItem, error: itemError } = await supabase
+        .from(stockTable)
+        .select('quantity, name, part_number')
+        .ilike('part_number', partNum)
+        .single();
+      
+      if (itemError) {
+        console.error('Error finding item:', itemError);
+        return { success: true, msg: `Status diupdate, tapi gagal update stok: ${itemError.message}` };
+      }
+      
+      if (currentItem) {
+        const newQty = (currentItem.quantity || 0) + (returData.quantity || 0);
+        const actualPartNumber = currentItem.part_number || partNum;
+        
+        console.log('TUKAR_SUPPLIER: Updating quantity from', currentItem.quantity, 'to', newQty);
+        
+        // Update quantity di base table (tidak ada kolom last_updated di skema)
+        const { error: updateStockError } = await supabase
+          .from(stockTable)
+          .update({ quantity: newQty })
+          .eq('part_number', actualPartNumber);
+        
+        if (updateStockError) {
+          console.error('Error updating stock:', updateStockError);
+          return { success: true, msg: `Status diupdate, tapi gagal update stok: ${updateStockError.message}` };
+        }
+        
+        // Log to barang_masuk sesuai skema
+        const inTable = getLogTableName('barang_masuk', store);
+        await supabase.from(inTable).insert([{
+          part_number: actualPartNumber,
+          nama_barang: returData.nama_barang || currentItem.name || '',
+          qty_masuk: returData.quantity,
+          stok_akhir: newQty,
+          harga_satuan: returData.harga_satuan || 0,
+          harga_total: returData.harga_total || 0,
+          customer: 'TUKAR SUPPLIER',
+          tempo: 'RETUR',
+          ecommerce: returData.ecommerce || '-'
+        }]);
+        
+        return { success: true, msg: `Stok dikembalikan (+${returData.quantity}), total: ${newQty}` };
+      }
+    }
+    
+    return { success: true, msg: 'Status retur diupdate' };
+  } catch (e: any) {
+    console.error('updateReturStatus Error:', e);
+    return { success: false, msg: e.message || 'Gagal update status' };
+  }
+};

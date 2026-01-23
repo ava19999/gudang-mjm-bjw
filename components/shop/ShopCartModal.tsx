@@ -48,7 +48,7 @@ export const ShopCartModal: React.FC<ShopCartModalProps> = ({
 
                             <div className="flex items-center justify-between pt-2 border-t border-gray-700">
                                 <div className="flex items-center gap-2 bg-gray-700 rounded-lg p-1">
-                                    <button onClick={() => onUpdateCartItem(item.id, { cartQuantity: Math.max(1, item.cartQuantity - 1) })} className="w-6 h-6 flex items-center justify-center bg-gray-600 rounded text-gray-300 shadow-sm hover:bg-gray-500 active:scale-95"><Minus size={12}/></button>
+                                    <button onClick={() => onUpdateCartItem(item.id, { cartQuantity: Math.max(0, item.cartQuantity - 1) })} className="w-6 h-6 flex items-center justify-center bg-gray-600 rounded text-gray-300 shadow-sm hover:bg-gray-500 active:scale-95"><Minus size={12}/></button>
                                     <span className="text-xs font-bold w-4 text-center text-gray-200">{item.cartQuantity}</span>
                                     <button onClick={() => onUpdateCartItem(item.id, { cartQuantity: item.cartQuantity + 1 })} className="w-6 h-6 flex items-center justify-center bg-gray-600 rounded text-gray-300 shadow-sm hover:bg-gray-500 active:scale-95"><Plus size={12}/></button>
                                 </div>

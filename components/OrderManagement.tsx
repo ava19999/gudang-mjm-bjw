@@ -5,12 +5,13 @@ import TextField from '@mui/material/TextField';
 import { useStore } from '../context/StoreContext';
 import { 
   fetchOfflineOrders, fetchSoldItems, fetchReturItems,
-  processOfflineOrderItem, updateOfflineOrder, fetchInventory
+  processOfflineOrderItem, updateOfflineOrder, fetchInventory, createReturFromSold, updateReturStatus
 } from '../services/supabaseService';
 import { OfflineOrderRow, SoldItemRow, ReturRow } from '../types';
 import { 
   ClipboardList, CheckCircle, RotateCcw, Search, RefreshCw, Box, Check, X, 
-  ChevronDown, ChevronUp, Layers, User, Pencil, Save, XCircle
+  ChevronDown, ChevronUp, Layers, User, Pencil, Save, XCircle, Trash2, ChevronLeft, ChevronRight,
+  PackageX, RotateCw, ArrowLeftRight, Package
 } from 'lucide-react';
 
 // Toast Component Sederhana
@@ -20,6 +21,115 @@ const Toast = ({ msg, type, onClose }: any) => (
     <button onClick={onClose} className="ml-3 opacity-70 hover:opacity-100"><X size={14}/></button>
   </div>
 );
+
+// Retur Modal Component
+interface ReturModalProps {
+  isOpen: boolean;
+  item: SoldItemRow | null;
+  onClose: () => void;
+  onConfirm: (item: SoldItemRow, tipeRetur: 'BALIK_STOK' | 'RUSAK' | 'TUKAR_SUPPLIER', qty: number, keterangan: string) => void;
+}
+
+const ReturModal: React.FC<ReturModalProps> = ({ isOpen, item, onClose, onConfirm }) => {
+  const [tipeRetur, setTipeRetur] = useState<'BALIK_STOK' | 'RUSAK' | 'TUKAR_SUPPLIER'>('BALIK_STOK');
+  const [qty, setQty] = useState(1);
+  const [keterangan, setKeterangan] = useState('');
+
+  useEffect(() => {
+    if (item) {
+      setQty(item.qty_keluar);
+      setTipeRetur('BALIK_STOK');
+      setKeterangan('');
+    }
+  }, [item]);
+
+  if (!isOpen || !item) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div className="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-md shadow-2xl">
+        <div className="p-4 border-b border-gray-700 flex justify-between items-center">
+          <h3 className="font-bold text-white flex items-center gap-2">
+            <RotateCcw className="text-red-400" size={20}/> Proses Retur
+          </h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-white"><X size={20}/></button>
+        </div>
+
+        <div className="p-4 space-y-4">
+          {/* Info Barang */}
+          <div className="bg-gray-800 p-3 rounded-lg border border-gray-700">
+            <p className="font-bold text-white">{item.name}</p>
+            <p className="text-xs text-gray-400">Part: {item.part_number}</p>
+            <p className="text-xs text-gray-500">Customer: {item.customer}</p>
+          </div>
+
+          {/* Qty Retur */}
+          <div>
+            <label className="block text-sm text-gray-400 mb-1">Jumlah Retur</label>
+            <input
+              type="number"
+              min={1}
+              max={item.qty_keluar}
+              value={qty}
+              onChange={(e) => setQty(Math.min(item.qty_keluar, Math.max(1, Number(e.target.value))))}
+              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white"
+            />
+            <p className="text-[10px] text-gray-500 mt-1">Max: {item.qty_keluar} pcs</p>
+          </div>
+
+          {/* Tipe Retur */}
+          <div>
+            <label className="block text-sm text-gray-400 mb-2">Tipe Retur</label>
+            <div className="space-y-2">
+              <label className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-all ${tipeRetur === 'BALIK_STOK' ? 'bg-green-900/30 border-green-600' : 'bg-gray-800 border-gray-700 hover:border-gray-600'}`}>
+                <input type="radio" name="tipeRetur" checked={tipeRetur === 'BALIK_STOK'} onChange={() => setTipeRetur('BALIK_STOK')} className="hidden"/>
+                <RotateCw size={20} className="text-green-400"/>
+                <div>
+                  <p className="font-bold text-white text-sm">Balik Stok</p>
+                  <p className="text-[10px] text-gray-400">Barang kembali ke stok gudang</p>
+                </div>
+              </label>
+
+              <label className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-all ${tipeRetur === 'RUSAK' ? 'bg-red-900/30 border-red-600' : 'bg-gray-800 border-gray-700 hover:border-gray-600'}`}>
+                <input type="radio" name="tipeRetur" checked={tipeRetur === 'RUSAK'} onChange={() => setTipeRetur('RUSAK')} className="hidden"/>
+                <PackageX size={20} className="text-red-400"/>
+                <div>
+                  <p className="font-bold text-white text-sm">Rusak</p>
+                  <p className="text-[10px] text-gray-400">Barang rusak, tidak balik ke stok</p>
+                </div>
+              </label>
+
+              <label className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-all ${tipeRetur === 'TUKAR_SUPPLIER' ? 'bg-orange-900/30 border-orange-600' : 'bg-gray-800 border-gray-700 hover:border-gray-600'}`}>
+                <input type="radio" name="tipeRetur" checked={tipeRetur === 'TUKAR_SUPPLIER'} onChange={() => setTipeRetur('TUKAR_SUPPLIER')} className="hidden"/>
+                <ArrowLeftRight size={20} className="text-orange-400"/>
+                <div>
+                  <p className="font-bold text-white text-sm">Tukar Supplier</p>
+                  <p className="text-[10px] text-gray-400">Dikirim ke supplier, bisa balik stok nanti</p>
+                </div>
+              </label>
+            </div>
+          </div>
+
+          {/* Keterangan */}
+          <div>
+            <label className="block text-sm text-gray-400 mb-1">Keterangan</label>
+            <textarea
+              value={keterangan}
+              onChange={(e) => setKeterangan(e.target.value)}
+              placeholder="Alasan retur..."
+              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm h-20 resize-none"
+            />
+          </div>
+        </div>
+
+        <div className="p-4 border-t border-gray-700 flex gap-2">
+          <button onClick={onClose} className="flex-1 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-600">Batal</button>
+          <button onClick={() => onConfirm(item, tipeRetur, qty, keterangan)} className="flex-1 py-2 bg-red-600 text-white rounded-lg hover:bg-red-500 font-bold">Proses Retur</button>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 export const OrderManagement: React.FC = () => {
   const { selectedStore } = useStore();
@@ -35,6 +145,14 @@ export const OrderManagement: React.FC = () => {
   const [offlineData, setOfflineData] = useState<OfflineOrderRow[]>([]);
   const [soldData, setSoldData] = useState<SoldItemRow[]>([]);
   const [returData, setReturData] = useState<ReturRow[]>([]);
+
+  // Pagination for TERJUAL
+  const [soldPage, setSoldPage] = useState(1);
+  const ITEMS_PER_PAGE = 50;
+
+  // Retur Modal
+  const [returModalOpen, setReturModalOpen] = useState(false);
+  const [selectedReturItem, setSelectedReturItem] = useState<SoldItemRow | null>(null);
 
   // State Edit
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -125,6 +243,86 @@ export const OrderManagement: React.FC = () => {
     });
     return Object.values(groups).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   }, [offlineData]);
+
+  // GROUPING SOLD DATA by Customer/Resi
+  const groupedSoldData = useMemo(() => {
+    // Filter dulu berdasarkan search
+    const filtered = soldData.filter(item => {
+      if (!searchTerm) return true;
+      const lower = searchTerm.toLowerCase();
+      return (item.customer || '').toLowerCase().includes(lower) ||
+             (item.name || '').toLowerCase().includes(lower) ||
+             (item.resi || '').toLowerCase().includes(lower) ||
+             (item.part_number || '').toLowerCase().includes(lower);
+    });
+
+    const groups: Record<string, { 
+      id: string, 
+      customer: string, 
+      resi: string, 
+      ecommerce: string, 
+      tempo: string,
+      date: string, 
+      items: SoldItemRow[], 
+      totalQty: number,
+      totalAmount: number 
+    }> = {};
+    
+    filtered.forEach(item => {
+      const safeCustomer = (item.customer || 'Tanpa Nama').trim();
+      const safeResi = (item.resi || '-').trim();
+      const safeEcommerce = (item.ecommerce || 'OFFLINE').trim();
+      // Group by resi jika ada, kalau tidak by customer + date
+      const key = safeResi !== '-' ? `${safeResi}` : `${safeCustomer}-${item.created_at?.slice(0, 10)}`;
+      
+      if (!groups[key]) {
+        groups[key] = {
+          id: key, 
+          customer: safeCustomer, 
+          resi: safeResi, 
+          ecommerce: safeEcommerce,
+          tempo: item.tempo || 'CASH',
+          date: item.created_at, 
+          items: [], 
+          totalQty: 0,
+          totalAmount: 0
+        };
+      }
+      groups[key].items.push(item);
+      groups[key].totalQty += (Number(item.qty_keluar) || 0);
+      groups[key].totalAmount += (Number(item.harga_total) || 0);
+    });
+    
+    return Object.values(groups).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  }, [soldData, searchTerm]);
+
+  // Pagination for grouped sold data
+  const paginatedSoldGroups = useMemo(() => {
+    const start = (soldPage - 1) * ITEMS_PER_PAGE;
+    return groupedSoldData.slice(start, start + ITEMS_PER_PAGE);
+  }, [groupedSoldData, soldPage]);
+
+  const soldTotalPages = Math.ceil(groupedSoldData.length / ITEMS_PER_PAGE);
+
+  // Handle Retur
+  const openReturModal = (item: SoldItemRow) => {
+    setSelectedReturItem(item);
+    setReturModalOpen(true);
+  };
+
+  const handleReturConfirm = async (item: SoldItemRow, tipeRetur: 'BALIK_STOK' | 'RUSAK' | 'TUKAR_SUPPLIER', qty: number, keterangan: string) => {
+    setLoading(true);
+    const result = await createReturFromSold(item, tipeRetur, qty, keterangan, selectedStore);
+    setLoading(false);
+    setReturModalOpen(false);
+    
+    if (result.success) {
+      showToast(`Retur berhasil diproses: ${result.msg}`);
+      loadData();
+    } else {
+      showToast(result.msg, 'error');
+    }
+  };
 
   // --- HANDLERS ---
 
@@ -506,50 +704,213 @@ export const OrderManagement: React.FC = () => {
           </div>
         )}
 
-        {/* --- 3. TAB TERJUAL & RETUR (TIDAK BERUBAH) --- */}
+        {/* --- 3. TAB TERJUAL (GROUPED VIEW dengan PAGINATION) --- */}
         {activeTab === 'TERJUAL' && (
-          <div className="space-y-2">
-            {filterList(soldData).length === 0 && <EmptyState msg="Belum ada data penjualan." />}
-            {filterList(soldData).map(item => (
-              <div key={item.id} className="bg-gray-800/50 border border-gray-700 p-3 rounded-lg flex justify-between items-center hover:bg-gray-800 transition-colors">
-                <div className="flex-1">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="text-[10px] text-gray-500">{new Date(item.created_at).toLocaleString('id-ID', {timeZone: 'Asia/Jakarta'})}</span>
-                    <span className="text-[10px] bg-gray-700 px-1.5 rounded text-gray-400">{item.ecommerce || 'OFFLINE'}</span>
+          <div className="space-y-4">
+            {paginatedSoldGroups.length === 0 && <EmptyState msg="Belum ada data penjualan." />}
+            
+            {paginatedSoldGroups.map((group) => {
+              const groupKey = group.id;
+              const isExpanded = expandedGroups[groupKey];
+
+              return (
+                <div key={groupKey} className="bg-gray-800 border border-gray-600 rounded-xl overflow-hidden hover:border-gray-500 transition-all shadow-lg">
+                  {/* GROUP HEADER */}
+                  <div className="p-4 flex flex-col md:flex-row justify-between gap-4 bg-gray-800">
+                    <div className="flex-1 cursor-pointer select-none" onClick={() => toggleExpand(groupKey)}>
+                      <div className="flex items-center gap-3 mb-2 flex-wrap">
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${group.ecommerce === 'OFFLINE' ? 'bg-gray-700 border-gray-600 text-gray-300' : 'bg-orange-900/30 border-orange-800 text-orange-400'}`}>
+                          {group.ecommerce}
+                        </span>
+                        <span className="text-[10px] font-mono bg-gray-700 px-2 py-0.5 rounded text-gray-300">
+                          {new Date(group.date).toLocaleString('id-ID', {timeZone: 'Asia/Jakarta'})}
+                        </span>
+                        <span className="text-[10px] bg-blue-900/30 text-blue-300 px-2 py-0.5 rounded border border-blue-800 flex items-center gap-1">
+                          <Layers size={10} /> {group.items.length} Item
+                        </span>
+                        {group.resi !== '-' && (
+                          <span className="text-[10px] bg-purple-900/30 text-purple-300 px-2 py-0.5 rounded border border-purple-800 font-mono">
+                            Resi: {group.resi}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {isExpanded ? <ChevronUp size={20} className="text-purple-400"/> : <ChevronDown size={20} className="text-gray-400"/>}
+                        <h3 className="font-bold text-lg text-white flex items-center gap-2">
+                          <User size={18} className="text-gray-400"/> {group.customer}
+                        </h3>
+                        <span className="text-xs text-gray-500">• {group.tempo}</span>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col items-end gap-1 border-t md:border-t-0 border-gray-700 pt-3 md:pt-0">
+                      <div className="text-right">
+                        <span className="text-gray-400 text-xs mr-2">Total:</span>
+                        <span className="text-xl font-bold text-green-400">{group.totalQty} Pcs</span>
+                      </div>
+                      <span className="text-lg font-bold font-mono text-yellow-400">{formatRupiah(group.totalAmount)}</span>
+                    </div>
                   </div>
-                  <h4 className="font-bold text-white text-sm">{item.name}</h4>
-                  <p className="text-xs text-gray-400">{item.customer} • {item.tempo}</p>
+
+                  {/* ITEM LIST */}
+                  {isExpanded && (
+                    <div className="bg-gray-900/80 border-t border-gray-700 p-2 space-y-2 animate-in slide-in-from-top-2 duration-200">
+                      {group.items.map((item, idx) => (
+                        <div key={`${item.id}-${idx}`} className="flex justify-between items-center p-3 rounded-lg border bg-gray-800 border-gray-700 hover:border-gray-600 ml-4 mr-2">
+                          <div className="flex-1">
+                            <p className="text-sm font-bold text-white">{item.name}</p>
+                            <p className="text-[10px] text-gray-500 font-mono">Part: {item.part_number}</p>
+                          </div>
+                          <div className="flex items-center gap-4">
+                            <div className="text-right">
+                              <p className="text-sm font-bold text-white">{item.qty_keluar} x {formatRupiah(item.harga_total / item.qty_keluar || 0)}</p>
+                              <p className="text-xs text-green-400 font-mono">{formatRupiah(item.harga_total)}</p>
+                            </div>
+                            <button 
+                              onClick={() => openReturModal(item)} 
+                              className="p-2 rounded bg-red-900/20 text-red-400 hover:bg-red-900/50 transition-colors" 
+                              title="Retur"
+                            >
+                              <RotateCcw size={14}/>
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
-                <div className="text-right pl-4 border-l border-gray-700">
-                  <p className="text-lg font-bold text-green-400">{item.qty_keluar}</p>
-                  <p className="text-[10px] text-gray-500">Pcs</p>
-                </div>
+              );
+            })}
+
+            {/* PAGINATION */}
+            {soldTotalPages > 1 && (
+              <div className="flex justify-center items-center gap-4 pt-4 border-t border-gray-700">
+                <button 
+                  onClick={() => setSoldPage(p => Math.max(1, p - 1))} 
+                  disabled={soldPage === 1}
+                  className="p-2 bg-gray-700 rounded-lg disabled:opacity-30 hover:bg-gray-600"
+                >
+                  <ChevronLeft size={18}/>
+                </button>
+                <span className="text-sm text-gray-400">
+                  Halaman {soldPage} dari {soldTotalPages} ({groupedSoldData.length} grup)
+                </span>
+                <button 
+                  onClick={() => setSoldPage(p => Math.min(soldTotalPages, p + 1))} 
+                  disabled={soldPage === soldTotalPages}
+                  className="p-2 bg-gray-700 rounded-lg disabled:opacity-30 hover:bg-gray-600"
+                >
+                  <ChevronRight size={18}/>
+                </button>
               </div>
-            ))}
+            )}
           </div>
         )}
 
+        {/* --- 4. TAB RETUR (Enhanced with types) --- */}
         {activeTab === 'RETUR' && (
           <div className="space-y-3">
             {filterList(returData).length === 0 && <EmptyState msg="Tidak ada data retur." />}
-            {filterList(returData).map((item, idx) => (
-              <div key={idx} className="bg-red-900/10 border border-red-900/30 p-4 rounded-xl flex justify-between items-center">
-                <div>
-                   <span className="text-[10px] font-bold bg-red-900/50 text-red-300 px-2 py-0.5 rounded border border-red-800 mb-1 inline-block">RETUR</span>
-                   <h4 className="font-bold text-white">{item.nama_barang}</h4>
-                   <p className="text-sm text-gray-400">{item.customer} (Resi: {item.resi})</p>
-                   <p className="text-xs text-gray-500 mt-1 italic">"{item.keterangan}"</p>
+            {filterList(returData).map((item, idx) => {
+              const tipeRetur = (item as any).tipe_retur || 'BALIK_STOK';
+              const isTukarSupplier = tipeRetur === 'TUKAR_SUPPLIER';
+              const isRusak = tipeRetur === 'RUSAK';
+              const isSudahDitukar = item.status === 'Sudah Ditukar';
+              
+              return (
+                <div key={idx} className={`border p-4 rounded-xl flex flex-col md:flex-row justify-between gap-4 ${
+                  isRusak ? 'bg-red-900/10 border-red-900/30' : 
+                  isTukarSupplier ? 'bg-orange-900/10 border-orange-900/30' : 
+                  'bg-green-900/10 border-green-900/30'
+                }`}>
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 mb-2 flex-wrap">
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
+                        isRusak ? 'bg-red-900/50 text-red-300 border-red-800' :
+                        isTukarSupplier ? 'bg-orange-900/50 text-orange-300 border-orange-800' :
+                        'bg-green-900/50 text-green-300 border-green-800'
+                      }`}>
+                        {isRusak ? 'RUSAK' : isTukarSupplier ? 'TUKAR SUPPLIER' : 'BALIK STOK'}
+                      </span>
+                      {item.ecommerce && (
+                        <span className="text-[10px] bg-gray-700 px-1.5 rounded text-gray-400">{item.ecommerce}</span>
+                      )}
+                      {item.status && (
+                        <span className={`text-[10px] px-2 py-0.5 rounded ${
+                          item.status === 'Selesai' ? 'bg-green-900/30 text-green-400' :
+                          isSudahDitukar ? 'bg-blue-900/30 text-blue-400' :
+                          'bg-yellow-900/30 text-yellow-400'
+                        }`}>
+                          {item.status}
+                        </span>
+                      )}
+                    </div>
+                    
+                    {/* Tanggal Pemesanan & Tanggal Retur */}
+                    <div className="flex flex-wrap gap-4 mb-2 text-[10px]">
+                      {item.tanggal_pemesanan && (
+                        <div className="flex items-center gap-1">
+                          <span className="text-gray-500">📦 Pesan:</span>
+                          <span className="text-gray-400 font-mono">{new Date(item.tanggal_pemesanan).toLocaleDateString('id-ID', {timeZone: 'Asia/Jakarta', day: '2-digit', month: '2-digit', year: '2-digit'})}</span>
+                        </div>
+                      )}
+                      <div className="flex items-center gap-1">
+                        <span className="text-gray-500">🔄 Retur:</span>
+                        <span className="text-gray-400 font-mono">{new Date(item.tanggal_retur).toLocaleDateString('id-ID', {timeZone: 'Asia/Jakarta', day: '2-digit', month: '2-digit', year: '2-digit'})}</span>
+                      </div>
+                    </div>
+                    
+                    <h4 className="font-bold text-white">{item.nama_barang}</h4>
+                    <p className="text-[10px] text-gray-500 font-mono">Part: {item.part_number}</p>
+                    <p className="text-sm text-gray-400 mt-1">{item.customer} {item.resi !== '-' ? `(Resi: ${item.resi})` : ''}</p>
+                    {item.keterangan && <p className="text-xs text-gray-500 mt-1 italic">"{item.keterangan}"</p>}
+                  </div>
+                  
+                  <div className="flex items-center gap-4">
+                    <div className="text-right">
+                      <p className={`text-xl font-bold ${isRusak ? 'text-red-400' : isTukarSupplier ? 'text-orange-400' : 'text-green-400'}`}>
+                        {item.quantity}
+                      </p>
+                      <p className="text-xs text-gray-500">Pcs</p>
+                      <p className="text-sm font-mono text-gray-400 mt-1">{formatRupiah(item.harga_total)}</p>
+                    </div>
+                    
+                    {/* Tombol untuk tukar supplier - hanya untuk status Pending */}
+                    {isTukarSupplier && item.status === 'Pending' && (
+                      <button 
+                        onClick={async () => {
+                          if (!confirm('Barang sudah ditukar di supplier dan akan dikembalikan ke stok?')) return;
+                          setLoading(true);
+                          const result = await updateReturStatus(item.id!, 'Sudah Ditukar', selectedStore);
+                          setLoading(false);
+                          if (result.success) {
+                            showToast('Stok berhasil dikembalikan');
+                            loadData();
+                          } else {
+                            showToast(result.msg, 'error');
+                          }
+                        }}
+                        className="px-3 py-2 rounded-lg bg-blue-600 text-white text-xs font-bold hover:bg-blue-500 flex items-center gap-1"
+                      >
+                        <Package size={14}/> Sudah Ditukar
+                      </button>
+                    )}
+                  </div>
                 </div>
-                <div className="text-right">
-                   <p className="text-xl font-bold text-red-400">{item.quantity}</p>
-                   <p className="text-xs text-gray-500">Dikembalikan</p>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
 
       </div>
+
+      {/* RETUR MODAL */}
+      <ReturModal 
+        isOpen={returModalOpen}
+        item={selectedReturItem}
+        onClose={() => setReturModalOpen(false)}
+        onConfirm={handleReturConfirm}
+      />
     </div>
   );
 };

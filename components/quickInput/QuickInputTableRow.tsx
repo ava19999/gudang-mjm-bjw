@@ -132,9 +132,9 @@ export const QuickInputTableRow: React.FC<QuickInputTableRowProps> = ({
                     <input
                         ref={el => { inputRefs.current[baseRefIndex + 2] = el; }}
                         type="text"
-                        className="w-full bg-transparent px-2 py-1 text-xs text-gray-300 focus:outline-none focus:text-blue-400 placeholder-gray-600"
+                        className="w-full bg-transparent px-2 py-1 text-xs text-gray-300 focus:outline-none focus:text-blue-400 placeholder-gray-600 uppercase"
                         value={row.customer}
-                        onChange={(e) => onUpdateRow(row.id, 'customer', e.target.value)}
+                        onChange={(e) => onUpdateRow(row.id, 'customer', e.target.value.toUpperCase())}
                         onKeyDown={(e) => onGridKeyDown(e, baseRefIndex + 2)}
                         placeholder="Customer"
                     />

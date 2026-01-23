@@ -51,13 +51,19 @@ export interface SoldItemRow {
 export interface ReturRow {
   id?: number;
   tanggal_retur: string;
+  tanggal_pemesanan?: string; // Tanggal order asli
   resi: string;
   customer: string;
+  part_number: string;
   nama_barang: string;
   quantity: number;
-  status: string;
-  keterangan: string;
+  harga_satuan: number;
   harga_total: number;
+  // Tipe retur: 'BALIK_STOK' | 'RUSAK' | 'TUKAR_SUPPLIER'
+  tipe_retur: 'BALIK_STOK' | 'RUSAK' | 'TUKAR_SUPPLIER';
+  status: string; // 'Pending' | 'Selesai' | 'Sudah Ditukar' (untuk tukar supplier)
+  keterangan: string;
+  ecommerce?: string;
 }
 
 // --- TYPE DATA INVENTORY & LEGACY (JANGAN DIHAPUS) ---
