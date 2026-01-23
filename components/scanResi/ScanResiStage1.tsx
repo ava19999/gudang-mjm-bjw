@@ -187,11 +187,25 @@ export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh }) => 
     
     const now = new Date().toISOString(); // atau gunakan format sesuai kebutuhan
 
+    // Cek apakah resi sudah ada di list (untuk mencegah overwrite ecommerce)
+    const existingResi = resiList.find(r => r.resi.toLowerCase() === resiInput.trim().toLowerCase());
+    
+    let finalEcommerce = ecommerce;
+    let finalSubToko = subToko;
+    let finalNegaraEkspor = negaraEkspor;
+
+    if (existingResi) {
+      // Jika resi sudah ada, gunakan data yang sudah tersimpan
+      finalEcommerce = existingResi.ecommerce as EcommercePlatform;
+      finalSubToko = existingResi.sub_toko as SubToko;
+      finalNegaraEkspor = existingResi.negara_ekspor as NegaraEkspor || 'PH';
+    }
+
     const payload = {
       resi: resiInput.trim(),
-      ecommerce,
-      sub_toko: subToko,
-      negara_ekspor: ecommerce === 'EKSPOR' ? negaraEkspor : undefined,
+      ecommerce: finalEcommerce,
+      sub_toko: finalSubToko,
+      negara_ekspor: finalEcommerce === 'EKSPOR' ? finalNegaraEkspor : undefined,
       scanned_by: userName || 'Admin',
       tanggal: now,
       reseller: selectedReseller || null,
@@ -366,13 +380,28 @@ export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh }) => 
 
     setBulkSaving(true);
 
-    const items = validResis.map(r => ({
-      resi: r.resi.trim(),
-      ecommerce: bulkEcommerce === 'EKSPOR' ? `EKSPOR - ${bulkNegaraEkspor}` : bulkEcommerce,
-      sub_toko: bulkSubToko,
-      negara_ekspor: bulkEcommerce === 'EKSPOR' ? bulkNegaraEkspor : undefined,
-      scanned_by: userName || 'Admin'
-    }));
+    const items = validResis.map(r => {
+      // Cek existing untuk mencegah overwrite
+      const existingResi = resiList.find(ex => ex.resi.toLowerCase() === r.resi.trim().toLowerCase());
+      
+      let finalEcommerce = bulkEcommerce;
+      let finalSubToko = bulkSubToko;
+      let finalNegaraEkspor = bulkNegaraEkspor;
+
+      if (existingResi) {
+        finalEcommerce = existingResi.ecommerce as EcommercePlatform;
+        finalSubToko = existingResi.sub_toko as SubToko;
+        finalNegaraEkspor = existingResi.negara_ekspor as NegaraEkspor || 'PH';
+      }
+
+      return {
+        resi: r.resi.trim(),
+        ecommerce: finalEcommerce === 'EKSPOR' ? `EKSPOR - ${finalNegaraEkspor}` : finalEcommerce,
+        sub_toko: finalSubToko,
+        negara_ekspor: finalEcommerce === 'EKSPOR' ? finalNegaraEkspor : undefined,
+        scanned_by: userName || 'Admin'
+      };
+    });
 
     const result = await scanResiStage1Bulk(items, selectedStore);
 
