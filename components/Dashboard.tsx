@@ -20,10 +20,11 @@ interface DashboardProps {
   onAddNew: () => void;
   onEdit: (item: InventoryItem) => void;
   onDelete: (id: string) => void;
+  canDelete?: boolean;
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({ 
-  history, refreshTrigger, onDelete 
+  history, refreshTrigger, onDelete, canDelete = false 
 }) => {
   // --- CONTEXT ---
   const { selectedStore } = useStore();
@@ -212,6 +213,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
           onEdit={handleEditClick}
           onDelete={onDelete}
           onShowHistory={setSelectedItemHistory}
+          canDelete={canDelete}
         />
       </div>
 

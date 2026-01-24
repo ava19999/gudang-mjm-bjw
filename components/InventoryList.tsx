@@ -15,10 +15,11 @@ interface InventoryListProps {
   onEdit: (item: InventoryItem) => void;
   onDelete: (id: string) => void;
   onShowHistory: (item: InventoryItem) => void;
+  canDelete?: boolean;
 }
 
 export const InventoryList: React.FC<InventoryListProps> = ({
-  loading, items, viewMode, page, totalPages, setPage, onEdit, onDelete, onShowHistory
+  loading, items, viewMode, page, totalPages, setPage, onEdit, onDelete, onShowHistory, canDelete = false
 }) => {
   const [viewerImages, setViewerImages] = useState<string[]>([]);
   const [isViewerOpen, setIsViewerOpen] = useState(false);
@@ -101,7 +102,7 @@ export const InventoryList: React.FC<InventoryListProps> = ({
                   <h3 className="font-bold text-gray-200 text-xs leading-snug line-clamp-2 min-h-[2.5em]">{item.name}</h3>
                   <div className="flex flex-wrap gap-1 mt-1.5 mb-2">{item.brand && <span className="text-[9px] px-1.5 py-0.5 bg-gray-700 text-gray-300 rounded font-medium border border-gray-600">{item.brand}</span>}{item.application && <span className="text-[9px] px-1.5 py-0.5 bg-blue-900/30 text-blue-300 rounded font-medium border border-blue-900/50">{item.application}</span>}</div>
                 </div>
-                <div className="mt-auto border-t border-gray-700 pt-2"><div className="text-sm font-extrabold text-blue-400 mb-2">{formatCompactNumber(item.price)}</div><div className="grid grid-cols-2 gap-2"><button onClick={() => onEdit(item)} className="py-1.5 bg-blue-900/20 text-blue-400 rounded-lg text-[10px] font-bold hover:bg-blue-900/40 transition-colors border border-blue-900/30">Edit</button><button onClick={() => onDelete(item.id)} className="py-1.5 bg-red-900/20 text-red-400 rounded-lg text-[10px] font-bold hover:bg-red-900/40 transition-colors border border-red-900/30">Hapus</button></div></div>
+                <div className="mt-auto border-t border-gray-700 pt-2"><div className="text-sm font-extrabold text-blue-400 mb-2">{formatCompactNumber(item.price)}</div><div className={`grid gap-2 ${canDelete ? 'grid-cols-2' : 'grid-cols-1'}`}><button onClick={() => onEdit(item)} className="py-1.5 bg-blue-900/20 text-blue-400 rounded-lg text-[10px] font-bold hover:bg-blue-900/40 transition-colors border border-blue-900/30">Edit</button>{canDelete && <button onClick={() => onDelete(item.id)} className="py-1.5 bg-red-900/20 text-red-400 rounded-lg text-[10px] font-bold hover:bg-red-900/40 transition-colors border border-red-900/30">Hapus</button>}</div></div>
               </div>
             </div>
           ))}
@@ -128,7 +129,7 @@ export const InventoryList: React.FC<InventoryListProps> = ({
               
               <div className="flex flex-col items-end gap-2 pl-2">
                   <div className="font-extrabold text-blue-400 text-sm">{formatCompactNumber(item.price)}</div>
-                  <div className="flex gap-1"><button onClick={() => onEdit(item)} className="p-1.5 bg-gray-700 rounded text-gray-400 hover:text-blue-400 hover:bg-gray-600 border border-gray-600"><Edit size={16}/></button><button onClick={() => onDelete(item.id)} className="p-1.5 bg-gray-700 rounded text-gray-400 hover:text-red-400 hover:bg-gray-600 border border-gray-600"><Trash2 size={16}/></button></div>
+                  <div className="flex gap-1"><button onClick={() => onEdit(item)} className="p-1.5 bg-gray-700 rounded text-gray-400 hover:text-blue-400 hover:bg-gray-600 border border-gray-600"><Edit size={16}/></button>{canDelete && <button onClick={() => onDelete(item.id)} className="p-1.5 bg-gray-700 rounded text-gray-400 hover:text-red-400 hover:bg-gray-600 border border-gray-600"><Trash2 size={16}/></button>}</div>
               </div>
             </div>
           ))}

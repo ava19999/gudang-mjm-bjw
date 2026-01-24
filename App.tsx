@@ -179,6 +179,15 @@ const AppContent: React.FC = () => {
   };
   
   const handleDelete = async (id: string) => {
+      // Hanya Bryan dan Ava yang bisa hapus barang
+      const allowedToDelete = ['Bryan', 'Ava'];
+      const canDelete = allowedToDelete.some(name => name.toLowerCase() === userName.toLowerCase());
+      
+      if (!canDelete) {
+          showToast('Anda tidak memiliki akses untuk menghapus barang', 'error');
+          return;
+      }
+      
       if(confirm('Hapus Barang Permanen?')) {
           setLoading(true);
           if (await deleteInventory(id, selectedStore)) { showToast('Dihapus'); refreshData(); }
@@ -382,7 +391,7 @@ const AppContent: React.FC = () => {
 
       <div className="flex-1 overflow-y-auto bg-gray-900">
         {activeView === 'shop' && <ShopView items={items} cart={cart} isAdmin={isAdmin} isKingFano={isKingFano} bannerUrl={bannerUrl} onAddToCart={addToCart} onRemoveFromCart={(id) => setCart(prev => prev.filter(c => c.id !== id))} onUpdateCartItem={updateCartItem} onCheckout={doCheckout} onUpdateBanner={handleUpdateBanner} />}
-        {activeView === 'inventory' && isAdmin && <Dashboard items={items} orders={[]} history={history} refreshTrigger={refreshTrigger} onViewOrders={() => setActiveView('orders')} onAddNew={() => { setEditItem(null); setIsEditing(true); }} onEdit={(item) => { setEditItem(item); setIsEditing(true); }} onDelete={handleDelete} />}
+        {activeView === 'inventory' && isAdmin && <Dashboard items={items} orders={[]} history={history} refreshTrigger={refreshTrigger} onViewOrders={() => setActiveView('orders')} onAddNew={() => { setEditItem(null); setIsEditing(true); }} onEdit={(item) => { setEditItem(item); setIsEditing(true); }} onDelete={handleDelete} canDelete={['Bryan', 'Ava'].some(name => name.toLowerCase() === userName.toLowerCase())} />}
         {activeView === 'quick_input' && isAdmin && <QuickInputView items={items} onRefresh={refreshData} showToast={showToast} />}
         {activeView === 'petty_cash' && isAdmin && <PettyCashView />}
         {activeView === 'barang_kosong' && isAdmin && <BarangKosongView />}

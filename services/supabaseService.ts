@@ -1056,12 +1056,12 @@ export const fetchBarangMasuk = async () => [];
 export const fetchBarangKeluar = async () => [];
 
 // Fetch riwayat harga modal dari barang_masuk
-export const fetchPriceHistoryBySource = async (partNumber: string, store?: string | null): Promise<{ source: string; price: number; date: string }[]> => {
+export const fetchPriceHistoryBySource = async (partNumber: string, store?: string | null): Promise<{ source: string; price: number; date: string; isOfficial?: boolean }[]> => {
   if (!partNumber) return [];
   
   // Try both stores if store not specified
   const stores = store ? [store] : ['mjm', 'bjw'];
-  const allHistory: { source: string; price: number; date: string; timestamp: number }[] = [];
+  const allHistory: { source: string; price: number; date: string; timestamp: number; isOfficial?: boolean }[] = [];
   
   for (const s of stores) {
     const logTable = getLogTableName('barang_masuk', s);
@@ -1073,7 +1073,7 @@ export const fetchPriceHistoryBySource = async (partNumber: string, store?: stri
         .not('harga_satuan', 'is', null)
         .gt('harga_satuan', 0)
         .order('created_at', { ascending: false })
-        .limit(10);
+        .limit(50);
       
       if (!error && data) {
         data.forEach((row: any) => {
@@ -1082,7 +1082,8 @@ export const fetchPriceHistoryBySource = async (partNumber: string, store?: stri
             source: row.customer || (s === 'mjm' ? 'MJM' : 'BJW'),
             price: Number(row.harga_satuan || 0),
             date: dateObj.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' }),
-            timestamp: dateObj.getTime()
+            timestamp: dateObj.getTime(),
+            isOfficial: false
           });
         });
       }
@@ -1094,8 +1095,73 @@ export const fetchPriceHistoryBySource = async (partNumber: string, store?: stri
   // Sort by timestamp descending and return without timestamp
   return allHistory
     .sort((a, b) => b.timestamp - a.timestamp)
-    .slice(0, 10)
-    .map(({ source, price, date }) => ({ source, price, date }));
+    .map(({ source, price, date, isOfficial }) => ({ source, price, date, isOfficial }));
+};
+
+// Fetch riwayat harga jual dari list_harga_jual dan barang_keluar
+export const fetchSellPriceHistory = async (partNumber: string, store?: string | null): Promise<{ source: string; price: number; date: string; isOfficial?: boolean }[]> => {
+  if (!partNumber) return [];
+  
+  const allHistory: { source: string; price: number; date: string; timestamp: number; isOfficial: boolean }[] = [];
+  
+  // 1. Ambil harga dari list_harga_jual (harga resmi)
+  try {
+    const { data: officialData, error: officialError } = await supabase
+      .from('list_harga_jual')
+      .select('harga, name, created_at')
+      .eq('part_number', partNumber.trim())
+      .maybeSingle();
+    
+    if (!officialError && officialData && officialData.harga > 0) {
+      const dateObj = officialData.created_at ? new Date(officialData.created_at) : new Date();
+      allHistory.push({
+        source: 'HARGA RESMI',
+        price: Number(officialData.harga || 0),
+        date: dateObj.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' }),
+        timestamp: Date.now() + 1000000, // Ensure it's always at top
+        isOfficial: true
+      });
+    }
+  } catch (e) {
+    console.error('Error fetching official price:', e);
+  }
+  
+  // 2. Ambil history dari barang_keluar
+  const stores = store ? [store] : ['mjm', 'bjw'];
+  
+  for (const s of stores) {
+    const logTable = getLogTableName('barang_keluar', s);
+    try {
+      const { data, error } = await supabase
+        .from(logTable)
+        .select('harga_satuan, customer, created_at')
+        .eq('part_number', partNumber.trim())
+        .not('harga_satuan', 'is', null)
+        .gt('harga_satuan', 0)
+        .order('created_at', { ascending: false })
+        .limit(50);
+      
+      if (!error && data) {
+        data.forEach((row: any) => {
+          const dateObj = new Date(row.created_at);
+          allHistory.push({
+            source: row.customer || (s === 'mjm' ? 'MJM' : 'BJW'),
+            price: Number(row.harga_satuan || 0),
+            date: dateObj.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' }),
+            timestamp: dateObj.getTime(),
+            isOfficial: false
+          });
+        });
+      }
+    } catch (e) {
+      console.error(`Error fetching sell price history from ${logTable}:`, e);
+    }
+  }
+  
+  // Sort: official first, then by timestamp descending
+  return allHistory
+    .sort((a, b) => b.timestamp - a.timestamp)
+    .map(({ source, price, date, isOfficial }) => ({ source, price, date, isOfficial }));
 };
 export const fetchChatSessions = async () => [];
 export const fetchChatMessages = async () => [];
