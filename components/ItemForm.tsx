@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { InventoryFormData, InventoryItem } from '../types';
 import { fetchPriceHistoryBySource, updateInventory, addInventory, saveItemImages } from '../services/supabaseService';
-import { X, Save, Upload, Loader2, Package, Layers, DollarSign, History, AlertCircle, ArrowLeft, Plus, ShoppingBag, User, Calendar, Truck } from 'lucide-react';
+import { X, Save, Upload, Loader2, Package, Layers, DollarSign, History, AlertCircle, ArrowLeft, Plus, User, Calendar } from 'lucide-react';
 import { compressImage, formatRupiah } from '../utils';
 import { useStore } from '../context/StoreContext';
 
@@ -28,8 +28,7 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
   // Stock Adjustment State
   const [stockAdjustmentType, setStockAdjustmentType] = useState<'none' | 'in' | 'out'>('none');
   const [adjustmentQty, setAdjustmentQty] = useState<string>('');
-  const [adjustmentEcommerce, setAdjustmentEcommerce] = useState<string>('');
-  const [adjustmentResiTempo, setAdjustmentResiTempo] = useState<string>('');
+  const [adjustmentResiTempo, setAdjustmentResiTempo] = useState<string>('CASH');
   const [adjustmentCustomer, setAdjustmentCustomer] = useState<string>('');
 
   // UI State
@@ -148,14 +147,24 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
         const transactionData = (stockAdjustmentType !== 'none' && qtyAdj > 0) ? {
             type: stockAdjustmentType === 'in' ? 'in' as const : 'out' as const,
             qty: qtyAdj,
-            ecommerce: adjustmentEcommerce,
+            ecommerce: '-', // Via/Sumber removed, use default
             resiTempo: adjustmentResiTempo,
-            customer: adjustmentCustomer 
+            customer: adjustmentCustomer,
+            tempo: adjustmentResiTempo // Tempo for barang_masuk
         } : undefined;
+
+        // Calculate new quantity based on adjustment type
+        let newQuantity = formData.quantity;
+        if (stockAdjustmentType === 'in') {
+            newQuantity = formData.quantity + qtyAdj;
+        } else if (stockAdjustmentType === 'out') {
+            newQuantity = formData.quantity - qtyAdj;
+        }
 
         const updated = await updateInventory({ 
             ...initialData, 
             ...formData, 
+            quantity: newQuantity, // Use updated quantity
             images: formData.images 
         }, transactionData, selectedStore);
         
@@ -331,18 +340,20 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
                                 </div>
 
                                 {stockAdjustmentType === 'in' ? (
-                                    <div className="grid grid-cols-3 gap-3 pt-1">
-                                        <div>
-                                            <label className="text-[10px] font-bold text-gray-400 uppercase block mb-1 flex items-center gap-1"><ShoppingBag size={10}/> Via / Sumber</label>
-                                            <input type="text" placeholder="Tokopedia" value={adjustmentEcommerce} onChange={(e) => setAdjustmentEcommerce(e.target.value)} className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-sm text-gray-200 focus:border-blue-500 outline-none placeholder-gray-600" />
-                                        </div>
+                                    <div className="grid grid-cols-2 gap-3 pt-1">
                                         <div>
                                             <label className="text-[10px] font-bold text-gray-400 uppercase block mb-1 flex items-center gap-1"><User size={10}/> Customer</label>
                                             <input type="text" placeholder="Nama..." value={adjustmentCustomer} onChange={(e) => setAdjustmentCustomer(e.target.value)} className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-sm text-gray-200 focus:border-blue-500 outline-none placeholder-gray-600" />
                                         </div>
                                         <div>
                                             <label className="text-[10px] font-bold text-gray-400 uppercase block mb-1 flex items-center gap-1"><Calendar size={10}/> Tempo</label>
-                                            <input type="text" placeholder="Lunas / 30 Hari" value={adjustmentResiTempo} onChange={(e) => setAdjustmentResiTempo(e.target.value)} className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-sm text-gray-200 focus:border-blue-500 outline-none placeholder-gray-600" />
+                                            <select value={adjustmentResiTempo} onChange={(e) => setAdjustmentResiTempo(e.target.value)} className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-sm text-gray-200 focus:border-blue-500 outline-none">
+                                                <option value="CASH">CASH</option>
+                                                <option value="1 BLN">1 BLN</option>
+                                                <option value="2 BLN">2 BLN</option>
+                                                <option value="3 BLN">3 BLN</option>
+                                                <option value="NADIR">NADIR</option>
+                                            </select>
                                         </div>
                                     </div>
                                 ) : (
@@ -351,15 +362,15 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
                                             <label className="text-[10px] font-bold text-gray-400 uppercase block mb-1 flex items-center gap-1"><User size={10}/> Penerima / Customer</label>
                                             <input type="text" placeholder="Nama Bengkel / Pembeli..." value={adjustmentCustomer} onChange={(e) => setAdjustmentCustomer(e.target.value)} className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-sm text-gray-200 focus:border-blue-500 outline-none placeholder-gray-600" />
                                         </div>
-                                        <div className="grid grid-cols-2 gap-3">
-                                            <div>
-                                                <label className="text-[10px] font-bold text-gray-400 uppercase block mb-1 flex items-center gap-1"><ShoppingBag size={10}/> Via / Sumber</label>
-                                                <input type="text" placeholder="Shopee" value={adjustmentEcommerce} onChange={(e) => setAdjustmentEcommerce(e.target.value)} className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-sm text-gray-200 focus:border-blue-500 outline-none placeholder-gray-600" />
-                                            </div>
-                                            <div>
-                                                <label className="text-[10px] font-bold text-gray-400 uppercase block mb-1 flex items-center gap-1"><Truck size={10}/> Resi</label>
-                                                <input type="text" placeholder="JP..." value={adjustmentResiTempo} onChange={(e) => setAdjustmentResiTempo(e.target.value)} className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-sm text-gray-200 focus:border-blue-500 outline-none placeholder-gray-600" />
-                                            </div>
+                                        <div>
+                                            <label className="text-[10px] font-bold text-gray-400 uppercase block mb-1 flex items-center gap-1"><Calendar size={10}/> Tempo</label>
+                                            <select value={adjustmentResiTempo} onChange={(e) => setAdjustmentResiTempo(e.target.value)} className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-sm text-gray-200 focus:border-blue-500 outline-none">
+                                                <option value="CASH">CASH</option>
+                                                <option value="1 BLN">1 BLN</option>
+                                                <option value="2 BLN">2 BLN</option>
+                                                <option value="3 BLN">3 BLN</option>
+                                                <option value="NADIR">NADIR</option>
+                                            </select>
                                         </div>
                                     </div>
                                 )}

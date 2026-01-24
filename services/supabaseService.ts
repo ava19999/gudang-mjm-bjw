@@ -272,7 +272,7 @@ export const updateInventory = async (arg1: any, arg2?: any, arg3?: any): Promis
      try {
        const isBarangMasuk = transactionData.type === 'in';
        const logTable = getLogTableName(isBarangMasuk ? 'barang_masuk' : 'barang_keluar', store);
-       const validTempo = isBarangMasuk ? (transactionData.tempo || 'CASH') : (transactionData.resiTempo || transactionData.tempo || '-');
+       const validTempo = transactionData.tempo || transactionData.resiTempo || 'CASH';
 
        let finalLogData: any = {
            part_number: pk,
@@ -302,7 +302,7 @@ export const updateInventory = async (arg1: any, arg2?: any, arg3?: any): Promis
               qty_keluar: Number(transactionData.qty),
               harga_satuan: Number(item.price || 0),
               harga_total: Number(item.price || 0) * Number(transactionData.qty),
-              resi: transactionData.resiTempo || '-'
+              resi: '-'
           };
        }
        
@@ -722,8 +722,13 @@ export const deleteBarangLog = async (
     const logTable = getLogTableName(type === 'in' ? 'barang_masuk' : 'barang_keluar', store);
     const stockTable = getTableName(store);
 
+    console.log('deleteBarangLog called:', { id, type, partNumber, qty, store, logTable, stockTable });
+
     try {
-        if (!id || !partNumber || qty < 0) return false;
+        if (!id || !partNumber || qty <= 0) {
+            console.error('Invalid params:', { id, partNumber, qty });
+            return false;
+        }
 
         const { data: currentItem, error: fetchError } = await supabase
             .from(stockTable)
@@ -731,21 +736,30 @@ export const deleteBarangLog = async (
             .eq('part_number', partNumber)
             .single();
 
+        console.log('Current stock:', currentItem, 'Error:', fetchError);
+
         if (fetchError || !currentItem) throw new Error("Item tidak ditemukan untuk rollback stok");
 
         let newQty = currentItem.quantity;
         if (type === 'in') newQty = Math.max(0, newQty - qty);
         else newQty = newQty + qty;
+        
+        console.log('Stock will be updated from', currentItem.quantity, 'to', newQty);
 
         const { error: deleteError } = await supabase.from(logTable).delete().eq('id', id);
         if (deleteError) throw new Error("Gagal menghapus log: " + deleteError.message);
 
         const { error: updateError } = await supabase
             .from(stockTable)
-            .update({ quantity: newQty, last_updated: getWIBDate().toISOString() })
+            .update({ quantity: newQty })
             .eq('part_number', partNumber);
 
-        if (updateError) console.warn("WARNING: Log terhapus tapi stok gagal diupdate");
+        if (updateError) {
+            console.error("Stock update error:", updateError);
+            throw new Error("WARNING: Log terhapus tapi stok gagal diupdate: " + updateError.message);
+        }
+        
+        console.log('Stock updated successfully to', newQty);
 
         return true;
     } catch (e) {

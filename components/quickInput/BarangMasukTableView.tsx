@@ -75,7 +75,16 @@ export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger, onRefres
     };
 
     const handleDelete = async (item: { id: number; part_number: string; quantity?: number; qty_masuk?: number; name?: string }) => {
-        if (!confirm(`Hapus log barang masuk "${item.part_number}"?\nStok akan dikembalikan (dikurangi ${item.quantity || item.qty_masuk}).`)) return;
+        const qtyToDelete = item.quantity || item.qty_masuk || 0;
+        console.log('handleDelete item:', item);
+        console.log('qty to delete:', qtyToDelete);
+        
+        if (!confirm(`Hapus log barang masuk "${item.part_number}"?\nStok akan dikembalikan (dikurangi ${qtyToDelete}).`)) return;
+        
+        if (qtyToDelete <= 0) {
+            alert('Error: Qty tidak valid. Tidak dapat menghapus.');
+            return;
+        }
         
         setDeletingId(item.id);
         try {
@@ -83,7 +92,7 @@ export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger, onRefres
                 item.id, 
                 'in', 
                 item.part_number, 
-                item.quantity || item.qty_masuk || 0, 
+                qtyToDelete, 
                 selectedStore
             );
             
