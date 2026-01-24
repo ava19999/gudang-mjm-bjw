@@ -119,7 +119,7 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
     setLoadingPrice(true);
     setShowPricePopup(true);
     try {
-        const history = await fetchPriceHistoryBySource(formData.partNumber);
+        const history = await fetchPriceHistoryBySource(formData.partNumber, selectedStore);
         setPriceHistory(history);
     } catch (error) { console.error(error); }
     setLoadingPrice(false);
@@ -390,7 +390,8 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
                             name="costPrice"
                             value={formData.costPrice} 
                             onChange={handleChange} 
-                            className="flex-1 px-3 py-2 bg-orange-900/20 text-orange-300 font-mono font-bold text-sm rounded-lg border border-orange-900/50 focus:ring-2 focus:ring-orange-800 outline-none placeholder-orange-800" 
+                            placeholder="0"
+                            className="flex-1 px-3 py-2 bg-orange-900/20 text-orange-300 font-mono font-bold text-sm rounded-lg border border-orange-900/50 focus:ring-2 focus:ring-orange-800 focus:bg-orange-900/30 hover:bg-orange-900/30 outline-none placeholder-orange-800 cursor-text transition-colors" 
                         />
                         <button type="button" onClick={handleCheckPrices} className="px-3 py-2 bg-gray-800 border border-gray-600 text-gray-400 rounded-lg hover:bg-gray-600 hover:text-white"><History size={18}/></button>
                       </div>
@@ -419,7 +420,7 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
 
                   <div>
                     <label className="text-[10px] font-bold text-gray-400 uppercase ml-1">Harga Jual</label>
-                    <input type="number" name="price" value={formData.price} onChange={handleChange} className="w-full mt-1 px-3 py-2 bg-blue-900/20 text-blue-300 font-mono font-bold text-sm rounded-lg border border-blue-900/50 focus:ring-2 focus:ring-blue-800 outline-none" />
+                    <input type="number" name="price" value={formData.price} onChange={handleChange} placeholder="0" className="w-full mt-1 px-3 py-2 bg-blue-900/20 text-blue-300 font-mono font-bold text-sm rounded-lg border border-blue-900/50 focus:ring-2 focus:ring-blue-800 focus:bg-blue-900/30 hover:bg-blue-900/30 outline-none cursor-text transition-colors" />
                   </div>
                </div>
             </div>
