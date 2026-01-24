@@ -15,6 +15,7 @@ import {
   getBulkPartNumberInfo,
   insertProductAlias,
   deleteProcessedResiItems,
+  deleteResiItemById,
   checkResiOrOrderStatus,
   getStage1ResiList,
   getAllPendingStage1Resi
@@ -722,8 +723,22 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
       });
 
       if (correctedItems.length > 0) {
-          await saveCSVToResiItems(correctedItems, selectedStore);
-          alert(`Berhasil import ${correctedItems.length} item sebagai ${uploadEcommerce} (${uploadSubToko}).`);
+          const result = await saveCSVToResiItems(correctedItems, selectedStore);
+          
+          if (result.skippedCount > 0) {
+            // Ada item yang di-skip karena sudah ada di Barang Keluar
+            const skippedMsg = result.skippedResis.slice(0, 10).join(', ');
+            const moreMsg = result.skippedResis.length > 10 ? ` dan ${result.skippedResis.length - 10} lainnya` : '';
+            alert(
+              `✅ Berhasil import ${result.count} item sebagai ${uploadEcommerce} (${uploadSubToko}).\n\n` +
+              `⚠️ ${result.skippedCount} item di-SKIP karena sudah ada di Barang Keluar (sudah terjual/keluar):\n` +
+              `${skippedMsg}${moreMsg}`
+            );
+          } else if (result.success) {
+            alert(`Berhasil import ${result.count} item sebagai ${uploadEcommerce} (${uploadSubToko}).`);
+          } else {
+            alert(result.message);
+          }
       }
 
       await loadSavedDataFromDB();
@@ -857,6 +872,21 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
       copy.splice(idx + 1, 0, ...newChildren);
       return copy;
     });
+  };
+
+  // Handler untuk hapus row - juga hapus dari database
+  const handleDeleteRow = async (rowId: string) => {
+    // Hapus dari state lokal dulu untuk responsivitas
+    setRows(prev => prev.filter(r => r.id !== rowId));
+    
+    // Jika ID dimulai dengan "db-", berarti sudah ada di database, hapus juga dari sana
+    if (rowId.startsWith('db-')) {
+      const result = await deleteResiItemById(selectedStore, rowId);
+      if (!result.success) {
+        console.warn('Gagal hapus dari database:', result.message);
+        // Opsional: bisa reload data jika gagal
+      }
+    }
   };
 
   const handlePartNumberBlur = async (id: string, sku: string) => {
@@ -1536,7 +1566,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                   <td className="border border-gray-600 text-center p-0 align-middle">
                     <div className="flex flex-col items-center justify-center gap-1 h-full w-full py-1">
                       <button tabIndex={-1} onClick={() => handleSplit(row.id)} className="text-blue-400 hover:text-white hover:bg-blue-700 rounded p-0.5 transition-colors" title="Split Item"><Plus size={14}/></button>
-                      <button tabIndex={-1} onClick={() => setRows(p => p.filter(r => r.id !== row.id))} className="text-red-400 hover:text-white hover:bg-red-700 rounded p-0.5 transition-colors" title="Hapus Baris"><Trash2 size={14}/></button>
+                      <button tabIndex={-1} onClick={() => handleDeleteRow(row.id)} className="text-red-400 hover:text-white hover:bg-red-700 rounded p-0.5 transition-colors" title="Hapus Baris (juga dari Database)"><Trash2 size={14}/></button>
                     </div>
                   </td>
                 </tr>

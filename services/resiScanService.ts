@@ -27,6 +27,58 @@ const mapToBoolean = (data: any[]) => {
 };
 
 // ============================================================================
+// HELPER: Cek apakah resi/order sudah ada di barang_keluar (sudah terjual/keluar)
+// ============================================================================
+
+/**
+ * Cek apakah resi atau order_id sudah ada di barang_keluar
+ * Return Set of resi yang sudah ada
+ */
+export const checkExistingInBarangKeluar = async (
+  resiOrOrders: string[],
+  store: string | null
+): Promise<Set<string>> => {
+  const table = getBarangKeluarTable(store);
+  if (!resiOrOrders || resiOrOrders.length === 0) return new Set();
+  
+  try {
+    // Normalize: uppercase dan trim
+    const normalized = resiOrOrders.map(r => r.trim().toUpperCase());
+    
+    // Query semua resi dari barang_keluar
+    const { data, error } = await supabase
+      .from(table)
+      .select('resi')
+      .limit(5000);
+    
+    if (error) {
+      console.error('checkExistingInBarangKeluar error:', error);
+      return new Set();
+    }
+    
+    // Buat set dari resi yang ada di barang_keluar (UPPERCASE)
+    const existingSet = new Set<string>(
+      (data || [])
+        .map((d: any) => (d.resi || '').trim().toUpperCase())
+        .filter((r: string) => r !== '' && r !== '-')
+    );
+    
+    // Return resi yang ada di kedua set (intersection)
+    const foundSet = new Set<string>();
+    for (const resi of normalized) {
+      if (existingSet.has(resi)) {
+        foundSet.add(resi);
+      }
+    }
+    
+    return foundSet;
+  } catch (err) {
+    console.error('checkExistingInBarangKeluar exception:', err);
+    return new Set();
+  }
+};
+
+// ============================================================================
 // STAGE 1: SCANNER GUDANG
 // ============================================================================
 
@@ -46,6 +98,12 @@ export const scanResiStage1 = async (
     
     if (existing && existing.length > 0) {
       return { success: false, message: 'Resi sudah pernah di-scan sebelumnya!' };
+    }
+    
+    // CEK BARANG KELUAR: Pastikan resi belum ada di barang_keluar (sudah terjual/keluar)
+    const existingInBarangKeluar = await checkExistingInBarangKeluar([data.resi], store);
+    if (existingInBarangKeluar.has(data.resi.trim().toUpperCase())) {
+      return { success: false, message: 'Resi sudah ada di Barang Keluar (sudah terjual/keluar)!' };
     }
     
     const insertData = {
@@ -92,11 +150,11 @@ export const scanResiStage1Bulk = async (
     scanned_by: string;
   }>,
   store: string | null
-): Promise<{ success: boolean; message: string; count?: number; duplicates?: string[] }> => {
+): Promise<{ success: boolean; message: string; count?: number; duplicates?: string[]; alreadySold?: string[] }> => {
   try {
     const table = getTableName(store);
     
-    // CEK DUPLIKAT: Ambil resi yang sudah ada di database
+    // CEK DUPLIKAT: Ambil resi yang sudah ada di database scan_resi
     const resiList = items.map(i => i.resi);
     const { data: existingResi } = await supabase
       .from(table)
@@ -104,14 +162,35 @@ export const scanResiStage1Bulk = async (
       .in('resi', resiList);
     
     const existingSet = new Set((existingResi || []).map(r => r.resi));
+    
+    // CEK BARANG KELUAR: Resi yang sudah ada di barang_keluar (sudah terjual/keluar)
+    const existingInBarangKeluar = await checkExistingInBarangKeluar(resiList, store);
+    
     const duplicates = items.filter(i => existingSet.has(i.resi)).map(i => i.resi);
-    const newItems = items.filter(i => !existingSet.has(i.resi));
+    const alreadySold = items
+      .filter(i => existingInBarangKeluar.has(i.resi.trim().toUpperCase()))
+      .map(i => i.resi);
+    
+    // Filter: bukan duplikat DAN bukan sudah terjual
+    const newItems = items.filter(i => {
+      const resiUpper = i.resi.trim().toUpperCase();
+      return !existingSet.has(i.resi) && !existingInBarangKeluar.has(resiUpper);
+    });
     
     if (newItems.length === 0) {
+      let errorMsg = '';
+      if (alreadySold.length > 0 && duplicates.length > 0) {
+        errorMsg = `Semua resi sudah ada! (${duplicates.length} duplikat, ${alreadySold.length} sudah terjual/keluar)`;
+      } else if (alreadySold.length > 0) {
+        errorMsg = `Semua resi sudah ada di Barang Keluar (sudah terjual/keluar)!`;
+      } else {
+        errorMsg = 'Semua resi sudah pernah di-scan sebelumnya!';
+      }
       return { 
         success: false, 
-        message: 'Semua resi sudah pernah di-scan sebelumnya!', 
-        duplicates 
+        message: errorMsg, 
+        duplicates,
+        alreadySold
       };
     }
     
@@ -132,11 +211,15 @@ export const scanResiStage1Bulk = async (
     const { error } = await supabase.from(table).insert(insertData);
     if (error) throw error;
 
-    const msg = duplicates.length > 0 
-      ? `${newItems.length} resi berhasil di-scan! (${duplicates.length} sudah ada sebelumnya)`
-      : `${newItems.length} resi berhasil di-scan!`;
+    let msg = `${newItems.length} resi berhasil di-scan!`;
+    if (duplicates.length > 0 || alreadySold.length > 0) {
+      const parts: string[] = [];
+      if (duplicates.length > 0) parts.push(`${duplicates.length} duplikat`);
+      if (alreadySold.length > 0) parts.push(`${alreadySold.length} sudah terjual/keluar`);
+      msg += ` (${parts.join(', ')} di-skip)`;
+    }
     
-    return { success: true, message: msg, count: newItems.length, duplicates };
+    return { success: true, message: msg, count: newItems.length, duplicates, alreadySold };
   } catch (error: any) {
     console.error('Error bulk scan stage 1:', error);
     return { success: false, message: error.message || 'Gagal bulk scan resi' };
@@ -624,14 +707,48 @@ export const processBarangKeluarBatch = async (items: any[], store: string | nul
 export const saveCSVToResiItems = async (
   items: ParsedCSVItem[], 
   store: string | null
-): Promise<{ success: boolean; message: string; count: number }> => {
+): Promise<{ success: boolean; message: string; count: number; skippedCount: number; skippedResis: string[] }> => {
   const tableName = store === 'mjm' ? 'resi_items_mjm' : (store === 'bjw' ? 'resi_items_bjw' : null);
   
-  if (!tableName) return { success: false, message: 'Toko tidak valid', count: 0 };
-  if (!items || items.length === 0) return { success: false, message: 'Tidak ada data untuk disimpan', count: 0 };
+  if (!tableName) return { success: false, message: 'Toko tidak valid', count: 0, skippedCount: 0, skippedResis: [] };
+  if (!items || items.length === 0) return { success: false, message: 'Tidak ada data untuk disimpan', count: 0, skippedCount: 0, skippedResis: [] };
 
   try {
-    const resiList = [...new Set(items.map(i => i.resi))];
+    // Kumpulkan semua resi dan order_id untuk dicek
+    const allResis = items.map(i => i.resi).filter(Boolean);
+    const allOrderIds = items.map(i => i.order_id).filter(Boolean);
+    const allToCheck = [...new Set([...allResis, ...allOrderIds])];
+    
+    // Cek apakah sudah ada di barang_keluar (sudah terjual/keluar)
+    const existingInBarangKeluar = await checkExistingInBarangKeluar(allToCheck, store);
+    
+    // Filter items yang tidak ada di barang_keluar
+    const skippedItems: ParsedCSVItem[] = [];
+    const validItems = items.filter(item => {
+      const resiUpper = (item.resi || '').trim().toUpperCase();
+      const orderIdUpper = (item.order_id || '').trim().toUpperCase();
+      
+      // Jika resi atau order_id ada di barang_keluar, skip
+      if (existingInBarangKeluar.has(resiUpper) || existingInBarangKeluar.has(orderIdUpper)) {
+        skippedItems.push(item);
+        return false;
+      }
+      return true;
+    });
+    
+    const skippedResis = [...new Set(skippedItems.map(i => i.resi))];
+    
+    if (validItems.length === 0) {
+      return { 
+        success: false, 
+        message: `Semua ${items.length} resi sudah ada di Barang Keluar (sudah terjual/keluar)!`, 
+        count: 0, 
+        skippedCount: skippedItems.length,
+        skippedResis 
+      };
+    }
+
+    const resiList = [...new Set(validItems.map(i => i.resi))];
 
     const { error: deleteError } = await supabase
       .from(tableName)
@@ -643,7 +760,7 @@ export const saveCSVToResiItems = async (
       console.warn("Warning hapus data lama:", deleteError.message);
     }
 
-    const payload = items.map(item => {
+    const payload = validItems.map(item => {
       const fixedToko = (item as any).sub_toko || store?.toUpperCase();
       
       return {
@@ -673,9 +790,19 @@ export const saveCSVToResiItems = async (
       throw error;
     }
 
-    return { success: true, message: 'Data CSV berhasil disimpan ke database', count: payload.length };
+    const skippedMsg = skippedResis.length > 0 
+      ? ` (${skippedResis.length} resi di-skip karena sudah ada di Barang Keluar)`
+      : '';
+
+    return { 
+      success: true, 
+      message: `Data CSV berhasil disimpan ke database${skippedMsg}`, 
+      count: payload.length,
+      skippedCount: skippedItems.length,
+      skippedResis 
+    };
   } catch (err: any) {
-    return { success: false, message: err.message || 'Gagal menyimpan data CSV', count: 0 };
+    return { success: false, message: err.message || 'Gagal menyimpan data CSV', count: 0, skippedCount: 0, skippedResis: [] };
   }
 };
 
@@ -798,4 +925,35 @@ export const deleteProcessedResiItems = async (
   }
 
   return { success: true, deleted: deletedCount };
+};
+
+/**
+ * Hapus satu item dari resi_items berdasarkan ID
+ */
+export const deleteResiItemById = async (
+  store: string | null,
+  id: string | number
+): Promise<{ success: boolean; message: string }> => {
+  const table = store === 'mjm' ? 'resi_items_mjm' : (store === 'bjw' ? 'resi_items_bjw' : null);
+  if (!table) return { success: false, message: 'Toko tidak valid' };
+
+  try {
+    // ID dari database biasanya format "db-123", perlu extract angkanya
+    const dbId = String(id).startsWith('db-') ? String(id).replace('db-', '') : String(id);
+    
+    const { error } = await supabase
+      .from(table)
+      .delete()
+      .eq('id', dbId);
+
+    if (error) {
+      console.error('Delete resi item by ID gagal:', error);
+      return { success: false, message: error.message };
+    }
+
+    return { success: true, message: 'Item berhasil dihapus' };
+  } catch (err: any) {
+    console.error('Delete resi item exception:', err);
+    return { success: false, message: err.message || 'Gagal menghapus item' };
+  }
 };
