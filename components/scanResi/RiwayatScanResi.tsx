@@ -4,7 +4,7 @@
 import React, { useState, useEffect } from 'react';
 import { useStore } from '../../context/StoreContext';
 import { getResiHistory } from '../../services/resiScanService';
-import { ResiScanStage, EcommercePlatform, ResiScanStatus } from '../../types';
+import { ResiScanStage, EcommercePlatform, ResiScanStatus, isInstantOrder } from '../../types';
 import {
   History,
   Search,
@@ -420,7 +420,12 @@ export const RiwayatScanResi: React.FC<RiwayatScanResiProps> = ({ onRefresh }) =
                     <td className="px-4 py-3 text-sm">
                       <span className={`px-2 py-1 ${getEcommerceBadgeColor(resi.ecommerce)} rounded text-xs font-semibold`}>
                         {resi.ecommerce}
-                        {resi.negara_ekspor && ` - ${resi.negara_ekspor}`}
+                        {resi.negara_ekspor && !resi.ecommerce.includes(resi.negara_ekspor) && ` - ${resi.negara_ekspor}`}
+                        {isInstantOrder(resi) && (
+                          <span className="ml-1 px-1 py-0.5 bg-orange-500 text-white text-[9px] font-bold rounded">
+                            INSTANT
+                          </span>
+                        )}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-sm">

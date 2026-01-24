@@ -16,7 +16,8 @@ import {
   insertProductAlias,
   deleteProcessedResiItems,
   checkResiOrOrderStatus,
-  getStage1ResiList
+  getStage1ResiList,
+  getAllPendingStage1Resi
 } from '../../services/resiScanService';
 import { 
   parseShopeeCSV, 
@@ -50,6 +51,137 @@ interface Stage3Row {
   status_message: string;
   force_override_double: boolean;  // FITUR 1: Flag untuk force override status Double
 }
+
+// --- KOMPONEN DROPDOWN E-COMMERCE (SEARCHABLE) ---
+const EcommerceDropdown = ({ value, onChange }: { value: string, onChange: (v: string) => void }) => {
+  const [show, setShow] = useState(false);
+  const [input, setInput] = useState(value);
+  const ref = useRef<HTMLDivElement>(null);
+
+  const ecommerceOptions = ['SHOPEE', 'TIKTOK', 'KILAT', 'RESELLER', 'EKSPOR'];
+
+  useEffect(() => { setInput(value); }, [value]);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setShow(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const filtered = ecommerceOptions.filter(s => s.toLowerCase().includes(input.toLowerCase()));
+
+  const handleSelect = (val: string) => {
+    onChange(val);
+    setInput(val);
+    setShow(false);
+  };
+
+  return (
+    <div className="relative min-w-[100px]" ref={ref}>
+      <input
+        type="text"
+        value={input}
+        onChange={e => { setInput(e.target.value.toUpperCase()); setShow(true); }}
+        onFocus={() => setShow(true)}
+        placeholder="E-commerce"
+        className="w-full px-2 py-1 bg-gray-700 border border-gray-600 rounded text-[10px] md:text-xs focus:ring-1 focus:ring-blue-500 focus:border-transparent"
+        autoComplete="off"
+      />
+      {show && (
+        <div className="absolute z-50 mt-1 w-full bg-gray-800 border border-gray-600 rounded shadow-lg max-h-48 overflow-auto animate-in fade-in slide-in-from-top-2">
+          {filtered.length > 0 ? filtered.map((s) => (
+            <div
+              key={s}
+              className={`px-3 py-2 cursor-pointer hover:bg-blue-600 hover:text-white transition-colors text-xs ${s === value ? 'bg-blue-600 text-white' : ''}`}
+              onMouseDown={() => handleSelect(s)}
+            >
+              {s}
+            </div>
+          )) : (
+            <div className="px-3 py-2 text-xs text-gray-500">Tidak ditemukan</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// --- KOMPONEN FILTER E-COMMERCE (SEARCHABLE dengan opsi "Semua") ---
+const EcommerceFilterDropdown = ({ value, onChange }: { value: string, onChange: (v: string) => void }) => {
+  const [show, setShow] = useState(false);
+  const [input, setInput] = useState(value || 'Semua Ecommerce');
+  const ref = useRef<HTMLDivElement>(null);
+
+  const ecommerceOptions = [
+    'SHOPEE', 
+    'TIKTOK', 
+    'KILAT', 
+    'RESELLER', 
+    'EKSPOR',
+    'EKSPOR - PH',
+    'EKSPOR - MY',
+    'EKSPOR - SG',
+    'EKSPOR - HK'
+  ];
+
+  useEffect(() => { setInput(value || 'Semua Ecommerce'); }, [value]);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setShow(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const filtered = ecommerceOptions.filter(s => s.toLowerCase().includes(input.toLowerCase()) || input === 'Semua Ecommerce');
+
+  const handleSelect = (val: string) => {
+    onChange(val);
+    setInput(val || 'Semua Ecommerce');
+    setShow(false);
+  };
+
+  return (
+    <div className="relative min-w-[120px]" ref={ref}>
+      <input
+        type="text"
+        value={input}
+        onChange={e => { 
+          const val = e.target.value.toUpperCase();
+          setInput(val); 
+          setShow(true); 
+        }}
+        onFocus={() => { setShow(true); if (input === 'Semua Ecommerce') setInput(''); }}
+        onBlur={() => { if (!input) setInput('Semua Ecommerce'); }}
+        placeholder="Filter E-commerce"
+        className="w-full px-2 py-0.5 bg-gray-800 border border-gray-600 rounded text-[10px] md:text-xs text-gray-300 focus:border-blue-500 outline-none"
+        autoComplete="off"
+      />
+      {show && (
+        <div className="absolute z-50 mt-1 w-full bg-gray-800 border border-gray-600 rounded shadow-lg max-h-48 overflow-auto animate-in fade-in slide-in-from-top-2">
+          <div
+            className={`px-3 py-2 cursor-pointer hover:bg-blue-600 hover:text-white transition-colors text-xs ${value === '' ? 'bg-blue-600 text-white' : ''}`}
+            onMouseDown={() => handleSelect('')}
+          >
+            Semua Ecommerce
+          </div>
+          {(input === '' || input === 'Semua Ecommerce' ? ecommerceOptions : filtered).map((s) => (
+            <div
+              key={s}
+              className={`px-3 py-2 cursor-pointer hover:bg-blue-600 hover:text-white transition-colors text-xs ${s === value ? 'bg-blue-600 text-white' : ''}`}
+              onMouseDown={() => handleSelect(s)}
+            >
+              {s}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
 
 // --- KOMPONEN DROPDOWN RESELLER (DICOPY DARI STAGE 1) ---
 const SubTokoResellerDropdown = ({ value, onChange, suggestions }: { value: string, onChange: (v: string) => void, suggestions: string[] }) => {
@@ -193,12 +325,12 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
             getBulkPartNumberInfo(allParts, selectedStore)
         ]);
 
-        // Map by resi AND no_pesanan
+        // Map by resi AND no_pesanan (UPPERCASE untuk case-insensitive matching)
         const statusMapByResi = new Map();
         const statusMapByOrder = new Map();
         dbStatus.forEach((d: any) => {
-          if (d.resi) statusMapByResi.set(d.resi, d);
-          if (d.no_pesanan) statusMapByOrder.set(String(d.no_pesanan), d);
+          if (d.resi) statusMapByResi.set(d.resi.trim().toUpperCase(), d);
+          if (d.no_pesanan) statusMapByOrder.set(String(d.no_pesanan).trim().toUpperCase(), d);
         });
 
         const partMap = new Map();
@@ -210,10 +342,13 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
         const seenKeys = new Set<string>();
 
         for (const item of savedItems) {
-           // Cari di Stage 1 by resi ATAU by order_id (untuk instant/sameday)
-           let dbRow = statusMapByResi.get(item.resi);
-           if (!dbRow && item.order_id) {
-             dbRow = statusMapByOrder.get(String(item.order_id));
+           // Cari di Stage 1 by resi ATAU by order_id (untuk instant/sameday) - UPPERCASE
+           const resiUpper = (item.resi || '').trim().toUpperCase();
+           const orderIdUpper = (item.order_id || '').trim().toUpperCase();
+           
+           let dbRow = statusMapByResi.get(resiUpper);
+           if (!dbRow && orderIdUpper) {
+             dbRow = statusMapByOrder.get(orderIdUpper);
            }
            
            const partInfo = partMap.get(item.part_number);
@@ -221,8 +356,19 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
            let statusMsg = 'Ready';
            let verified = true;
            
-           // Prioritas Ecom/Toko: Dari Item CSV -> Dari DB Stage 1 -> Default berdasarkan selectedStore
-           let ecommerceDB = item.ecommerce || (dbRow?.ecommerce) || '-';
+           // Prioritas Ecom: Stage 1 SELALU prioritas untuk mendapatkan negara ekspor yang benar
+           let ecommerceCSV = item.ecommerce || '-';
+           let ecommerceS1 = dbRow?.ecommerce || '-';
+           
+           // SELALU gunakan ecommerce dari Stage 1 jika tersedia (karena punya info negara)
+           // Fallback ke CSV jika Stage 1 tidak ada
+           let ecommerceDB = ecommerceS1 !== '-' ? ecommerceS1 : ecommerceCSV;
+           
+           // Jika masih hanya "EKSPOR" tanpa negara, dan ada negara_ekspor di dbRow, tambahkan
+           if (ecommerceDB === 'EKSPOR' && dbRow?.negara_ekspor) {
+             ecommerceDB = `EKSPOR - ${dbRow.negara_ekspor}`;
+           }
+           
            let subToko = item.toko || (dbRow?.sub_toko) || (selectedStore === 'bjw' ? 'BJW' : 'MJM');
 
            // CHECK 1: Belum Scan Stage 1
@@ -331,9 +477,57 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
           }
         });
 
+        // Simpan loadedRows untuk digunakan nanti
+        const csvResiSet = new Set(loadedRows.map(r => r.resi));
+        
+        // === TAMBAHAN: Ambil resi dari Stage 1 yang belum ada di CSV ===
+        const stage1Resi = await getAllPendingStage1Resi(selectedStore);
+        
+        // Filter resi Stage 1 yang belum ada di CSV
+        const stage1OnlyRows: Stage3Row[] = [];
+        for (const s1 of stage1Resi) {
+          if (!csvResiSet.has(s1.resi)) {
+            // Tentukan ecommerce dengan negara
+            let ecommerce = s1.ecommerce || '-';
+            if (ecommerce === 'EKSPOR' && s1.negara_ekspor) {
+              ecommerce = `EKSPOR - ${s1.negara_ekspor}`;
+            }
+            
+            // Tentukan status
+            let statusMsg = s1.stage2_verified ? 'Butuh Input' : 'Pending S2';
+            
+            stage1OnlyRows.push({
+              id: `s1-${s1.id}`,
+              tanggal: s1.tanggal ? s1.tanggal.split('T')[0] : new Date().toISOString().split('T')[0],
+              resi: s1.resi,
+              ecommerce: ecommerce,
+              sub_toko: s1.sub_toko || (selectedStore === 'bjw' ? 'BJW' : 'MJM'),
+              part_number: '',
+              nama_barang_csv: '-',
+              nama_barang_base: '',
+              brand: '',
+              application: '',
+              stock_saat_ini: 0,
+              qty_keluar: 1,
+              harga_total: 0,
+              harga_satuan: 0,
+              customer: s1.customer || '',
+              no_pesanan: s1.no_pesanan || '',
+              is_db_verified: s1.stage2_verified,
+              is_stock_valid: false,
+              status_message: statusMsg,
+              force_override_double: false
+            });
+            csvResiSet.add(s1.resi);
+          }
+        }
+        
+        // Gabungkan semua rows (dari CSV + Stage 1 only)
+        const allRows = [...loadedRows, ...stage1OnlyRows];
+        
         setRows(prev => {
             const newMap = new Map();
-            loadedRows.forEach(r => newMap.set(r.resi + r.part_number, r));
+            allRows.forEach(r => newMap.set(r.resi + r.part_number, r));
             const mergedRows = prev.map(existingRow => {
                 const key = existingRow.resi + existingRow.part_number;
                 if (newMap.has(key)) {
@@ -345,7 +539,47 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
             });
             return [...mergedRows, ...Array.from(newMap.values()) as Stage3Row[]];
         });
+      } else {
+        // Jika tidak ada CSV items, tetap load dari Stage 1
+        const stage1Resi = await getAllPendingStage1Resi(selectedStore);
+        
+        const stage1Rows: Stage3Row[] = stage1Resi.map(s1 => {
+          let ecommerce = s1.ecommerce || '-';
+          if (ecommerce === 'EKSPOR' && s1.negara_ekspor) {
+            ecommerce = `EKSPOR - ${s1.negara_ekspor}`;
+          }
+          
+          let statusMsg = s1.stage2_verified ? 'Butuh Input' : 'Pending S2';
+          
+          return {
+            id: `s1-${s1.id}`,
+            tanggal: s1.tanggal ? s1.tanggal.split('T')[0] : new Date().toISOString().split('T')[0],
+            resi: s1.resi,
+            ecommerce: ecommerce,
+            sub_toko: s1.sub_toko || (selectedStore === 'bjw' ? 'BJW' : 'MJM'),
+            part_number: '',
+            nama_barang_csv: '-',
+            nama_barang_base: '',
+            brand: '',
+            application: '',
+            stock_saat_ini: 0,
+            qty_keluar: 1,
+            harga_total: 0,
+            harga_satuan: 0,
+            customer: s1.customer || '',
+            no_pesanan: s1.no_pesanan || '',
+            is_db_verified: s1.stage2_verified,
+            is_stock_valid: false,
+            status_message: statusMsg,
+            force_override_double: false
+          };
+        });
+        
+        if (stage1Rows.length > 0) {
+          setRows(stage1Rows);
+        }
       }
+      
     } catch (e) {
       console.error("Error loading saved items:", e);
     } finally {
@@ -437,20 +671,52 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
         return;
       }
 
-      // Check status di DB Stage 1 (Opsional, untuk info saja)
-      // Kita akan gunakan input User untuk Ecommerce & Sub Toko
+      // Ambil info dari Stage 1 untuk mendapatkan ecommerce dengan negara yang benar
       const resiList = parsedItems.map(i => i.resi);
-      // const dbStatus = await checkResiStatus(resiList, selectedStore);
+      const orderIdList = parsedItems.map(i => i.order_id).filter(Boolean);
+      const allResiOrOrders = [...new Set([...resiList, ...orderIdList])];
+      
+      // Cek Stage 1 untuk mendapatkan ecommerce yang sudah ada (termasuk negara ekspor)
+      const dbStatus = await checkResiOrOrderStatus(allResiOrOrders, selectedStore);
+      
+      // Buat map dari resi/order_id ke data Stage 1 (termasuk negara_ekspor) - UPPERCASE
+      const s1MapByResi = new Map<string, any>();
+      const s1MapByOrder = new Map<string, any>();
+      dbStatus.forEach((d: any) => {
+        if (d.resi) s1MapByResi.set(d.resi.trim().toUpperCase(), d);
+        if (d.no_pesanan) s1MapByOrder.set(String(d.no_pesanan).trim().toUpperCase(), d);
+      });
       
       const correctedItems = parsedItems.map(item => {
-        // APPLY USER SELECTION HERE (OVERRIDE DETECTED / DB)
-        item.ecommerce = uploadEcommerce;
-        item.sub_toko = uploadSubToko;
+        // Cek apakah resi ini sudah ada di Stage 1 - UPPERCASE matching
+        const resiUpper = (item.resi || '').trim().toUpperCase();
+        const orderIdUpper = (item.order_id || '').trim().toUpperCase();
+        let s1Data = s1MapByResi.get(resiUpper) || s1MapByOrder.get(orderIdUpper);
         
-        // Handle Ekspor (tambah suffix negara)
-        if (uploadEcommerce === 'EKSPOR') {
+        if (s1Data) {
+          // Ada di Stage 1, gunakan ecommerce dari sana
+          let ecomFromS1 = s1Data.ecommerce || '';
+          
+          // Jika hanya "EKSPOR" tapi ada negara_ekspor, gabungkan
+          if (ecomFromS1 === 'EKSPOR' && s1Data.negara_ekspor) {
+            item.ecommerce = `EKSPOR - ${s1Data.negara_ekspor}`;
+          } else if (ecomFromS1.startsWith('EKSPOR')) {
+            // Sudah format lengkap atau tidak ada negara
+            item.ecommerce = ecomFromS1;
+          } else {
+            // Bukan ekspor, gunakan dari Stage 1
+            item.ecommerce = ecomFromS1 || uploadEcommerce;
+          }
+        } else {
+          // Tidak ada di Stage 1, gunakan pilihan user
+          if (uploadEcommerce === 'EKSPOR') {
             item.ecommerce = `EKSPOR - ${uploadNegara}`;
+          } else {
+            item.ecommerce = uploadEcommerce;
+          }
         }
+        
+        item.sub_toko = uploadSubToko;
 
         return item;
       });
@@ -674,7 +940,18 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
   const displayedRows = rows.filter(row => {
     // Filter by status - 'all' menampilkan semua, selain itu filter berdasarkan status_message
     if (filterStatus !== 'all' && row.status_message !== filterStatus) return false;
-    if (filterEcommerce && row.ecommerce !== filterEcommerce) return false;
+    
+    // Filter by ecommerce - mendukung filter "EKSPOR" untuk semua ekspor (EKSPOR - PH, EKSPOR - MY, dll)
+    if (filterEcommerce) {
+      if (filterEcommerce === 'EKSPOR') {
+        // Jika filter "EKSPOR", tampilkan semua yang mengandung EKSPOR
+        if (!row.ecommerce.startsWith('EKSPOR')) return false;
+      } else {
+        // Jika filter spesifik (misal "EKSPOR - PH"), harus exact match
+        if (row.ecommerce !== filterEcommerce) return false;
+      }
+    }
+    
     if (filterSubToko && row.sub_toko !== filterSubToko) return false;
     
     // Filter by part number - HANYA tampilkan yang part_number cocok
@@ -752,18 +1029,11 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                     <Settings size={12}/> Upload Config:
                 </div>
                 
-                {/* SELECTOR E-COMMERCE */}
-                <select 
-                    value={uploadEcommerce} 
-                    onChange={e => setUploadEcommerce(e.target.value as EcommercePlatform)}
-                    className="bg-gray-700 border border-gray-600 rounded px-2 py-1 text-[10px] md:text-xs outline-none focus:ring-1 focus:ring-blue-500 flex-shrink-0"
-                >
-                    <option value="SHOPEE">SHOPEE</option>
-                    <option value="TIKTOK">TIKTOK</option>
-                    <option value="KILAT">KILAT</option>
-                    <option value="RESELLER">RESELLER</option>
-                    <option value="EKSPOR">EKSPOR</option>
-                </select>
+                {/* SELECTOR E-COMMERCE (SEARCHABLE) */}
+                <EcommerceDropdown 
+                    value={uploadEcommerce}
+                    onChange={(v) => setUploadEcommerce(v as EcommercePlatform)}
+                />
 
                 {/* SELECTOR SUB TOKO */}
                 {uploadEcommerce === 'RESELLER' ? (
@@ -818,14 +1088,11 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                     ))}
                 </select>
                 
-                {/* FILTER ECOMMERCE */}
-                <select value={filterEcommerce} onChange={e => setFilterEcommerce(e.target.value)} className="bg-gray-800 border border-gray-600 rounded px-1.5 md:px-2 py-0.5 text-[10px] md:text-xs text-gray-300 focus:border-blue-500 outline-none flex-shrink-0">
-                    <option value="">Semua Ecommerce</option>
-                    <option value="SHOPEE">SHOPEE</option>
-                    <option value="TIKTOK">TIKTOK</option>
-                    <option value="RESELLER">RESELLER</option>
-                    <option value="EKSPOR">EKSPOR</option>
-                </select>
+                {/* FILTER ECOMMERCE (SEARCHABLE) */}
+                <EcommerceFilterDropdown 
+                    value={filterEcommerce}
+                    onChange={(v) => setFilterEcommerce(v)}
+                />
                 
                 {/* FILTER PART NUMBER dengan Dropdown */}
                 <div className="relative" ref={partNumberSearchRef}>
