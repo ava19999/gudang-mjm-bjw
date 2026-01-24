@@ -12,6 +12,8 @@ interface QuickInputTableRowProps {
     globalIndex: number;
     activeSearchIndex: number | null;
     suggestions: InventoryItem[];
+    supplierList: string[];
+    customerList: string[];
     inputRefs: React.MutableRefObject<(HTMLInputElement | null)[]>;
     onPartNumberChange: (id: number, val: string) => void;
     onSelectItem: (id: number, item: InventoryItem) => void;
@@ -24,12 +26,17 @@ interface QuickInputTableRowProps {
 }
 
 export const QuickInputTableRow: React.FC<QuickInputTableRowProps> = ({
-    row, index, globalIndex, activeSearchIndex, suggestions, inputRefs,
+    row, index, globalIndex, activeSearchIndex, suggestions, supplierList, customerList, inputRefs,
     onPartNumberChange, onSelectItem, onUpdateRow, onRemoveRow, highlightedIndex, onSearchKeyDown, onGridKeyDown, mode
 }) => {
     const isComplete = checkIsRowComplete(row);
     const activeItemRef = useRef<HTMLDivElement>(null);
+    const activeSupplierRef = useRef<HTMLDivElement>(null);
     const [showItemDetails, setShowItemDetails] = useState(false);
+    const [showSupplierDropdown, setShowSupplierDropdown] = useState(false);
+    const [supplierSearchQuery, setSupplierSearchQuery] = useState('');
+    const [supplierHighlightIndex, setSupplierHighlightIndex] = useState(-1);
+    const supplierInputRef = useRef<HTMLInputElement>(null);
 
     // Constants - Now 8 input columns
     const COLS = 8;
@@ -37,6 +44,91 @@ export const QuickInputTableRow: React.FC<QuickInputTableRowProps> = ({
 
     // Payment terms options
     const tempoOptions = ['CASH', '1 BLN', '2 BLN', '3 BLN', 'NADIR'];
+
+    // Get the active list based on mode
+    const activeList = mode === 'in' ? supplierList : customerList;
+
+    // Filter list based on search query
+    const filteredList = activeList.filter(s => 
+        !supplierSearchQuery || s.toLowerCase().includes(supplierSearchQuery.toLowerCase())
+    );
+
+    // Handle customer input change
+    const handleCustomerChange = (value: string) => {
+        const upperValue = value.toUpperCase();
+        setSupplierSearchQuery(upperValue);
+        onUpdateRow(row.id, 'customer', upperValue);
+        setShowSupplierDropdown(true);
+        setSupplierHighlightIndex(-1);
+    };
+
+    // Handle selection from dropdown
+    const handleSelectSupplier = (selected: string) => {
+        onUpdateRow(row.id, 'customer', selected);
+        setSupplierSearchQuery('');
+        setShowSupplierDropdown(false);
+        setSupplierHighlightIndex(-1);
+        // Move focus to next field
+        const nextInput = inputRefs.current[baseRefIndex + 3];
+        if (nextInput) nextInput.focus();
+    };
+
+    // Handle customer input blur
+    const handleCustomerBlur = () => {
+        // Delay to allow click on dropdown
+        setTimeout(() => {
+            setShowSupplierDropdown(false);
+            setSupplierHighlightIndex(-1);
+        }, 200);
+    };
+
+    // Handle customer input focus
+    const handleCustomerFocus = () => {
+        if (activeList.length > 0) {
+            setShowSupplierDropdown(true);
+            setSupplierHighlightIndex(-1);
+        }
+    };
+
+    // Handle keyboard navigation for dropdown
+    const handleSupplierKeyDown = (e: React.KeyboardEvent, refIndex: number) => {
+        if (showSupplierDropdown && filteredList.length > 0) {
+            const maxIndex = Math.min(filteredList.length - 1, 14); // Max 15 items shown
+            
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                e.stopPropagation();
+                setSupplierHighlightIndex(prev => (prev < maxIndex ? prev + 1 : 0));
+                return;
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                e.stopPropagation();
+                setSupplierHighlightIndex(prev => (prev > 0 ? prev - 1 : maxIndex));
+                return;
+            } else if (e.key === 'Enter') {
+                if (supplierHighlightIndex >= 0 && filteredList[supplierHighlightIndex]) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    handleSelectSupplier(filteredList[supplierHighlightIndex]);
+                    return;
+                }
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                setShowSupplierDropdown(false);
+                setSupplierHighlightIndex(-1);
+                return;
+            }
+        }
+        // If dropdown not open or no match, use grid navigation
+        onGridKeyDown(e, refIndex);
+    };
+
+    // Scroll highlighted supplier into view
+    useEffect(() => {
+        if (supplierHighlightIndex >= 0 && activeSupplierRef.current) {
+            activeSupplierRef.current.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        }
+    }, [supplierHighlightIndex]);
 
     // --- CALCULATION LOGIC ---
     
@@ -128,16 +220,43 @@ export const QuickInputTableRow: React.FC<QuickInputTableRowProps> = ({
                 </td>
 
                 {/* COL 2: Customer */}
-                <td className="px-2 py-1.5">
+                <td className="px-2 py-1.5 relative">
                     <input
                         ref={el => { inputRefs.current[baseRefIndex + 2] = el; }}
                         type="text"
                         className="w-full bg-transparent px-2 py-1 text-xs text-gray-300 focus:outline-none focus:text-blue-400 placeholder-gray-600 uppercase"
                         value={row.customer}
-                        onChange={(e) => onUpdateRow(row.id, 'customer', e.target.value.toUpperCase())}
-                        onKeyDown={(e) => onGridKeyDown(e, baseRefIndex + 2)}
-                        placeholder="Customer"
+                        onChange={(e) => handleCustomerChange(e.target.value)}
+                        onKeyDown={(e) => handleSupplierKeyDown(e, baseRefIndex + 2)}
+                        onFocus={handleCustomerFocus}
+                        onBlur={handleCustomerBlur}
+                        placeholder={mode === 'in' ? 'Supplier...' : 'Customer...'}
+                        autoComplete="off"
                     />
+                    {/* Dropdown for Supplier (mode 'in') or Customer (mode 'out') */}
+                    {showSupplierDropdown && filteredList.length > 0 && (
+                        <div className="absolute top-full left-0 right-0 mt-1 bg-gray-800 rounded-lg shadow-xl z-20 max-h-48 overflow-y-auto border border-gray-600">
+                            {filteredList.slice(0, 15).map((item, idx) => (
+                                <div
+                                    key={idx}
+                                    ref={idx === supplierHighlightIndex ? activeSupplierRef : null}
+                                    className={`px-3 py-2 cursor-pointer border-b border-gray-700 last:border-0 transition-colors text-xs ${
+                                        idx === supplierHighlightIndex 
+                                        ? 'bg-gray-700 border-l-2 border-orange-400' 
+                                        : 'hover:bg-gray-700'
+                                    }`}
+                                    onClick={() => handleSelectSupplier(item)}
+                                >
+                                    <div className={`font-medium ${idx === supplierHighlightIndex ? 'text-orange-300' : 'text-orange-400'}`}>{item}</div>
+                                </div>
+                            ))}
+                            {filteredList.length > 15 && (
+                                <div className="px-3 py-1.5 text-[10px] text-gray-500 text-center">
+                                    +{filteredList.length - 15} lainnya...
+                                </div>
+                            )}
+                        </div>
+                    )}
                 </td>
 
                 {/* COL 3: Part Number (with suggestions) */}

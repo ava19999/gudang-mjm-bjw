@@ -59,6 +59,185 @@ export const fetchDistinctEcommerce = async (store: string | null): Promise<stri
   }
 };
 
+// --- FETCH DISTINCT SUPPLIERS (Customer dari Barang Masuk) ---
+export const fetchDistinctSuppliers = async (store: string | null): Promise<string[]> => {
+  const table = store === 'mjm' ? 'barang_masuk_mjm' : (store === 'bjw' ? 'barang_masuk_bjw' : null);
+  if (!table) return [];
+
+  try {
+    const { data, error } = await supabase
+      .from(table)
+      .select('customer')
+      .not('customer', 'is', null)
+      .not('customer', 'eq', '')
+      .not('customer', 'eq', '-');
+
+    if (error) {
+      console.error('Fetch Distinct Suppliers Error:', error);
+      return [];
+    }
+
+    // Get unique values and filter out empty/dash
+    const uniqueValues = [...new Set(
+      (data || [])
+        .map(d => d.customer?.trim().toUpperCase())
+        .filter(Boolean)
+        .filter(c => c !== '-' && c !== '')
+    )];
+    return uniqueValues.sort();
+  } catch (err) {
+    console.error('Fetch Distinct Suppliers Exception:', err);
+    return [];
+  }
+};
+
+// --- FETCH DISTINCT CUSTOMERS (Customer dari Barang Keluar) ---
+export const fetchDistinctCustomers = async (store: string | null): Promise<string[]> => {
+  const table = store === 'mjm' ? 'barang_keluar_mjm' : (store === 'bjw' ? 'barang_keluar_bjw' : null);
+  if (!table) return [];
+
+  try {
+    const { data, error } = await supabase
+      .from(table)
+      .select('customer')
+      .not('customer', 'is', null)
+      .not('customer', 'eq', '')
+      .not('customer', 'eq', '-');
+
+    if (error) {
+      console.error('Fetch Distinct Customers Error:', error);
+      return [];
+    }
+
+    // Get unique values and filter out empty/dash
+    const uniqueValues = [...new Set(
+      (data || [])
+        .map(d => d.customer?.trim().toUpperCase())
+        .filter(Boolean)
+        .filter(c => c !== '-' && c !== '')
+    )];
+    return uniqueValues.sort();
+  } catch (err) {
+    console.error('Fetch Distinct Customers Exception:', err);
+    return [];
+  }
+};
+
+// --- FETCH SEARCH SUGGESTIONS (untuk dropdown autocomplete) ---
+export const fetchSearchSuggestions = async (
+  store: string | null,
+  field: 'part_number' | 'name' | 'brand' | 'application',
+  searchQuery: string
+): Promise<string[]> => {
+  const table = getTableName(store);
+  if (!searchQuery || searchQuery.length < 1) return [];
+
+  try {
+    const { data, error } = await supabase
+      .from(table)
+      .select(field)
+      .ilike(field, `%${searchQuery}%`)
+      .not(field, 'is', null)
+      .not(field, 'eq', '')
+      .limit(50);
+
+    if (error) {
+      console.error(`Fetch ${field} Suggestions Error:`, error);
+      return [];
+    }
+
+    // Get unique values
+    const uniqueValues = [...new Set(
+      (data || [])
+        .map((d: any) => d[field]?.toString().trim())
+        .filter(Boolean)
+    )];
+    return uniqueValues.sort().slice(0, 20);
+  } catch (err) {
+    console.error(`Fetch ${field} Suggestions Exception:`, err);
+    return [];
+  }
+};
+
+// --- FETCH ALL DISTINCT VALUES (untuk initial load) ---
+export const fetchAllDistinctValues = async (
+  store: string | null,
+  field: 'part_number' | 'name' | 'brand' | 'application'
+): Promise<string[]> => {
+  const table = getTableName(store);
+
+  try {
+    const { data, error } = await supabase
+      .from(table)
+      .select(field)
+      .not(field, 'is', null)
+      .not(field, 'eq', '');
+
+    if (error) {
+      console.error(`Fetch All ${field} Error:`, error);
+      return [];
+    }
+
+    // Get unique values
+    const uniqueValues = [...new Set(
+      (data || [])
+        .map((d: any) => d[field]?.toString().trim())
+        .filter(Boolean)
+    )];
+    return uniqueValues.sort();
+  } catch (err) {
+    console.error(`Fetch All ${field} Exception:`, err);
+    return [];
+  }
+};
+
+// --- FETCH INVENTORY BY PART NUMBER (untuk quick search) ---
+export const fetchInventoryByPartNumber = async (
+  store: string | null,
+  searchValue: string
+): Promise<InventoryItem | null> => {
+  const table = getTableName(store);
+  if (!searchValue) return null;
+
+  try {
+    // First try exact match on part_number
+    let { data, error } = await supabase
+      .from(table)
+      .select('*')
+      .ilike('part_number', searchValue)
+      .limit(1)
+      .single();
+
+    // If not found, try searching by name
+    if (error || !data) {
+      const { data: nameData, error: nameError } = await supabase
+        .from(table)
+        .select('*')
+        .ilike('name', `%${searchValue}%`)
+        .limit(1)
+        .single();
+
+      if (nameError || !nameData) {
+        return null;
+      }
+      data = nameData;
+    }
+
+    // Fetch photo if exists
+    const partNumber = data.part_number;
+    const { data: photoData } = await supabase
+      .from('foto')
+      .select('*')
+      .eq('part_number', partNumber)
+      .single();
+
+    return mapItemFromDB(data, photoData);
+  } catch (err) {
+    console.error('Fetch Inventory By Part Number Exception:', err);
+    return null;
+  }
+};
+
 // --- HELPER: MAPPING FOTO ---
 const mapPhotoRowToImages = (photoRow: any): string[] => {
   if (!photoRow) return [];
@@ -521,7 +700,10 @@ export const fetchBarangMasukLog = async (store: string | null, page = 1, limit 
         query = query.or(`part_number.ilike.%${search}%,nama_barang.ilike.%${search}%,customer.ilike.%${search}%`);
     }
 
-    const { data, count, error } = await query.order('created_at', { ascending: false }).range(from, to);
+    // Order by id descending (newest first) as primary, then created_at as fallback
+    const { data, count, error } = await query
+        .order('id', { ascending: false })
+        .range(from, to);
 
     if (error) {
         console.error("Error fetching barang masuk:", error);
@@ -868,7 +1050,10 @@ export const fetchBarangKeluarLog = async (store: string | null, page = 1, limit
         query = query.or(`part_number.ilike.%${search}%,name.ilike.%${search}%,customer.ilike.%${search}%`);
     }
 
-    const { data, count, error } = await query.order('created_at', { ascending: false }).range(from, to);
+    // Order by id descending (newest first)
+    const { data, count, error } = await query
+        .order('id', { ascending: false })
+        .range(from, to);
 
     if (error) {
         console.error("Error fetching barang keluar:", error);

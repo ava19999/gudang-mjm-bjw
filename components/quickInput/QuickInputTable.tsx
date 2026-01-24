@@ -9,6 +9,8 @@ interface QuickInputTableProps {
     startIndex: number;
     activeSearchIndex: number | null;
     suggestions: InventoryItem[];
+    supplierList: string[];
+    customerList: string[];
     inputRefs: React.MutableRefObject<(HTMLInputElement | null)[]>;
     onPartNumberChange: (id: number, val: string) => void;
     onSelectItem: (id: number, item: InventoryItem) => void;
@@ -21,7 +23,7 @@ interface QuickInputTableProps {
 }
 
 export const QuickInputTable: React.FC<QuickInputTableProps> = ({
-    currentRows, startIndex, activeSearchIndex, suggestions, inputRefs,
+    currentRows, startIndex, activeSearchIndex, suggestions, supplierList, customerList, inputRefs,
     onPartNumberChange, onSelectItem, onUpdateRow, onRemoveRow, highlightedIndex, onSearchKeyDown, onGridKeyDown, mode
 }) => {
     return (
@@ -33,7 +35,7 @@ export const QuickInputTable: React.FC<QuickInputTableProps> = ({
                             <th className="px-2 py-2 w-8 text-center">#</th>
                             <th className="px-2 py-2 w-28">Tanggal</th>
                             <th className="px-2 py-2 w-24">Tempo</th>
-                            <th className="px-2 py-2 w-32">Customer</th>
+                            <th className="px-2 py-2 w-32">{mode === 'in' ? 'Supplier' : 'Customer'}</th>
                             <th className="px-2 py-2 w-48">Part Number</th>
                             <th className="px-2 py-2 w-16 text-right">{mode === 'in' ? 'Qty Masuk' : 'Qty Keluar'}</th>
                             <th className="px-2 py-2 w-32 text-right">Total Harga</th>
@@ -51,6 +53,8 @@ export const QuickInputTable: React.FC<QuickInputTableProps> = ({
                                 globalIndex={startIndex + index}
                                 activeSearchIndex={activeSearchIndex}
                                 suggestions={suggestions}
+                                supplierList={supplierList}
+                                customerList={customerList}
                                 inputRefs={inputRefs}
                                 onPartNumberChange={onPartNumberChange}
                                 onSelectItem={onSelectItem}

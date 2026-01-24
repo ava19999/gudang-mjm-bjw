@@ -21,6 +21,7 @@ import { RiwayatScanResi } from './components/scanResi/RiwayatScanResi';
 
 // --- NEW SPLIT COMPONENTS ---
 import { Toast } from './components/common/Toast';
+import { FloatingQuickAccess } from './components/common/FloatingQuickAccess';
 import { StoreSelector } from './components/auth/StoreSelector';
 import { LoginPage } from './components/auth/LoginPage';
 import { Header } from './components/layout/Header';
@@ -414,6 +415,15 @@ const AppContent: React.FC = () => {
       </div>
 
       <MobileNav isAdmin={isAdmin} activeView={activeView} setActiveView={setActiveView} pendingOrdersCount={0} myPendingOrdersCount={0} />
+      
+      {/* Floating Quick Access Widget */}
+      {isAdmin && (
+        <FloatingQuickAccess 
+          onAddNew={() => { setEditItem(null); setIsEditing(true); }}
+          onViewItem={(item) => { setEditItem(item); setIsEditing(true); }}
+          isAdmin={isAdmin}
+        />
+      )}
     </div>
   );
 };

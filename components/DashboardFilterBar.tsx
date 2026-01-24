@@ -178,14 +178,20 @@ export const DashboardFilterBar: React.FC<DashboardFilterBarProps> = ({
         
         {/* Secondary Filters */}
         <div className="grid grid-cols-2 gap-2 mb-2">
-            <div className="relative">
-                <Tag className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={14} />
-                <input type="text" placeholder="Filter Brand..." value={brandSearch} onChange={(e) => setBrandSearch(e.target.value)} className="w-full pl-9 pr-3 py-2 bg-gray-700 border border-gray-600 rounded-xl text-xs font-medium focus:ring-2 focus:ring-blue-500/50 outline-none text-white placeholder-gray-500" />
-            </div>
-            <div className="relative">
-                <PenTool className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={14} />
-                <input type="text" placeholder="Filter Aplikasi..." value={appSearch} onChange={(e) => setAppSearch(e.target.value)} className="w-full pl-9 pr-3 py-2 bg-gray-700 border border-gray-600 rounded-xl text-xs font-medium focus:ring-2 focus:ring-blue-500/50 outline-none text-white placeholder-gray-500" />
-            </div>
+            <AutocompleteInput
+              value={brandSearch}
+              onChange={setBrandSearch}
+              options={brandOptions}
+              placeholder="Filter Brand..."
+              icon={<Tag size={14} />}
+            />
+            <AutocompleteInput
+              value={appSearch}
+              onChange={setAppSearch}
+              options={appOptions}
+              placeholder="Filter Aplikasi..."
+              icon={<PenTool size={14} />}
+            />
         </div>
 
         {/* Filter Harga (BARU) */}

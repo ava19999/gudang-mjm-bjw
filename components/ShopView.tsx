@@ -1,7 +1,7 @@
 // FILE: src/components/ShopView.tsx
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { InventoryItem, CartItem } from '../types';
-import { fetchShopItems } from '../services/supabaseService'; 
+import { fetchShopItems, fetchSearchSuggestions } from '../services/supabaseService'; 
 import { compressImage } from '../utils';
 import { ShoppingCart } from 'lucide-react';
 import { useStore } from '../context/StoreContext';
@@ -73,6 +73,61 @@ export const ShopView: React.FC<ShopViewProps> = ({
   
   // PERBAIKAN 1: Limit 50 Item
   const limit = 50; 
+
+  // State untuk Search Suggestions (dropdown autocomplete)
+  const [partNumberOptions, setPartNumberOptions] = useState<string[]>([]);
+  const [nameOptions, setNameOptions] = useState<string[]>([]);
+  const [brandOptions, setBrandOptions] = useState<string[]>([]);
+  const [applicationOptions, setApplicationOptions] = useState<string[]>([]);
+
+  // Fetch suggestions dynamically based on search input
+  useEffect(() => {
+    const timer = setTimeout(async () => {
+      if (partNumberSearch.length >= 1) {
+        const suggestions = await fetchSearchSuggestions(selectedStore, 'part_number', partNumberSearch);
+        setPartNumberOptions(suggestions);
+      } else {
+        setPartNumberOptions([]);
+      }
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [partNumberSearch, selectedStore]);
+
+  useEffect(() => {
+    const timer = setTimeout(async () => {
+      if (nameSearch.length >= 1) {
+        const suggestions = await fetchSearchSuggestions(selectedStore, 'name', nameSearch);
+        setNameOptions(suggestions);
+      } else {
+        setNameOptions([]);
+      }
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [nameSearch, selectedStore]);
+
+  useEffect(() => {
+    const timer = setTimeout(async () => {
+      if (brandSearch.length >= 1) {
+        const suggestions = await fetchSearchSuggestions(selectedStore, 'brand', brandSearch);
+        setBrandOptions(suggestions);
+      } else {
+        setBrandOptions([]);
+      }
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [brandSearch, selectedStore]);
+
+  useEffect(() => {
+    const timer = setTimeout(async () => {
+      if (applicationSearch.length >= 1) {
+        const suggestions = await fetchSearchSuggestions(selectedStore, 'application', applicationSearch);
+        setApplicationOptions(suggestions);
+      } else {
+        setApplicationOptions([]);
+      }
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [applicationSearch, selectedStore]);
 
   // PERBAIKAN 2: Debounce Search (Mencegah Kedip / Loop)
   useEffect(() => {
@@ -202,12 +257,16 @@ export const ShopView: React.FC<ShopViewProps> = ({
                 setSearchTerm={setSearchTerm}
                 partNumberSearch={partNumberSearch}
                 setPartNumberSearch={setPartNumberSearch}
+                partNumberOptions={partNumberOptions}
                 nameSearch={nameSearch}
                 setNameSearch={setNameSearch}
+                nameOptions={nameOptions}
                 brandSearch={brandSearch}
                 setBrandSearch={setBrandSearch}
+                brandOptions={brandOptions}
                 applicationSearch={applicationSearch}
                 setApplicationSearch={setApplicationSearch}
+                applicationOptions={applicationOptions}
                 isAdmin={isAdmin}
                 viewMode={viewMode}
                 setViewMode={setViewMode}

@@ -312,7 +312,7 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
               {!isEditMode && (
                   <div className="bg-blue-900/20 p-4 rounded-xl border border-blue-900/40">
                     <label className="text-[10px] font-bold text-blue-300 uppercase mb-1 block flex items-center gap-1"><Layers size={12}/> Stok Awal</label>
-                    <input type="number" name="quantity" required min="0" className="w-full bg-gray-900 border border-blue-800 rounded-lg p-2.5 text-xl font-bold text-center text-blue-400 focus:ring-2 focus:ring-blue-800 outline-none" value={formData.quantity} onChange={handleChange} />
+                    <input type="number" name="quantity" min="0" className="w-full bg-gray-900 border border-blue-800 rounded-lg p-2.5 text-xl font-bold text-center text-blue-400 focus:ring-2 focus:ring-blue-800 outline-none" value={formData.quantity} onChange={handleChange} placeholder="0" />
                   </div>
               )}
             </div>
