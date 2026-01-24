@@ -11,9 +11,8 @@ export const HistoryTable = ({ data }: { data: StockHistory[] }) => (
                 <tr>
                     <th className="px-3 py-2 border-r border-gray-700 w-24">Tanggal</th>
                     <th className="px-3 py-2 border-r border-gray-700 w-32">Resi / Toko</th>
-                    <th className="px-3 py-2 border-r border-gray-700 w-36">Via</th>
-                    <th className="px-3 py-2 border-r border-gray-700 w-32">Pelanggan</th>
-                    <th className="px-3 py-2 border-r border-gray-700 w-28">Part No</th>
+                    <th className="px-3 py-2 border-r border-gray-700 w-36">Pelanggan</th>
+                    <th className="px-3 py-2 border-r border-gray-700 w-32">Part No</th>
                     <th className="px-3 py-2 border-r border-gray-700">Barang</th>
                     <th className="px-3 py-2 border-r border-gray-700 text-right w-16">Qty</th>
                     <th className="px-3 py-2 border-r border-gray-700 text-right w-24">Satuan</th>
@@ -55,15 +54,10 @@ export const HistoryTable = ({ data }: { data: StockHistory[] }) => (
                                     ) : null}
                                 </div>
                             </td>
-                            <td className="px-3 py-2 align-top border-r border-gray-700">
-                                {ecommerce !== '-' ? (
-                                    <span className="px-1.5 py-0.5 rounded bg-orange-900/30 text-orange-400 text-[9px] font-bold border border-orange-800 break-words">{ecommerce}</span>
-                                ) : <span className="text-gray-600">-</span>}
-                            </td>
-                            <td className="px-3 py-2 align-top border-r border-gray-700 text-gray-300 font-medium">
+                            <td className="px-3 py-2 align-top border-r border-gray-700 text-sm text-gray-100 font-semibold">
                                 {customer !== '-' ? customer : '-'}
                             </td>
-                            <td className="px-3 py-2 align-top border-r border-gray-700 font-mono text-[10px] text-gray-400">
+                            <td className="px-3 py-2 align-top border-r border-gray-700 font-mono text-sm font-bold text-blue-300">
                                 {h.partNumber}
                             </td>
                             <td className="px-3 py-2 align-top border-r border-gray-700">

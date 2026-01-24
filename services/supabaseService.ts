@@ -164,8 +164,17 @@ export const fetchInventoryPaginated = async (store: string | null, page: number
   const to = from + perPage - 1;
   let query = supabase.from(table).select('*', { count: 'exact' });
 
-  if (filters?.search) query = query.or(`name.ilike.%${filters.search}%,part_number.ilike.%${filters.search}%`);
+  // Filter by part number
+  if (filters?.partNumber) query = query.ilike('part_number', `%${filters.partNumber}%`);
+  // Filter by name
+  if (filters?.name) query = query.ilike('name', `%${filters.name}%`);
+  // Filter by brand
   if (filters?.brand) query = query.ilike('brand', `%${filters.brand}%`);
+  // Filter by application
+  if (filters?.app) query = query.ilike('application', `%${filters.app}%`);
+  // Filter by stock type
+  if (filters?.type === 'low') query = query.gt('quantity', 0).lte('quantity', 3);
+  if (filters?.type === 'empty') query = query.eq('quantity', 0);
 
   const { data: items, count, error } = await query.range(from, to).order('name', { ascending: true });
   if (error || !items) return { data: [], total: 0 };
@@ -232,7 +241,33 @@ export const fetchInventoryStats = async (store: string | null): Promise<any> =>
 };
 
 export const fetchInventoryAllFiltered = async (store: string | null, filters?: any): Promise<InventoryItem[]> => {
-  return await fetchInventory(store); 
+  const table = getTableName(store);
+  let query = supabase.from(table).select('*');
+
+  // Filter by part number
+  if (filters?.partNumber) query = query.ilike('part_number', `%${filters.partNumber}%`);
+  // Filter by name
+  if (filters?.name) query = query.ilike('name', `%${filters.name}%`);
+  // Filter by brand
+  if (filters?.brand) query = query.ilike('brand', `%${filters.brand}%`);
+  // Filter by application
+  if (filters?.app) query = query.ilike('application', `%${filters.app}%`);
+  // Filter by stock type
+  if (filters?.type === 'low') query = query.gt('quantity', 0).lte('quantity', 3);
+  if (filters?.type === 'empty') query = query.eq('quantity', 0);
+
+  const { data: items, error } = await query.order('name', { ascending: true });
+  if (error || !items) return [];
+
+  const photoMap = await fetchPhotosForItems(items);
+  const priceMap = await fetchLatestPricesForItems(items, store);
+
+  return items.map(item => {
+    const mapped = mapItemFromDB(item, photoMap[item.part_number]);
+    const lookupKey = (item.part_number || '').trim();
+    if (priceMap[lookupKey]) mapped.price = priceMap[lookupKey].harga; 
+    return mapped;
+  });
 };
 
 // --- ADD & UPDATE & DELETE INVENTORY ---
