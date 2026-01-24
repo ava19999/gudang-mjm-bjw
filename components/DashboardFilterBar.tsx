@@ -35,7 +35,9 @@ const AutocompleteInput: React.FC<{
 }> = ({ value, onChange, options, placeholder, icon, className = '' }) => {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [filteredOptions, setFilteredOptions] = useState<string[]>([]);
+  const [highlightedIndex, setHighlightedIndex] = useState(-1);
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (value.length >= 1) {
@@ -46,6 +48,7 @@ const AutocompleteInput: React.FC<{
       setShowSuggestions(filtered.length > 0);
     } else {
       setShowSuggestions(false);
+      setHighlightedIndex(-1);
     }
   }, [value, options]);
 
@@ -53,11 +56,50 @@ const AutocompleteInput: React.FC<{
     const handleClickOutside = (e: MouseEvent) => {
       if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
         setShowSuggestions(false);
+        setHighlightedIndex(-1);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  useEffect(() => {
+    if (highlightedIndex >= 0 && listRef.current) {
+      const item = listRef.current.children[highlightedIndex] as HTMLElement;
+      if (item) {
+        item.scrollIntoView({ block: 'nearest' });
+      }
+    }
+  }, [highlightedIndex]);
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!showSuggestions && filteredOptions.length > 0 && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+      setShowSuggestions(true);
+      return;
+    }
+    switch (e.key) {
+      case 'ArrowDown':
+        e.preventDefault();
+        setHighlightedIndex(prev => prev < filteredOptions.length - 1 ? prev + 1 : prev);
+        break;
+      case 'ArrowUp':
+        e.preventDefault();
+        setHighlightedIndex(prev => prev > 0 ? prev - 1 : 0);
+        break;
+      case 'Enter':
+        e.preventDefault();
+        if (highlightedIndex >= 0 && filteredOptions[highlightedIndex]) {
+          onChange(filteredOptions[highlightedIndex]);
+          setShowSuggestions(false);
+          setHighlightedIndex(-1);
+        }
+        break;
+      case 'Escape':
+        setShowSuggestions(false);
+        setHighlightedIndex(-1);
+        break;
+    }
+  };
 
   return (
     <div ref={wrapperRef} className={`relative ${className}`}>
@@ -70,16 +112,23 @@ const AutocompleteInput: React.FC<{
         placeholder={placeholder}
         onChange={(e) => onChange(e.target.value)}
         onFocus={() => value.length >= 1 && filteredOptions.length > 0 && setShowSuggestions(true)}
+        onKeyDown={handleKeyDown}
         className="w-full pl-10 pr-4 py-2.5 bg-gray-700 border border-gray-600 rounded-xl text-sm font-medium focus:ring-2 focus:ring-blue-500/50 outline-none text-white placeholder-gray-400"
+        autoComplete="off"
       />
       {showSuggestions && (
-        <div className="absolute top-full left-0 right-0 mt-1 bg-gray-800 border border-gray-600 rounded-xl shadow-lg z-50 max-h-48 overflow-y-auto">
+        <div ref={listRef} className="absolute top-full left-0 right-0 mt-1 bg-gray-800 border border-gray-600 rounded-xl shadow-lg z-50 max-h-48 overflow-y-auto">
           {filteredOptions.map((opt, idx) => (
             <button
               key={idx}
               type="button"
-              onClick={() => { onChange(opt); setShowSuggestions(false); }}
-              className="w-full px-4 py-2 text-left text-sm text-gray-200 hover:bg-gray-700 first:rounded-t-xl last:rounded-b-xl"
+              onClick={() => { onChange(opt); setShowSuggestions(false); setHighlightedIndex(-1); }}
+              className={`w-full px-4 py-2 text-left text-sm first:rounded-t-xl last:rounded-b-xl ${
+                idx === highlightedIndex
+                  ? 'bg-purple-600 text-white'
+                  : 'text-gray-200 hover:bg-gray-700'
+              }`}
+              onMouseEnter={() => setHighlightedIndex(idx)}
             >
               {opt}
             </button>

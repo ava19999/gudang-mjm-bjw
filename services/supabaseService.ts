@@ -33,6 +33,32 @@ const parseDateToNumber = (dateVal: any): number => {
   return isNaN(parsed) ? Date.now() : parsed;
 };
 
+// --- FETCH DISTINCT ECOMMERCE VALUES ---
+export const fetchDistinctEcommerce = async (store: string | null): Promise<string[]> => {
+  const table = store === 'mjm' ? 'barang_keluar_mjm' : (store === 'bjw' ? 'barang_keluar_bjw' : null);
+  if (!table) return [];
+
+  try {
+    const { data, error } = await supabase
+      .from(table)
+      .select('ecommerce')
+      .not('ecommerce', 'is', null)
+      .not('ecommerce', 'eq', '');
+
+    if (error) {
+      console.error('Fetch Distinct Ecommerce Error:', error);
+      return [];
+    }
+
+    // Get unique values
+    const uniqueValues = [...new Set((data || []).map(d => d.ecommerce?.toUpperCase()).filter(Boolean))];
+    return uniqueValues.sort();
+  } catch (err) {
+    console.error('Fetch Distinct Ecommerce Exception:', err);
+    return [];
+  }
+};
+
 // --- HELPER: MAPPING FOTO ---
 const mapPhotoRowToImages = (photoRow: any): string[] => {
   if (!photoRow) return [];
@@ -811,7 +837,7 @@ export const fetchHistoryLogsPaginated = async (
   type: 'in' | 'out',
   page: number = 1,
   perPage: number = 50,
-  search: string = '',
+  filters: any = {},
   store?: string | null
 ): Promise<{ data: any[]; count: number }> => {
   // Determine store from context if not provided
@@ -826,13 +852,28 @@ export const fetchHistoryLogsPaginated = async (
       .from(tableName)
       .select('*', { count: 'exact' });
     
-    // Add search filter if provided
-    if (search && search.trim()) {
-      const searchTerm = `%${search.trim()}%`;
+    // Handle both old string format and new object format for backwards compatibility
+    if (typeof filters === 'string' && filters.trim()) {
+      // Old format: search string
+      const searchTerm = `%${filters.trim()}%`;
       if (type === 'in') {
         query = query.or(`nama_barang.ilike.${searchTerm},part_number.ilike.${searchTerm},customer.ilike.${searchTerm}`);
       } else {
         query = query.or(`name.ilike.${searchTerm},part_number.ilike.${searchTerm},customer.ilike.${searchTerm},resi.ilike.${searchTerm}`);
+      }
+    } else if (typeof filters === 'object') {
+      // New format: filters object
+      // Filter by customer
+      if (filters.customer && filters.customer.trim()) {
+        query = query.ilike('customer', `%${filters.customer.trim()}%`);
+      }
+      // Filter by part number
+      if (filters.partNumber && filters.partNumber.trim()) {
+        query = query.ilike('part_number', `%${filters.partNumber.trim()}%`);
+      }
+      // Filter by ecommerce
+      if (filters.ecommerce && filters.ecommerce.trim()) {
+        query = query.ilike('ecommerce', filters.ecommerce.trim());
       }
     }
     

@@ -1,17 +1,18 @@
 // FILE: src/components/OrderManagement.tsx
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import Autocomplete from '@mui/material/Autocomplete';
 import TextField from '@mui/material/TextField';
 import { useStore } from '../context/StoreContext';
 import { 
   fetchOfflineOrders, fetchSoldItems, fetchReturItems,
-  processOfflineOrderItem, updateOfflineOrder, fetchInventory, createReturFromSold, updateReturStatus
+  processOfflineOrderItem, updateOfflineOrder, fetchInventory, createReturFromSold, updateReturStatus,
+  fetchDistinctEcommerce
 } from '../services/supabaseService';
 import { OfflineOrderRow, SoldItemRow, ReturRow } from '../types';
 import { 
   ClipboardList, CheckCircle, RotateCcw, Search, RefreshCw, Box, Check, X, 
   ChevronDown, ChevronUp, Layers, User, Pencil, Save, XCircle, Trash2, ChevronLeft, ChevronRight,
-  PackageX, RotateCw, ArrowLeftRight, Package
+  PackageX, RotateCw, ArrowLeftRight, Package, Hash, ShoppingBag
 } from 'lucide-react';
 
 // Toast Component Sederhana
@@ -21,6 +22,120 @@ const Toast = ({ msg, type, onClose }: any) => (
     <button onClick={onClose} className="ml-3 opacity-70 hover:opacity-100"><X size={14}/></button>
   </div>
 );
+
+// Autocomplete Dropdown with Keyboard Navigation
+interface AutocompleteDropdownProps {
+  value: string;
+  onChange: (value: string) => void;
+  options: string[];
+  placeholder: string;
+  icon: React.ReactNode;
+}
+
+const AutocompleteDropdown: React.FC<AutocompleteDropdownProps> = ({ value, onChange, options, placeholder, icon }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [highlightedIndex, setHighlightedIndex] = useState(-1);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLUListElement>(null);
+
+  // Reset highlighted index when options change
+  useEffect(() => {
+    setHighlightedIndex(-1);
+  }, [options]);
+
+  // Scroll highlighted item into view
+  useEffect(() => {
+    if (highlightedIndex >= 0 && listRef.current) {
+      const item = listRef.current.children[highlightedIndex] as HTMLElement;
+      if (item) {
+        item.scrollIntoView({ block: 'nearest' });
+      }
+    }
+  }, [highlightedIndex]);
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (!isOpen && options.length > 0 && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+      setIsOpen(true);
+      return;
+    }
+
+    switch (e.key) {
+      case 'ArrowDown':
+        e.preventDefault();
+        setHighlightedIndex(prev => 
+          prev < options.length - 1 ? prev + 1 : prev
+        );
+        break;
+      case 'ArrowUp':
+        e.preventDefault();
+        setHighlightedIndex(prev => prev > 0 ? prev - 1 : 0);
+        break;
+      case 'Enter':
+        e.preventDefault();
+        if (highlightedIndex >= 0 && options[highlightedIndex]) {
+          onChange(options[highlightedIndex]);
+          setIsOpen(false);
+          setHighlightedIndex(-1);
+        }
+        break;
+      case 'Escape':
+        setIsOpen(false);
+        setHighlightedIndex(-1);
+        break;
+    }
+  };
+
+  const handleSelect = (option: string) => {
+    onChange(option);
+    setIsOpen(false);
+    setHighlightedIndex(-1);
+    inputRef.current?.focus();
+  };
+
+  return (
+    <div className="relative">
+      <div className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">
+        {icon}
+      </div>
+      <input
+        ref={inputRef}
+        type="text"
+        placeholder={placeholder}
+        className="w-full pl-10 pr-4 py-3 bg-gray-800 border border-gray-700 rounded-xl text-sm focus:ring-2 focus:ring-purple-500 outline-none text-white placeholder-gray-500"
+        value={value}
+        onChange={(e) => {
+          onChange(e.target.value);
+          setIsOpen(true);
+        }}
+        onFocus={() => options.length > 0 && setIsOpen(true)}
+        onBlur={() => setTimeout(() => setIsOpen(false), 150)}
+        onKeyDown={handleKeyDown}
+      />
+      {isOpen && options.length > 0 && (
+        <ul
+          ref={listRef}
+          className="absolute z-50 w-full mt-1 max-h-60 overflow-auto bg-gray-800 border border-gray-600 rounded-xl shadow-xl"
+        >
+          {options.map((option, index) => (
+            <li
+              key={option}
+              className={`px-4 py-2 text-sm cursor-pointer transition-colors ${
+                index === highlightedIndex
+                  ? 'bg-purple-600 text-white'
+                  : 'text-gray-200 hover:bg-gray-700'
+              }`}
+              onMouseEnter={() => setHighlightedIndex(index)}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => handleSelect(option)}
+            >
+              {option}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+};
 
 // Retur Modal Component
 interface ReturModalProps {
@@ -136,6 +251,10 @@ export const OrderManagement: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'OFFLINE' | 'TERJUAL' | 'RETUR'>('OFFLINE');
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [customerFilter, setCustomerFilter] = useState('');
+  const [partNumberFilter, setPartNumberFilter] = useState('');
+  const [ecommerceFilter, setEcommerceFilter] = useState('all');
+  const [ecommerceOptions, setEcommerceOptions] = useState<string[]>([]);
   const [toast, setToast] = useState<{msg: string, type: 'success'|'error'} | null>(null);
   
   // State Grouping
@@ -226,6 +345,15 @@ export const OrderManagement: React.FC = () => {
 
   useEffect(() => { loadData(); }, [selectedStore, activeTab]);
 
+  // Load ecommerce options from database
+  useEffect(() => {
+    const loadEcommerceOptions = async () => {
+      const options = await fetchDistinctEcommerce(selectedStore);
+      setEcommerceOptions(options);
+    };
+    loadEcommerceOptions();
+  }, [selectedStore]);
+
   // --- LOGIC GROUPING ---
   const groupedOfflineOrders = useMemo(() => {
     const groups: Record<string, { id: string, customer: string, tempo: string, date: string, items: OfflineOrderRow[], totalAmount: number }> = {};
@@ -248,12 +376,24 @@ export const OrderManagement: React.FC = () => {
   const groupedSoldData = useMemo(() => {
     // Filter dulu berdasarkan search
     const filtered = soldData.filter(item => {
-      if (!searchTerm) return true;
-      const lower = searchTerm.toLowerCase();
-      return (item.customer || '').toLowerCase().includes(lower) ||
-             (item.name || '').toLowerCase().includes(lower) ||
-             (item.resi || '').toLowerCase().includes(lower) ||
-             (item.part_number || '').toLowerCase().includes(lower);
+      // Old searchTerm filter (for backward compatibility)
+      if (searchTerm && !(
+        (item.customer || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (item.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (item.resi || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (item.part_number || '').toLowerCase().includes(searchTerm.toLowerCase())
+      )) return false;
+
+      // Customer filter
+      if (customerFilter && !(item.customer || '').toLowerCase().includes(customerFilter.toLowerCase())) return false;
+      
+      // Part number filter
+      if (partNumberFilter && !(item.part_number || '').toLowerCase().includes(partNumberFilter.toLowerCase())) return false;
+      
+      // Ecommerce filter
+      if (ecommerceFilter !== 'all' && (item.ecommerce || '').toUpperCase() !== ecommerceFilter.toUpperCase()) return false;
+      
+      return true;
     });
 
     const groups: Record<string, { 
@@ -294,7 +434,22 @@ export const OrderManagement: React.FC = () => {
     });
     
     return Object.values(groups).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  }, [soldData, searchTerm]);
+  }, [soldData, searchTerm, customerFilter, partNumberFilter, ecommerceFilter]);
+
+  // Extract unique customers and part numbers from soldData for autocomplete - filtered and limited for performance
+  const filteredCustomerOptions = useMemo(() => {
+    if (!customerFilter || customerFilter.length < 1) return [];
+    const search = customerFilter.toLowerCase();
+    const customers = [...new Set(soldData.map(item => item.customer).filter(Boolean))];
+    return customers.filter(c => c.toLowerCase().includes(search)).slice(0, 50);
+  }, [soldData, customerFilter]);
+
+  const filteredPartNumberOptions = useMemo(() => {
+    if (!partNumberFilter || partNumberFilter.length < 1) return [];
+    const search = partNumberFilter.toLowerCase();
+    const partNumbers = [...new Set(soldData.map(item => item.part_number).filter(Boolean))];
+    return partNumbers.filter(p => p.toLowerCase().includes(search)).slice(0, 50);
+  }, [soldData, partNumberFilter]);
 
   // Pagination for grouped sold data
   const paginatedSoldGroups = useMemo(() => {
@@ -473,17 +628,53 @@ export const OrderManagement: React.FC = () => {
         ))}
       </div>
 
-      {/* SEARCH */}
+      {/* SEARCH FILTERS */}
       <div className="p-4 bg-gray-900/30 border-b border-gray-700">
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
-          <input 
-            type="text" 
-            placeholder="Cari Customer, Barang, Resi..." 
-            className="w-full pl-10 pr-4 py-3 bg-gray-800 border border-gray-700 rounded-xl text-sm focus:ring-2 focus:ring-purple-500 outline-none text-white placeholder-gray-500"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
+          {/* Customer Search with Keyboard-Navigable Dropdown */}
+          <AutocompleteDropdown
+            value={customerFilter}
+            onChange={setCustomerFilter}
+            options={filteredCustomerOptions}
+            placeholder="Cari Customer..."
+            icon={<User size={16} />}
           />
+          
+          {/* Part Number Search with Keyboard-Navigable Dropdown */}
+          <AutocompleteDropdown
+            value={partNumberFilter}
+            onChange={setPartNumberFilter}
+            options={filteredPartNumberOptions}
+            placeholder="Cari Part Number..."
+            icon={<Hash size={16} />}
+          />
+          
+          {/* Ecommerce Dropdown */}
+          <div className="relative">
+            <ShoppingBag className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
+            <select 
+              className="w-full pl-10 pr-4 py-3 bg-gray-800 border border-gray-700 rounded-xl text-sm focus:ring-2 focus:ring-purple-500 outline-none text-white appearance-none cursor-pointer"
+              value={ecommerceFilter}
+              onChange={(e) => setEcommerceFilter(e.target.value)}
+            >
+              <option value="all">Semua Sumber</option>
+              {ecommerceOptions.map(ecom => (
+                <option key={ecom} value={ecom}>{ecom}</option>
+              ))}
+            </select>
+          </div>
+          
+          {/* General Search (backward compatibility) */}
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
+            <input 
+              type="text" 
+              placeholder="Cari lainnya (Resi, Barang)..." 
+              className="w-full pl-10 pr-4 py-3 bg-gray-800 border border-gray-700 rounded-xl text-sm focus:ring-2 focus:ring-purple-500 outline-none text-white placeholder-gray-500"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+          </div>
         </div>
       </div>
 
