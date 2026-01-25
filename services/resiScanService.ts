@@ -507,8 +507,8 @@ export const checkResiOrOrderStatus = async (
   
   // Filter manual dengan case-insensitive matching
   const filtered = (data || []).filter((d: any) => {
-    const resiUpper = (d.resi || '').trim().toUpperCase();
-    const noPesananUpper = (d.no_pesanan || '').trim().toUpperCase();
+    const resiUpper = String(d.resi || '').trim().toUpperCase();
+    const noPesananUpper = String(d.no_pesanan || '').trim().toUpperCase();
     return normalized.includes(resiUpper) || normalized.includes(noPesananUpper);
   });
   

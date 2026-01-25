@@ -17,6 +17,7 @@ import {
   deleteProcessedResiItems,
   deleteResiItemById,
   checkResiOrOrderStatus,
+  checkExistingInBarangKeluar,
   getStage1ResiList,
   getAllPendingStage1Resi
 } from '../../services/resiScanService';
@@ -672,9 +673,36 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
         return;
       }
 
-      // Ambil info dari Stage 1 untuk mendapatkan ecommerce dengan negara yang benar
-      const resiList = parsedItems.map(i => i.resi);
-      const orderIdList = parsedItems.map(i => i.order_id).filter(Boolean);
+      // === STEP 1: CEK BARANG_KELUAR - Filter item yang sudah terjual ===
+      const allResiFromCSV = parsedItems.map(i => i.resi).filter(Boolean);
+      const allOrderIdFromCSV = parsedItems.map(i => i.order_id).filter(Boolean);
+      const allToCheckBarangKeluar = [...new Set([...allResiFromCSV, ...allOrderIdFromCSV])];
+      
+      const existingInBarangKeluar = await checkExistingInBarangKeluar(allToCheckBarangKeluar, selectedStore);
+      
+      // Filter: buang item yang sudah ada di barang_keluar
+      const skippedByBarangKeluar: any[] = [];
+      const afterBarangKeluarFilter = parsedItems.filter(item => {
+        const resiUpper = String(item.resi || '').trim().toUpperCase();
+        const orderIdUpper = String(item.order_id || '').trim().toUpperCase();
+        
+        if (existingInBarangKeluar.has(resiUpper) || existingInBarangKeluar.has(orderIdUpper)) {
+          skippedByBarangKeluar.push(item);
+          return false;
+        }
+        return true;
+      });
+      
+      if (afterBarangKeluarFilter.length === 0) {
+        const skippedResis = [...new Set(skippedByBarangKeluar.map(i => i.resi))].slice(0, 10).join(', ');
+        alert(`Semua ${parsedItems.length} resi sudah ada di Barang Keluar (sudah terjual)!\n\nResi: ${skippedResis}...`);
+        setLoading(false);
+        return;
+      }
+
+      // === STEP 2: Ambil info dari Stage 1 untuk ecommerce ===
+      const resiList = afterBarangKeluarFilter.map(i => i.resi);
+      const orderIdList = afterBarangKeluarFilter.map(i => i.order_id).filter(Boolean);
       const allResiOrOrders = [...new Set([...resiList, ...orderIdList])];
       
       // Cek Stage 1 untuk mendapatkan ecommerce yang sudah ada (termasuk negara ekspor)
@@ -684,11 +712,12 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
       const s1MapByResi = new Map<string, any>();
       const s1MapByOrder = new Map<string, any>();
       dbStatus.forEach((d: any) => {
-        if (d.resi) s1MapByResi.set(d.resi.trim().toUpperCase(), d);
+        if (d.resi) s1MapByResi.set(String(d.resi).trim().toUpperCase(), d);
         if (d.no_pesanan) s1MapByOrder.set(String(d.no_pesanan).trim().toUpperCase(), d);
       });
       
-      const correctedItems = parsedItems.map(item => {
+      // === STEP 3: Proses item yang lolos filter barang_keluar ===
+      const correctedItems = afterBarangKeluarFilter.map(item => {
         // Cek apakah resi ini sudah ada di Stage 1 - UPPERCASE matching
         const resiUpper = (item.resi || '').trim().toUpperCase();
         const orderIdUpper = (item.order_id || '').trim().toUpperCase();
@@ -725,20 +754,33 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
       if (correctedItems.length > 0) {
           const result = await saveCSVToResiItems(correctedItems, selectedStore);
           
-          if (result.skippedCount > 0) {
+          // Gabungkan info skip dari pre-filter dan dari saveCSVToResiItems
+          const totalSkipped = skippedByBarangKeluar.length + result.skippedCount;
+          const allSkippedResis = [
+            ...new Set([
+              ...skippedByBarangKeluar.map(i => i.resi),
+              ...result.skippedResis
+            ])
+          ];
+          
+          if (totalSkipped > 0) {
             // Ada item yang di-skip karena sudah ada di Barang Keluar
-            const skippedMsg = result.skippedResis.slice(0, 10).join(', ');
-            const moreMsg = result.skippedResis.length > 10 ? ` dan ${result.skippedResis.length - 10} lainnya` : '';
+            const skippedMsg = allSkippedResis.slice(0, 10).join(', ');
+            const moreMsg = allSkippedResis.length > 10 ? ` dan ${allSkippedResis.length - 10} lainnya` : '';
             alert(
               `✅ Berhasil import ${result.count} item sebagai ${uploadEcommerce} (${uploadSubToko}).\n\n` +
-              `⚠️ ${result.skippedCount} item di-SKIP karena sudah ada di Barang Keluar (sudah terjual/keluar):\n` +
+              `⚠️ ${totalSkipped} item di-SKIP karena sudah ada di Barang Keluar (sudah terjual/keluar):\n` +
               `${skippedMsg}${moreMsg}`
             );
           } else if (result.success) {
-            alert(`Berhasil import ${result.count} item sebagai ${uploadEcommerce} (${uploadSubToko}).`);
+            alert(`✅ Berhasil import ${result.count} item sebagai ${uploadEcommerce} (${uploadSubToko}).`);
           } else {
             alert(result.message);
           }
+      } else {
+        // Semua item sudah di-filter
+        const skippedResis = [...new Set(skippedByBarangKeluar.map(i => i.resi))].slice(0, 10).join(', ');
+        alert(`Semua item sudah ada di Barang Keluar!\n\nResi: ${skippedResis}...`);
       }
 
       await loadSavedDataFromDB();
@@ -995,10 +1037,10 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
     // Filter by search query - mencari di resi, no_pesanan, customer, part_number
     if (resiSearchQuery) {
       const query = resiSearchQuery.toLowerCase();
-      const matchResi = row.resi.toLowerCase().includes(query);
-      const matchOrder = row.no_pesanan && row.no_pesanan.toLowerCase().includes(query);
-      const matchCustomer = row.customer && row.customer.toLowerCase().includes(query);
-      const matchPart = row.part_number && row.part_number.toLowerCase().includes(query);
+      const matchResi = String(row.resi || '').toLowerCase().includes(query);
+      const matchOrder = row.no_pesanan && String(row.no_pesanan).toLowerCase().includes(query);
+      const matchCustomer = row.customer && String(row.customer).toLowerCase().includes(query);
+      const matchPart = row.part_number && String(row.part_number).toLowerCase().includes(query);
       if (!matchResi && !matchOrder && !matchCustomer && !matchPart) return false;
     }
     
@@ -1240,10 +1282,10 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                             {(() => {
                                 const filteredTableRows = rows.filter(r => 
                                     resiSearchQuery && (
-                                        r.resi.toLowerCase().includes(resiSearchQuery.toLowerCase()) ||
-                                        (r.no_pesanan && r.no_pesanan.toLowerCase().includes(resiSearchQuery.toLowerCase())) ||
-                                        (r.customer && r.customer.toLowerCase().includes(resiSearchQuery.toLowerCase())) ||
-                                        (r.part_number && r.part_number.toLowerCase().includes(resiSearchQuery.toLowerCase()))
+                                        String(r.resi || '').toLowerCase().includes(resiSearchQuery.toLowerCase()) ||
+                                        (r.no_pesanan && String(r.no_pesanan).toLowerCase().includes(resiSearchQuery.toLowerCase())) ||
+                                        (r.customer && String(r.customer).toLowerCase().includes(resiSearchQuery.toLowerCase())) ||
+                                        (r.part_number && String(r.part_number).toLowerCase().includes(resiSearchQuery.toLowerCase()))
                                     )
                                 );
                                 return filteredTableRows.length > 0 && (
@@ -1294,15 +1336,15 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                             <div className="p-1.5 text-[9px] text-blue-400 border-b border-gray-700 bg-blue-900/20 font-semibold sticky top-0 z-10">
                                 🔍 Resi Stage 1 ({stage1ResiList.filter(r => 
                                     !resiSearchQuery || 
-                                    r.resi.toLowerCase().includes(resiSearchQuery.toLowerCase()) ||
-                                    (r.no_pesanan && r.no_pesanan.toLowerCase().includes(resiSearchQuery.toLowerCase()))
+                                    String(r.resi || '').toLowerCase().includes(resiSearchQuery.toLowerCase()) ||
+                                    (r.no_pesanan && String(r.no_pesanan).toLowerCase().includes(resiSearchQuery.toLowerCase()))
                                 ).length})
                             </div>
                             {stage1ResiList
                                 .filter(r => 
                                     !resiSearchQuery || 
-                                    r.resi.toLowerCase().includes(resiSearchQuery.toLowerCase()) ||
-                                    (r.no_pesanan && r.no_pesanan.toLowerCase().includes(resiSearchQuery.toLowerCase()))
+                                    String(r.resi || '').toLowerCase().includes(resiSearchQuery.toLowerCase()) ||
+                                    (r.no_pesanan && String(r.no_pesanan).toLowerCase().includes(resiSearchQuery.toLowerCase()))
                                 )
                                 .slice(0, 30)
                                 .map((r, i) => (
