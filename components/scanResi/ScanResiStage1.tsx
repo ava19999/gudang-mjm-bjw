@@ -174,6 +174,13 @@ export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh }) => 
     setBulkSubToko(defaultToko as SubToko);
   }, [selectedStore]);
   
+  // Reset subToko jika pindah dari RESELLER ke yang lain untuk mencegah data invalid
+  useEffect(() => {
+    if (ecommerce !== 'RESELLER') {
+      setSubToko(selectedStore === 'bjw' ? 'BJW' : 'MJM');
+    }
+  }, [ecommerce, selectedStore]);
+
   // Auto focus on resi input
   useEffect(() => {
     if (resiInputRef.current && !showResellerForm) {
@@ -245,15 +252,28 @@ export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh }) => 
     try {
       const now = new Date().toISOString(); // atau gunakan format sesuai kebutuhan
 
-      const payload = {
-        resi: resiInput.trim(),
+      // Construct payload to match the user's `scan_resi_*` table schema
+      const payload: any = {
+        resi: resiInput.trim().replace(/[\n\r\t]/g, ''), // Hapus karakter hidden scanner
         ecommerce,
-        sub_toko: subToko,
-        negara_ekspor: ecommerce === 'EKSPOR' ? negaraEkspor : undefined,
-        scanned_by: userName || 'Admin',
+        sub_toko: subToko?.trim() || (selectedStore === 'bjw' ? 'BJW' : 'MJM'), // Fallback default
+        stage1_scanned_by: userName || 'Admin', // Match column name
         tanggal: now,
-        reseller: selectedReseller || null,
+        status: 'stage1',
+        stage1_scanned: true,
+        stage1_scanned_at: now,
+        no_pesanan: null, // Explicitly set nullable numeric column
       };
+
+      if (ecommerce === 'EKSPOR' && negaraEkspor) {
+        payload.negara_ekspor = negaraEkspor;
+      }
+      
+      if (ecommerce === 'RESELLER' && selectedReseller?.trim()) {
+        const resellerData = resellers.find(r => r.nama_reseller === selectedReseller.trim());
+        payload.id_reseller = resellerData ? (resellerData.id_reseller || resellerData.id) : null;
+        payload.customer = selectedReseller.trim();
+      }
       
       const result = await scanResiStage1(payload, selectedStore);
       
@@ -505,13 +525,24 @@ export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh }) => 
 
     setBulkSaving(true);
 
-    const items = validResis.map(r => ({
-      resi: r.resi.trim(),
-      ecommerce: bulkEcommerce === 'EKSPOR' ? `EKSPOR - ${bulkNegaraEkspor}` : bulkEcommerce,
-      sub_toko: bulkSubToko,
-      negara_ekspor: bulkEcommerce === 'EKSPOR' ? bulkNegaraEkspor : undefined,
-      scanned_by: userName || 'Admin'
-    }));
+    const now = new Date().toISOString();
+    const items = validResis.map(r => {
+      const itemPayload: any = {
+        resi: r.resi.trim(),
+        ecommerce: bulkEcommerce,
+        sub_toko: bulkSubToko?.trim(),
+        stage1_scanned_by: userName || 'Admin',
+        tanggal: now,
+        status: 'stage1',
+        stage1_scanned: true,
+        stage1_scanned_at: now,
+        no_pesanan: null,
+      };
+      if (bulkEcommerce === 'EKSPOR') {
+        itemPayload.negara_ekspor = bulkNegaraEkspor;
+      }
+      return itemPayload;
+    });
 
     const result = await scanResiStage1Bulk(items, selectedStore);
 
