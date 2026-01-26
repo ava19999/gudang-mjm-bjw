@@ -278,7 +278,7 @@ export const scanResiStage1Bulk = async (
 export const getResiStage1List = async (store: string | null) => {
   const table = getTableName(store);
   
-  // Ambil semua data dari tabel tanpa filter apapun dulu
+  // Ambil semua data dari tabel
   const { data, error } = await supabase
     .from(table)
     .select('*')
@@ -374,23 +374,11 @@ export const restoreResi = async (resiData: ResiScanStage, store: string | null)
 // Update resi - edit resi, ecommerce, sub_toko, negara_ekspor
 export const updateResi = async (
   id: string,
-  updates: { resi?: string; ecommerce?: string; sub_toko?: string; negara_ekspor?: string | null; updated_by?: string },
+  updates: { resi?: string; ecommerce?: string; sub_toko?: string; negara_ekspor?: string | null },
   store: string | null
 ) => {
   const table = getTableName(store);
-  
-  // Jika ada updated_by, update juga stage1_scanned_by jika kosong
-  const updateData: any = { ...updates };
-  if (updates.updated_by) {
-    // Cek apakah stage1_scanned_by sudah ada
-    const { data: existing } = await supabase.from(table).select('stage1_scanned_by').eq('id', id).single();
-    if (!existing?.stage1_scanned_by) {
-      updateData.stage1_scanned_by = updates.updated_by;
-    }
-    delete updateData.updated_by; // Hapus karena bukan kolom di database
-  }
-  
-  const { error } = await supabase.from(table).update(updateData).eq('id', id);
+  const { error } = await supabase.from(table).update(updates).eq('id', id);
   if (error) return { success: false, message: error.message };
   return { success: true, message: 'Resi berhasil diupdate!' };
 };
