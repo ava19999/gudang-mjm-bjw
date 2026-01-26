@@ -137,6 +137,8 @@ export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh }) => 
   const bulkInputRefs = useRef<{ [key: string]: HTMLInputElement | null }>({});
   
   const resiInputRef = useRef<HTMLInputElement>(null);
+  // Ref untuk mencegah double submit dari scanner
+  const isSubmitting = useRef(false);
   
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
     setToast({ message, type });
@@ -178,59 +180,82 @@ export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh }) => 
   const handleScanResi = async (e: React.FormEvent) => {
     e.preventDefault();
     
+    // CEGAH DOUBLE SUBMIT: Jika sedang proses, abaikan input berikutnya
+    if (isSubmitting.current) return;
+
     if (!resiInput.trim()) {
       showToast('Resi tidak boleh kosong!', 'error');
       return;
     }
     
+    // Kunci proses
+    isSubmitting.current = true;
     setLoading(true);
     
-    const now = new Date().toISOString(); // atau gunakan format sesuai kebutuhan
+    try {
+      const now = new Date().toISOString(); // atau gunakan format sesuai kebutuhan
 
-    const payload = {
-      resi: resiInput.trim(),
-      ecommerce,
-      sub_toko: subToko,
-      negara_ekspor: ecommerce === 'EKSPOR' ? negaraEkspor : undefined,
-      scanned_by: userName || 'Admin',
-      tanggal: now,
-      reseller: selectedReseller || null,
-    };
-    
-    const result = await scanResiStage1(payload, selectedStore);
-    
-    if (result.success) {
-      showToast('Resi berhasil di-scan!');
-      setResiInput('');
-      await loadResiList();
-      if (onRefresh) onRefresh();
-      // Scroll/focus ke input resi agar siap scan berikutnya
-      setTimeout(() => {
-        if (resiInputRef.current) {
-          resiInputRef.current.focus();
-          resiInputRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      const payload = {
+        resi: resiInput.trim(),
+        ecommerce,
+        sub_toko: subToko,
+        negara_ekspor: ecommerce === 'EKSPOR' ? negaraEkspor : undefined,
+        scanned_by: userName || 'Admin',
+        tanggal: now,
+        reseller: selectedReseller || null,
+      };
+      
+      const result = await scanResiStage1(payload, selectedStore);
+      
+      if (result.success) {
+        showToast('Resi berhasil di-scan!');
+        setResiInput('');
+        await loadResiList();
+        if (onRefresh) onRefresh();
+        // Scroll/focus ke input resi agar siap scan berikutnya
+        setTimeout(() => {
+          if (resiInputRef.current) {
+            resiInputRef.current.focus();
+            resiInputRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+        }, 100);
+      } else {
+        showToast(result.message, 'error');
+        setResiInput(''); // KOSONGKAN INPUT JIKA DOUBLE/ERROR
+        
+        // FIX: Hanya mainkan audio jika error mengandung kata kunci duplikat/sudah ada
+        const isDuplicate = result.message.toLowerCase().includes('duplicate') || 
+                            result.message.toLowerCase().includes('unique') || 
+                            result.message.toLowerCase().includes('sudah ada');
+
+        if (isDuplicate) {
+          try {
+            const audio = new Audio(duplicateAudioFile);
+            audio.volume = 1.0;
+            audio.play().catch((e) => console.error('Audio play failed:', e));
+          } catch (e) {
+            console.error('Audio error:', e);
+          }
         }
-      }, 100);
-    } else {
-      showToast(result.message, 'error');
-      setResiInput(''); // KOSONGKAN INPUT JIKA DOUBLE/ERROR
-      // Mainkan audio sudah di scan.mp3 jika error/double
-      try {
-        const audio = new Audio(duplicateAudioFile);
-        audio.volume = 1.0;
-        audio.play().catch((e) => console.error('Audio play failed:', e));
-      } catch (e) {
-        console.error('Audio error:', e);
+        
+        // Tetap fokus ke input jika error
+        setTimeout(() => {
+          if (resiInputRef.current) {
+            resiInputRef.current.focus();
+            resiInputRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+        }, 100);
       }
-      // Tetap fokus ke input jika error
+    } catch (error) {
+      console.error("Scan error:", error);
+      showToast("Terjadi kesalahan sistem", 'error');
+    } finally {
+      setLoading(false);
+      // Delay unlock sedikit untuk mencegah bounce dari scanner
       setTimeout(() => {
-        if (resiInputRef.current) {
-          resiInputRef.current.focus();
-          resiInputRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }
-      }, 100);
+        isSubmitting.current = false;
+      }, 500);
     }
-    setLoading(false);
   };
   
   const handleDeleteResi = async (resiId: string) => {
