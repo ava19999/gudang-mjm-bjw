@@ -479,16 +479,17 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
           }
         });
 
-        // Simpan loadedRows untuk digunakan nanti
-        const csvResiSet = new Set(loadedRows.map(r => r.resi));
+        // Simpan loadedRows untuk digunakan nanti - UPPERCASE untuk case-insensitive matching
+        const csvResiSet = new Set(loadedRows.map(r => (r.resi || '').trim().toUpperCase()));
         
         // === TAMBAHAN: Ambil resi dari Stage 1 yang belum ada di CSV ===
         const stage1Resi = await getAllPendingStage1Resi(selectedStore);
         
-        // Filter resi Stage 1 yang belum ada di CSV
+        // Filter resi Stage 1 yang belum ada di CSV (case-insensitive)
         const stage1OnlyRows: Stage3Row[] = [];
         for (const s1 of stage1Resi) {
-          if (!csvResiSet.has(s1.resi)) {
+          const s1ResiUpper = (s1.resi || '').trim().toUpperCase();
+          if (!csvResiSet.has(s1ResiUpper)) {
             // Tentukan ecommerce dengan negara
             let ecommerce = s1.ecommerce || '-';
             if (ecommerce === 'EKSPOR' && s1.negara_ekspor) {
@@ -520,27 +521,17 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
               status_message: statusMsg,
               force_override_double: false
             });
-            csvResiSet.add(s1.resi);
+            csvResiSet.add(s1ResiUpper);
           }
         }
         
         // Gabungkan semua rows (dari CSV + Stage 1 only)
         const allRows = [...loadedRows, ...stage1OnlyRows];
         
-        setRows(prev => {
-            const newMap = new Map();
-            allRows.forEach(r => newMap.set(r.resi + r.part_number, r));
-            const mergedRows = prev.map(existingRow => {
-                const key = existingRow.resi + existingRow.part_number;
-                if (newMap.has(key)) {
-                    const freshData = newMap.get(key);
-                    newMap.delete(key);
-                    return freshData;
-                }
-                return existingRow;
-            });
-            return [...mergedRows, ...Array.from(newMap.values()) as Stage3Row[]];
-        });
+        // Gunakan resi (uppercase) sebagai key utama, bukan resi + part_number
+        // Jika ada multiple item dengan resi sama tapi part_number berbeda, 
+        // gunakan resi + part_number + nama_barang_csv sebagai key
+        setRows(allRows);
       } else {
         // Jika tidak ada CSV items, tetap load dari Stage 1
         const stage1Resi = await getAllPendingStage1Resi(selectedStore);
@@ -752,7 +743,33 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
       });
 
       if (correctedItems.length > 0) {
-          const result = await saveCSVToResiItems(correctedItems, selectedStore);
+          // === FITUR BARU: Buat map resi yang sudah ada di Stage 3 untuk di-UPDATE/INSERT ===
+          // Hanya untuk SHOPEE - jika resi sudah ada, data CSV akan mengisi/update baris yang ada
+          // TANPA mengubah kolom ecommerce dan toko (tetap dari scan aplikasi)
+          // 
+          // Ada 2 kasus:
+          // 1. ID format "db-XXX" -> sudah ada di resi_items, bisa di-UPDATE
+          // 2. ID format "s1-XXX" -> hanya ada di scan_resi, perlu INSERT baru tapi pakai ecommerce/toko dari scan
+          const existingResiMap = new Map<string, { id: string, ecommerce: string, toko: string, isFromDB: boolean }>();
+          
+          if (platform === 'shopee') {
+            // Buat map dari resi yang sudah ada di rows (Stage 3)
+            for (const row of rows) {
+              const resiUpper = (row.resi || '').trim().toUpperCase();
+              if (resiUpper) {
+                // Cek apakah row ini dari database (db-XXX) atau dari Stage 1 scan (s1-XXX)
+                const isFromDB = row.id.startsWith('db-');
+                existingResiMap.set(resiUpper, {
+                  id: row.id,
+                  ecommerce: row.ecommerce,
+                  toko: row.sub_toko,
+                  isFromDB: isFromDB
+                });
+              }
+            }
+          }
+          
+          const result = await saveCSVToResiItems(correctedItems, selectedStore, existingResiMap);
           
           // Gabungkan info skip dari pre-filter dan dari saveCSVToResiItems
           const totalSkipped = skippedByBarangKeluar.length + result.skippedCount;
@@ -763,17 +780,22 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
             ])
           ];
           
+          // Buat pesan hasil
+          const updateInfo = result.updatedCount > 0 
+            ? `\n📝 ${result.updatedCount} resi sudah ada → data CSV diisi ke baris yang ada (ecommerce & toko tetap dari scan)` 
+            : '';
+          
           if (totalSkipped > 0) {
             // Ada item yang di-skip karena sudah ada di Barang Keluar
             const skippedMsg = allSkippedResis.slice(0, 10).join(', ');
             const moreMsg = allSkippedResis.length > 10 ? ` dan ${allSkippedResis.length - 10} lainnya` : '';
             alert(
-              `✅ Berhasil import ${result.count} item sebagai ${uploadEcommerce} (${uploadSubToko}).\n\n` +
+              `✅ Berhasil import ${result.count} item baru sebagai ${uploadEcommerce} (${uploadSubToko}).${updateInfo}\n\n` +
               `⚠️ ${totalSkipped} item di-SKIP karena sudah ada di Barang Keluar (sudah terjual/keluar):\n` +
               `${skippedMsg}${moreMsg}`
             );
           } else if (result.success) {
-            alert(`✅ Berhasil import ${result.count} item sebagai ${uploadEcommerce} (${uploadSubToko}).`);
+            alert(`✅ Berhasil import ${result.count} item baru sebagai ${uploadEcommerce} (${uploadSubToko}).${updateInfo}`);
           } else {
             alert(result.message);
           }

@@ -51,10 +51,28 @@ const parseCurrencyIDR = (val: string): number => {
   if (!val) return 0;
   // Buang semua karakter non-angka kecuali titik, koma, minus
   let numStr = val.replace(/[^0-9.,-]/g, '');
-  // Buang titik (ribuan Indonesia)
-  numStr = numStr.replace(/\./g, '');
-  // Ganti koma jadi titik (desimal Indonesia)
-  numStr = numStr.replace(/,/g, '.');
+  
+  // Deteksi format: 
+  // - Jika ada koma diikuti 3 digit di akhir (100,000) → koma adalah ribuan
+  // - Jika ada titik diikuti 3 digit di akhir (100.000) → titik adalah ribuan
+  // - Jika ada koma diikuti 1-2 digit di akhir (100,50) → koma adalah desimal
+  
+  const commaMatch = numStr.match(/,(\d+)$/);
+  const dotMatch = numStr.match(/\.(\d+)$/);
+  
+  if (commaMatch && commaMatch[1].length === 3) {
+    // Koma adalah ribuan (format: 100,000 atau 1,000,000)
+    numStr = numStr.replace(/,/g, '');
+  } else if (dotMatch && dotMatch[1].length === 3) {
+    // Titik adalah ribuan (format Indonesia: 100.000)
+    numStr = numStr.replace(/\./g, '');
+    numStr = numStr.replace(/,/g, '.');
+  } else {
+    // Default: titik adalah ribuan, koma adalah desimal (format Indonesia)
+    numStr = numStr.replace(/\./g, '');
+    numStr = numStr.replace(/,/g, '.');
+  }
+  
   return parseFloat(numStr) || 0;
 };
 
@@ -150,13 +168,37 @@ export const parseShopeeCSV = (text: string): ParsedCSVItem[] => {
       ? cols[idxResi].replace(/["']/g, '').trim() 
       : '';
     resi = fixScientificNotation(resi);
-    if (!resi) return null;
     
     // Get order_id - juga fix scientific notation
     let orderId = (idxOrder !== -1 && cols[idxOrder]) 
       ? cols[idxOrder].replace(/["']/g, '').trim() 
       : '';
     orderId = fixScientificNotation(orderId);
+    
+    // Get opsi pengiriman
+    const shippingOption = (idxOpsiKirim !== -1 && cols[idxOpsiKirim]) 
+      ? cols[idxOpsiKirim].replace(/["']/g, '').trim() 
+      : '';
+    const shippingOptionLower = shippingOption.toLowerCase();
+    
+    // KHUSUS INSTANT & KILAT: Gunakan No. Pesanan sebagai Resi
+    // Karena Instant/Kilat tidak punya resi tradisional
+    // Label INSTAN/KILAT ditaruh di kolom ecommerce
+    // Prioritas: cek "kilat" dulu karena "kilat instan" mengandung kedua kata
+    const isKilat = shippingOptionLower.includes('kilat');
+    const isInstant = shippingOptionLower.includes('instant') && !isKilat;
+    
+    let ecommerceLabel = 'SHOPEE';
+    if (isKilat) {
+      if (orderId) resi = orderId;
+      ecommerceLabel = 'KILAT INSTAN';
+    } else if (isInstant) {
+      if (orderId) resi = orderId;
+      ecommerceLabel = 'SHOPEE INSTAN';
+    }
+    
+    // SKIP jika resi masih kosong
+    if (!resi) return null;
 
     // Format customer
     const customer = formatCustomer(cols[idxUser] || '');
@@ -178,14 +220,14 @@ export const parseShopeeCSV = (text: string): ParsedCSVItem[] => {
       resi,
       order_id: orderId,
       order_status: rawStatus,
-      shipping_option: (idxOpsiKirim !== -1 && cols[idxOpsiKirim]) ? cols[idxOpsiKirim].replace(/["']/g, '') : '',
+      shipping_option: shippingOption,
       customer,
       part_number: (idxSKU !== -1 && cols[idxSKU]) ? cols[idxSKU].replace(/["']/g, '') : '',
       product_name: productName,
       quantity: (idxQty !== -1) ? (parseInt(cols[idxQty]) || 1) : 1,
       total_price: totalPriceIDR,
       original_currency_val: (idxTotal !== -1) ? cols[idxTotal] : '0',
-      ecommerce: 'SHOPEE'
+      ecommerce: ecommerceLabel
     };
   }).filter((item): item is ParsedCSVItem => item !== null);
 };

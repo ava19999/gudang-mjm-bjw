@@ -784,14 +784,19 @@ export const processBarangKeluarBatch = async (items: any[], store: string | nul
   return { success: errors.length === 0, processed: successCount, errors };
 };
 
+/**
+ * existingResiMap: Map<resi_upper, { id: string, ecommerce: string, toko: string, isFromDB: boolean }>
+ * Digunakan untuk mendapatkan ecommerce/toko dari scan aplikasi
+ */
 export const saveCSVToResiItems = async (
   items: ParsedCSVItem[], 
-  store: string | null
-): Promise<{ success: boolean; message: string; count: number; skippedCount: number; skippedResis: string[] }> => {
+  store: string | null,
+  existingResiMap?: Map<string, { id: string, ecommerce: string, toko: string, isFromDB?: boolean }>
+): Promise<{ success: boolean; message: string; count: number; skippedCount: number; skippedResis: string[]; updatedCount: number }> => {
   const tableName = store === 'mjm' ? 'resi_items_mjm' : (store === 'bjw' ? 'resi_items_bjw' : null);
   
-  if (!tableName) return { success: false, message: 'Toko tidak valid', count: 0, skippedCount: 0, skippedResis: [] };
-  if (!items || items.length === 0) return { success: false, message: 'Tidak ada data untuk disimpan', count: 0, skippedCount: 0, skippedResis: [] };
+  if (!tableName) return { success: false, message: 'Toko tidak valid', count: 0, skippedCount: 0, skippedResis: [], updatedCount: 0 };
+  if (!items || items.length === 0) return { success: false, message: 'Tidak ada data untuk disimpan', count: 0, skippedCount: 0, skippedResis: [], updatedCount: 0 };
 
   try {
     // Kumpulkan semua resi dan order_id untuk dicek
@@ -802,8 +807,26 @@ export const saveCSVToResiItems = async (
     // Cek apakah sudah ada di barang_keluar (sudah terjual/keluar)
     const existingInBarangKeluar = await checkExistingInBarangKeluar(allToCheck, store);
     
-    // Filter items yang tidak ada di barang_keluar
+    // === LANGKAH BARU: Cek apakah resi sudah di-scan di Stage 1 ===
+    // Hanya resi yang sudah scan Stage 1 yang boleh masuk ke resi_items
+    const scanTable = getTableName(store);
+    const { data: stage1Data } = await supabase
+      .from(scanTable)
+      .select('resi, no_pesanan')
+      .eq('stage1_scanned', 'true');
+    
+    // Buat set untuk lookup cepat (UPPERCASE)
+    const stage1ResiSet = new Set<string>();
+    (stage1Data || []).forEach((row: any) => {
+      if (row.resi) stage1ResiSet.add(String(row.resi).trim().toUpperCase());
+      if (row.no_pesanan) stage1ResiSet.add(String(row.no_pesanan).trim().toUpperCase());
+    });
+    
+    console.log(`[saveCSVToResiItems] Found ${stage1ResiSet.size} resi in Stage 1`);
+    
+    // Filter items: harus lolos barang_keluar DAN sudah scan Stage 1
     const skippedItems: ParsedCSVItem[] = [];
+    const skippedNotScanned: ParsedCSVItem[] = [];
     const validItems = items.filter(item => {
       const resiUpper = (item.resi || '').trim().toUpperCase();
       const orderIdUpper = (item.order_id || '').trim().toUpperCase();
@@ -813,76 +836,195 @@ export const saveCSVToResiItems = async (
         skippedItems.push(item);
         return false;
       }
+      
+      // Jika resi BELUM scan Stage 1, skip
+      if (!stage1ResiSet.has(resiUpper) && !stage1ResiSet.has(orderIdUpper)) {
+        skippedNotScanned.push(item);
+        return false;
+      }
+      
       return true;
     });
     
     const skippedResis = [...new Set(skippedItems.map(i => i.resi))];
+    const skippedNotScannedResis = [...new Set(skippedNotScanned.map(i => i.resi))];
+    
+    console.log(`[saveCSVToResiItems] Valid items: ${validItems.length}, Skipped (barang_keluar): ${skippedItems.length}, Skipped (not scanned): ${skippedNotScanned.length}`);
     
     if (validItems.length === 0) {
+      let message = '';
+      if (skippedItems.length > 0 && skippedNotScanned.length > 0) {
+        message = `Tidak ada resi valid. ${skippedItems.length} sudah di Barang Keluar, ${skippedNotScanned.length} belum scan Stage 1.`;
+      } else if (skippedItems.length > 0) {
+        message = `Semua ${items.length} resi sudah ada di Barang Keluar (sudah terjual/keluar)!`;
+      } else if (skippedNotScanned.length > 0) {
+        message = `Semua ${items.length} resi belum di-scan di Stage 1!`;
+      } else {
+        message = 'Tidak ada data valid untuk disimpan.';
+      }
       return { 
         success: false, 
-        message: `Semua ${items.length} resi sudah ada di Barang Keluar (sudah terjual/keluar)!`, 
+        message, 
         count: 0, 
-        skippedCount: skippedItems.length,
-        skippedResis 
+        skippedCount: skippedItems.length + skippedNotScanned.length,
+        skippedResis: [...skippedResis, ...skippedNotScannedResis],
+        updatedCount: 0
       };
     }
 
-    const resiList = [...new Set(validItems.map(i => i.resi))];
-
-    const { error: deleteError } = await supabase
+    // === LANGKAH 1: Cek SEMUA resi dari CSV ke database resi_items ===
+    // Ambil semua resi yang sudah ada di database untuk semua item yang valid
+    const allValidResis = [...new Set(validItems.map(i => i.resi).filter(Boolean))];
+    
+    // Query dengan case-insensitive menggunakan ilike untuk setiap resi
+    // Karena .in() adalah case-sensitive, kita perlu query semua lalu filter manual
+    // Tambahkan status dan part_number untuk cek apakah sudah "Ready"
+    const { data: allExistingInDB } = await supabase
       .from(tableName)
-      .delete()
-      .in('resi', resiList)
-      .eq('status', 'pending');
-
-    if (deleteError) {
-      console.warn("Warning hapus data lama:", deleteError.message);
-    }
-
-    const payload = validItems.map(item => {
-      const fixedToko = (item as any).sub_toko || store?.toUpperCase();
-      
-      return {
-        order_id: item.order_id,
-        status_pesanan: item.order_status,
-        resi: item.resi,
-        opsi_pengiriman: item.shipping_option,
-        part_number: item.part_number,
-        nama_produk: item.product_name,
-        jumlah: item.quantity,
-        total_harga_produk: item.total_price,
-        customer: item.customer,
-        ecommerce: item.ecommerce, 
-        toko: fixedToko,           
-        status: 'pending',
-        // [UBAH] Gunakan getWIBDate()
-        created_at: getWIBDate().toISOString()
-      };
+      .select('id, resi, ecommerce, toko, status, part_number, customer');
+    
+    // Buat map untuk lookup cepat (UPPERCASE untuk case-insensitive)
+    const dbResiMap = new Map<string, { id: number, ecommerce: string, toko: string, isReady: boolean }>();
+    const allValidResisUpper = new Set(allValidResis.map(r => r.trim().toUpperCase()));
+    
+    (allExistingInDB || []).forEach((row: any) => {
+      const resiUpper = String(row.resi || '').trim().toUpperCase();
+      // Hanya simpan ke map jika resi ada di list yang kita cari
+      if (allValidResisUpper.has(resiUpper)) {
+        // Cek apakah sudah "Ready" - memiliki part_number dan customer yang valid
+        const hasPartNumber = row.part_number && row.part_number.trim() !== '';
+        const hasCustomer = row.customer && row.customer.trim() !== '' && row.customer !== '-';
+        const isReady = hasPartNumber && hasCustomer;
+        
+        dbResiMap.set(resiUpper, {
+          id: row.id,
+          ecommerce: row.ecommerce,
+          toko: row.toko,
+          isReady: isReady
+        });
+      }
     });
+    
+    console.log(`[saveCSVToResiItems] Found ${dbResiMap.size} existing resi in resi_items from ${allValidResis.length} valid CSV resis`);
 
-    const { error } = await supabase
-      .from(tableName)
-      .insert(payload); 
+    let updatedCount = 0;
+    let insertedCount = 0;
+    let skippedReadyCount = 0;
 
-    if (error) {
-      console.error('Error saving CSV to DB:', error);
-      throw error;
+    // === LANGKAH 2: Proses setiap item - UPDATE jika sudah ada, INSERT jika baru ===
+    for (const item of validItems) {
+      const resiUpper = (item.resi || '').trim().toUpperCase();
+      const existingInDB = dbResiMap.get(resiUpper);
+      
+      // Cek juga di existingResiMap (dari UI) untuk mendapatkan ecommerce/toko dari scan
+      const scanData = existingResiMap?.get(resiUpper);
+      
+      console.log(`[saveCSVToResiItems] Processing resi: ${item.resi}, existingInDB: ${existingInDB ? 'YES (id=' + existingInDB.id + ', isReady=' + existingInDB.isReady + ')' : 'NO'}, scanData: ${scanData ? 'YES' : 'NO'}`);
+      
+      if (existingInDB) {
+        // === RESI SUDAH ADA DI DATABASE ===
+        
+        // SKIP jika sudah Ready (sudah memiliki data lengkap)
+        if (existingInDB.isReady) {
+          console.log(`[saveCSVToResiItems] ⏭️ Skipped resi ${item.resi} - already Ready`);
+          skippedReadyCount++;
+          continue;
+        }
+        
+        // UPDATE hanya jika belum Ready
+        // JANGAN ubah ecommerce dan toko - tetap dari data yang ada di DB
+        // KECUALI untuk SHOPEE INSTAN/KILAT, update ecommerce dari CSV
+        const updatePayload: Record<string, any> = {
+          order_id: item.order_id,
+          status_pesanan: item.order_status,
+          opsi_pengiriman: item.shipping_option,
+          part_number: item.part_number,
+          nama_produk: item.product_name,
+          jumlah: item.quantity,
+          total_harga_produk: item.total_price,
+          customer: item.customer,
+        };
+        
+        // Update ecommerce jika Instan atau Kilat
+        if (item.ecommerce === 'SHOPEE INSTAN' || item.ecommerce === 'KILAT INSTAN') {
+          updatePayload.ecommerce = item.ecommerce;
+          console.log(`[saveCSVToResiItems] 📦 Updating ecommerce to ${item.ecommerce} for resi ${item.resi}`);
+        }
+        
+        console.log(`[saveCSVToResiItems] Updating resi ${item.resi} with id=${existingInDB.id}, payload:`, updatePayload);
+        
+        const { error: updateErr } = await supabase
+          .from(tableName)
+          .update(updatePayload)
+          .eq('id', existingInDB.id);
+        
+        if (!updateErr) {
+          updatedCount++;
+          console.log(`[saveCSVToResiItems] ✅ Updated resi: ${item.resi}`);
+        } else {
+          console.error(`[saveCSVToResiItems] ❌ Failed to update resi ${item.resi}:`, updateErr);
+        }
+      } else {
+        // === RESI BELUM ADA DI DATABASE → INSERT BARU ===
+        // Gunakan ecommerce/toko dari scan (jika ada) atau dari CSV
+        let ecommerce = item.ecommerce;
+        let toko = (item as any).sub_toko || store?.toUpperCase();
+        
+        if (scanData) {
+          // Ada data dari scan, gunakan ecommerce/toko dari sana
+          ecommerce = scanData.ecommerce;
+          toko = scanData.toko;
+        }
+        
+        const insertPayload = {
+          order_id: item.order_id,
+          status_pesanan: item.order_status,
+          resi: item.resi,
+          opsi_pengiriman: item.shipping_option,
+          part_number: item.part_number,
+          nama_produk: item.product_name,
+          jumlah: item.quantity,
+          total_harga_produk: item.total_price,
+          customer: item.customer,
+          ecommerce: ecommerce,
+          toko: toko,
+          status: 'pending',
+          created_at: getWIBDate().toISOString()
+        };
+        
+        const { error: insertErr } = await supabase
+          .from(tableName)
+          .insert([insertPayload]);
+        
+        if (!insertErr) {
+          insertedCount++;
+          console.log(`[saveCSVToResiItems] Inserted new resi: ${item.resi}`);
+        } else {
+          console.error(`[saveCSVToResiItems] Failed to insert resi ${item.resi}:`, insertErr);
+        }
+      }
     }
 
     const skippedMsg = skippedResis.length > 0 
       ? ` (${skippedResis.length} resi di-skip karena sudah ada di Barang Keluar)`
       : '';
+    
+    const readyMsg = skippedReadyCount > 0
+      ? `, ${skippedReadyCount} resi di-skip (sudah Ready)`
+      : '';
+    
+    const updateMsg = updatedCount > 0 ? `, ${updatedCount} resi di-update` : '';
 
     return { 
       success: true, 
-      message: `Data CSV berhasil disimpan ke database${skippedMsg}`, 
-      count: payload.length,
-      skippedCount: skippedItems.length,
-      skippedResis 
+      message: `Data CSV berhasil disimpan ke database${updateMsg}${readyMsg}${skippedMsg}`, 
+      count: insertedCount,
+      skippedCount: skippedItems.length + skippedReadyCount,
+      skippedResis,
+      updatedCount
     };
   } catch (err: any) {
-    return { success: false, message: err.message || 'Gagal menyimpan data CSV', count: 0, skippedCount: 0, skippedResis: [] };
+    return { success: false, message: err.message || 'Gagal menyimpan data CSV', count: 0, skippedCount: 0, skippedResis: [], updatedCount: 0 };
   }
 };
 
