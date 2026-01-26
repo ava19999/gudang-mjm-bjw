@@ -277,16 +277,13 @@ export const scanResiStage1Bulk = async (
 
 export const getResiStage1List = async (store: string | null) => {
   const table = getTableName(store);
-  console.log('[getResiStage1List] store:', store, 'table:', table);
   
-  // Ambil semua data dari tabel tanpa filter apapun dulu
+  // Ambil semua data dari tabel
   const { data, error } = await supabase
     .from(table)
     .select('*')
     .order('tanggal', { ascending: false })
     .limit(500);
-
-  console.log('[getResiStage1List] result:', { count: data?.length, error, firstItem: data?.[0] });
 
   if (error) {
     console.error('getResiStage1List error:', error);
@@ -295,7 +292,6 @@ export const getResiStage1List = async (store: string | null) => {
   
   // Filter manual: ambil yang bukan completed
   const filtered = (data || []).filter((d: any) => d.status !== 'completed');
-  console.log('[getResiStage1List] filtered count:', filtered.length);
   
   return mapToBoolean(filtered);
 };
