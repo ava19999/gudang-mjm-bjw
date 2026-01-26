@@ -1,8 +1,8 @@
 // FILE: src/components/ItemForm.tsx
 import React, { useState, useEffect, useRef } from 'react';
 import { InventoryFormData, InventoryItem } from '../types';
-import { fetchPriceHistoryBySource, updateInventory, addInventory, saveItemImages } from '../services/supabaseService';
-import { X, Save, Upload, Loader2, Package, Layers, DollarSign, History, AlertCircle, ArrowLeft, Plus, User, Calendar } from 'lucide-react';
+import { fetchPriceHistoryBySource, fetchSellPriceHistory, updateInventory, addInventory, saveItemImages } from '../services/supabaseService';
+import { X, Save, Upload, Loader2, Package, Layers, DollarSign, History, AlertCircle, ArrowLeft, Plus, User, Calendar, Search } from 'lucide-react';
 import { compressImage, formatRupiah } from '../utils';
 import { useStore } from '../context/StoreContext';
 
@@ -36,8 +36,13 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showPricePopup, setShowPricePopup] = useState(false);
+  const [showSellPricePopup, setShowSellPricePopup] = useState(false);
   const [priceHistory, setPriceHistory] = useState<any[]>([]);
+  const [sellPriceHistory, setSellPriceHistory] = useState<any[]>([]);
   const [loadingPrice, setLoadingPrice] = useState(false);
+  const [loadingSellPrice, setLoadingSellPrice] = useState(false);
+  const [priceSearchQuery, setPriceSearchQuery] = useState('');
+  const [sellPriceSearchQuery, setSellPriceSearchQuery] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -118,17 +123,44 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
     if (!formData.partNumber) { alert("Isi Part Number terlebih dahulu!"); return; }
     setLoadingPrice(true);
     setShowPricePopup(true);
+    setPriceSearchQuery('');
     try {
-        const history = await fetchPriceHistoryBySource(formData.partNumber);
+        const history = await fetchPriceHistoryBySource(formData.partNumber, selectedStore);
         setPriceHistory(history);
     } catch (error) { console.error(error); }
     setLoadingPrice(false);
+  };
+
+  const handleCheckSellPrices = async () => {
+    if (!formData.partNumber) { alert("Isi Part Number terlebih dahulu!"); return; }
+    setLoadingSellPrice(true);
+    setShowSellPricePopup(true);
+    setSellPriceSearchQuery('');
+    try {
+        const history = await fetchSellPriceHistory(formData.partNumber, selectedStore);
+        setSellPriceHistory(history);
+    } catch (error) { console.error(error); }
+    setLoadingSellPrice(false);
   };
 
   const selectPrice = (unitPrice: number) => {
       setFormData(prev => ({ ...prev, costPrice: unitPrice }));
       setShowPricePopup(false);
   };
+
+  const selectSellPrice = (unitPrice: number) => {
+      setFormData(prev => ({ ...prev, price: unitPrice }));
+      setShowSellPricePopup(false);
+  };
+
+  // Filter price history by search query
+  const filteredPriceHistory = priceHistory.filter(ph => 
+    !priceSearchQuery || ph.source.toLowerCase().includes(priceSearchQuery.toLowerCase())
+  );
+
+  const filteredSellPriceHistory = sellPriceHistory.filter(ph => 
+    !sellPriceSearchQuery || ph.source.toLowerCase().includes(sellPriceSearchQuery.toLowerCase())
+  );
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -280,7 +312,7 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
               {!isEditMode && (
                   <div className="bg-blue-900/20 p-4 rounded-xl border border-blue-900/40">
                     <label className="text-[10px] font-bold text-blue-300 uppercase mb-1 block flex items-center gap-1"><Layers size={12}/> Stok Awal</label>
-                    <input type="number" name="quantity" required min="0" className="w-full bg-gray-900 border border-blue-800 rounded-lg p-2.5 text-xl font-bold text-center text-blue-400 focus:ring-2 focus:ring-blue-800 outline-none" value={formData.quantity} onChange={handleChange} />
+                    <input type="number" name="quantity" min="0" className="w-full bg-gray-900 border border-blue-800 rounded-lg p-2.5 text-xl font-bold text-center text-blue-400 focus:ring-2 focus:ring-blue-800 outline-none" value={formData.quantity} onChange={handleChange} placeholder="0" />
                   </div>
               )}
             </div>
@@ -390,36 +422,114 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
                             name="costPrice"
                             value={formData.costPrice} 
                             onChange={handleChange} 
-                            className="flex-1 px-3 py-2 bg-orange-900/20 text-orange-300 font-mono font-bold text-sm rounded-lg border border-orange-900/50 focus:ring-2 focus:ring-orange-800 outline-none placeholder-orange-800" 
+                            placeholder="0"
+                            className="flex-1 px-3 py-2 bg-orange-900/20 text-orange-300 font-mono font-bold text-sm rounded-lg border border-orange-900/50 focus:ring-2 focus:ring-orange-800 focus:bg-orange-900/30 hover:bg-orange-900/30 outline-none placeholder-orange-800 cursor-text transition-colors" 
                         />
                         <button type="button" onClick={handleCheckPrices} className="px-3 py-2 bg-gray-800 border border-gray-600 text-gray-400 rounded-lg hover:bg-gray-600 hover:text-white"><History size={18}/></button>
                       </div>
                       
                       {showPricePopup && (
-                        <div className="absolute top-full left-0 right-0 mt-2 bg-gray-800 shadow-xl border border-gray-600 rounded-xl z-20 max-h-40 overflow-y-auto">
-                           {priceHistory.length > 0 ? (
-                               priceHistory.map((ph, idx) => (
-                               <div key={idx} onClick={() => selectPrice(ph.price)} className="p-2.5 border-b border-gray-700 text-xs flex justify-between hover:bg-gray-700 cursor-pointer items-center">
+                        <div className="absolute top-full left-0 right-0 mt-2 bg-gray-800 shadow-xl border border-gray-600 rounded-xl z-20 max-h-64 overflow-hidden flex flex-col">
+                           {/* Search Input */}
+                           <div className="p-2 border-b border-gray-700 sticky top-0 bg-gray-800 z-10">
+                             <div className="relative">
+                               <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-500" />
+                               <input 
+                                 type="text" 
+                                 placeholder="Cari customer..." 
+                                 value={priceSearchQuery}
+                                 onChange={(e) => setPriceSearchQuery(e.target.value)}
+                                 className="w-full pl-8 pr-3 py-1.5 bg-gray-900 border border-gray-700 rounded-lg text-xs text-gray-200 placeholder-gray-500 focus:border-orange-500 outline-none"
+                               />
+                             </div>
+                           </div>
+                           
+                           <div className="overflow-y-auto flex-1">
+                             {loadingPrice ? (
+                               <div className="p-4 text-center"><Loader2 size={20} className="animate-spin mx-auto text-orange-400" /></div>
+                             ) : filteredPriceHistory.length > 0 ? (
+                               filteredPriceHistory.map((ph, idx) => (
+                                 <div key={idx} onClick={() => selectPrice(ph.price)} className="p-2.5 border-b border-gray-700 text-xs flex justify-between hover:bg-gray-700 cursor-pointer items-center">
                                    <div>
-                                       <div className="font-bold text-blue-300 mb-0.5">{ph.source}</div>
-                                       <div className="text-[10px] text-gray-500">{ph.date}</div>
+                                     <div className="font-bold text-orange-300 mb-0.5">{ph.source}</div>
+                                     <div className="text-[10px] text-gray-500">{ph.date}</div>
                                    </div>
                                    <div className="font-mono font-bold text-gray-200">{formatRupiah(ph.price)}</div>
-                               </div>
+                                 </div>
                                ))
-                           ) : (
-                               <div className="p-3 text-center text-xs text-gray-500">Belum ada riwayat</div>
-                           )}
+                             ) : (
+                               <div className="p-3 text-center text-xs text-gray-500">
+                                 {priceSearchQuery ? 'Tidak ditemukan' : 'Belum ada riwayat'}
+                               </div>
+                             )}
+                           </div>
+                           
                            <div className="p-2 sticky bottom-0 bg-gray-800/95 border-t border-gray-700">
-                               <button onClick={() => setShowPricePopup(false)} className="w-full py-1.5 text-[10px] text-gray-400 hover:text-gray-200 font-bold uppercase">Tutup</button>
+                               <button type="button" onClick={() => setShowPricePopup(false)} className="w-full py-1.5 text-[10px] text-gray-400 hover:text-gray-200 font-bold uppercase">Tutup</button>
                            </div>
                         </div>
                       )}
                   </div>
 
-                  <div>
+                  <div className="relative">
                     <label className="text-[10px] font-bold text-gray-400 uppercase ml-1">Harga Jual</label>
-                    <input type="number" name="price" value={formData.price} onChange={handleChange} className="w-full mt-1 px-3 py-2 bg-blue-900/20 text-blue-300 font-mono font-bold text-sm rounded-lg border border-blue-900/50 focus:ring-2 focus:ring-blue-800 outline-none" />
+                    <div className="flex gap-2 mt-1">
+                      <input type="number" name="price" value={formData.price} onChange={handleChange} placeholder="0" className="flex-1 px-3 py-2 bg-blue-900/20 text-blue-300 font-mono font-bold text-sm rounded-lg border border-blue-900/50 focus:ring-2 focus:ring-blue-800 focus:bg-blue-900/30 hover:bg-blue-900/30 outline-none cursor-text transition-colors" />
+                      <button type="button" onClick={handleCheckSellPrices} className="px-3 py-2 bg-gray-800 border border-gray-600 text-gray-400 rounded-lg hover:bg-gray-600 hover:text-white"><History size={18}/></button>
+                    </div>
+                    
+                    {showSellPricePopup && (
+                      <div className="absolute top-full left-0 right-0 mt-2 bg-gray-800 shadow-xl border border-gray-600 rounded-xl z-20 max-h-64 overflow-hidden flex flex-col">
+                         {/* Search Input */}
+                         <div className="p-2 border-b border-gray-700 sticky top-0 bg-gray-800 z-10">
+                           <div className="relative">
+                             <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-500" />
+                             <input 
+                               type="text" 
+                               placeholder="Cari customer..." 
+                               value={sellPriceSearchQuery}
+                               onChange={(e) => setSellPriceSearchQuery(e.target.value)}
+                               className="w-full pl-8 pr-3 py-1.5 bg-gray-900 border border-gray-700 rounded-lg text-xs text-gray-200 placeholder-gray-500 focus:border-blue-500 outline-none"
+                             />
+                           </div>
+                         </div>
+                         
+                         <div className="overflow-y-auto flex-1">
+                           {loadingSellPrice ? (
+                             <div className="p-4 text-center"><Loader2 size={20} className="animate-spin mx-auto text-blue-400" /></div>
+                           ) : filteredSellPriceHistory.length > 0 ? (
+                             filteredSellPriceHistory.map((ph, idx) => (
+                               <div 
+                                 key={idx} 
+                                 onClick={() => selectSellPrice(ph.price)} 
+                                 className={`p-2.5 border-b text-xs flex justify-between hover:bg-gray-700 cursor-pointer items-center ${
+                                   ph.isOfficial 
+                                     ? 'bg-green-900/30 border-green-800 hover:bg-green-900/50' 
+                                     : 'border-gray-700'
+                                 }`}
+                               >
+                                 <div>
+                                   <div className={`font-bold mb-0.5 flex items-center gap-1.5 ${ph.isOfficial ? 'text-green-400' : 'text-blue-300'}`}>
+                                     {ph.isOfficial && <span className="px-1.5 py-0.5 bg-green-600 text-white text-[8px] rounded font-bold">RESMI</span>}
+                                     {ph.source}
+                                   </div>
+                                   <div className="text-[10px] text-gray-500">{ph.date}</div>
+                                 </div>
+                                 <div className={`font-mono font-bold ${ph.isOfficial ? 'text-green-300' : 'text-gray-200'}`}>{formatRupiah(ph.price)}</div>
+                               </div>
+                             ))
+                           ) : (
+                             <div className="p-3 text-center text-xs text-gray-500">
+                               {sellPriceSearchQuery ? 'Tidak ditemukan' : 'Belum ada riwayat'}
+                             </div>
+                           )}
+                         </div>
+                         
+                         <div className="p-2 sticky bottom-0 bg-gray-800/95 border-t border-gray-700">
+                             <button type="button" onClick={() => setShowSellPricePopup(false)} className="w-full py-1.5 text-[10px] text-gray-400 hover:text-gray-200 font-bold uppercase">Tutup</button>
+                         </div>
+                      </div>
+                    )}
                   </div>
                </div>
             </div>

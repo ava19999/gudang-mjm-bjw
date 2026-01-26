@@ -21,6 +21,7 @@ import { RiwayatScanResi } from './components/scanResi/RiwayatScanResi';
 
 // --- NEW SPLIT COMPONENTS ---
 import { Toast } from './components/common/Toast';
+import { FloatingQuickAccess } from './components/common/FloatingQuickAccess';
 import { StoreSelector } from './components/auth/StoreSelector';
 import { LoginPage } from './components/auth/LoginPage';
 import { Header } from './components/layout/Header';
@@ -179,6 +180,15 @@ const AppContent: React.FC = () => {
   };
   
   const handleDelete = async (id: string) => {
+      // Hanya Bryan dan Ava yang bisa hapus barang
+      const allowedToDelete = ['Bryan', 'Ava'];
+      const canDelete = allowedToDelete.some(name => name.toLowerCase() === userName.toLowerCase());
+      
+      if (!canDelete) {
+          showToast('Anda tidak memiliki akses untuk menghapus barang', 'error');
+          return;
+      }
+      
       if(confirm('Hapus Barang Permanen?')) {
           setLoading(true);
           if (await deleteInventory(id, selectedStore)) { showToast('Dihapus'); refreshData(); }
@@ -382,7 +392,7 @@ const AppContent: React.FC = () => {
 
       <div className="flex-1 overflow-y-auto bg-gray-900">
         {activeView === 'shop' && <ShopView items={items} cart={cart} isAdmin={isAdmin} isKingFano={isKingFano} bannerUrl={bannerUrl} onAddToCart={addToCart} onRemoveFromCart={(id) => setCart(prev => prev.filter(c => c.id !== id))} onUpdateCartItem={updateCartItem} onCheckout={doCheckout} onUpdateBanner={handleUpdateBanner} />}
-        {activeView === 'inventory' && isAdmin && <Dashboard items={items} orders={[]} history={history} refreshTrigger={refreshTrigger} onViewOrders={() => setActiveView('orders')} onAddNew={() => { setEditItem(null); setIsEditing(true); }} onEdit={(item) => { setEditItem(item); setIsEditing(true); }} onDelete={handleDelete} />}
+        {activeView === 'inventory' && isAdmin && <Dashboard items={items} orders={[]} history={history} refreshTrigger={refreshTrigger} onViewOrders={() => setActiveView('orders')} onAddNew={() => { setEditItem(null); setIsEditing(true); }} onEdit={(item) => { setEditItem(item); setIsEditing(true); }} onDelete={handleDelete} canDelete={['Bryan', 'Ava'].some(name => name.toLowerCase() === userName.toLowerCase())} />}
         {activeView === 'quick_input' && isAdmin && <QuickInputView items={items} onRefresh={refreshData} showToast={showToast} />}
         {activeView === 'petty_cash' && isAdmin && <PettyCashView />}
         {activeView === 'barang_kosong' && isAdmin && <BarangKosongView />}
@@ -405,6 +415,15 @@ const AppContent: React.FC = () => {
       </div>
 
       <MobileNav isAdmin={isAdmin} activeView={activeView} setActiveView={setActiveView} pendingOrdersCount={0} myPendingOrdersCount={0} />
+      
+      {/* Floating Quick Access Widget */}
+      {isAdmin && (
+        <FloatingQuickAccess 
+          onAddNew={() => { setEditItem(null); setIsEditing(true); }}
+          onViewItem={(item) => { setEditItem(item); setIsEditing(true); }}
+          isAdmin={isAdmin}
+        />
+      )}
     </div>
   );
 };

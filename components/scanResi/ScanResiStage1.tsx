@@ -51,7 +51,10 @@ import { useStore } from '../../context/StoreContext';
 import { 
   scanResiStage1, 
   scanResiStage1Bulk,
-  deleteResiStage1, 
+  deleteResiStage1,
+  deleteResi,
+  restoreResi,
+  updateResi, 
   getResiStage1List,
   getResellers,
   addReseller
@@ -60,12 +63,14 @@ import {
   ResiScanStage, 
   EcommercePlatform, 
   SubToko, 
-  NegaraEkspor 
+  NegaraEkspor,
+  isInstantOrder
 } from '../../types';
 import { 
   Package, 
   Scan, 
-  Trash2, 
+  Trash2,
+  Edit2,
   RefreshCw, 
   Plus,
   X,
@@ -140,6 +145,17 @@ export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh }) => 
   // Ref untuk mencegah double submit dari scanner
   const isSubmitting = useRef(false);
   
+  // State untuk Undo (Ctrl+Z)
+  const [deletedResiStack, setDeletedResiStack] = useState<ResiScanStage[]>([]);
+  
+  // State untuk Edit Modal
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editingResi, setEditingResi] = useState<ResiScanStage | null>(null);
+  const [editResiValue, setEditResiValue] = useState('');
+  const [editEcommerce, setEditEcommerce] = useState<EcommercePlatform>('SHOPEE');
+  const [editSubToko, setEditSubToko] = useState<SubToko>('MJM');
+  const [editNegaraEkspor, setEditNegaraEkspor] = useState<NegaraEkspor>('PH');
+  
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 3000);
@@ -164,6 +180,40 @@ export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh }) => 
       resiInputRef.current.focus();
     }
   }, [showResellerForm]);
+  
+  // Keyboard listener untuk Ctrl+Z (Undo)
+  useEffect(() => {
+    const handleKeyDown = async (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.key === 'z' && deletedResiStack.length > 0) {
+        e.preventDefault();
+        await handleUndoDelete();
+      }
+    };
+    
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [deletedResiStack]);
+  
+  // Fungsi Undo Delete
+  const handleUndoDelete = async () => {
+    if (deletedResiStack.length === 0) return;
+    
+    const lastDeleted = deletedResiStack[deletedResiStack.length - 1];
+    setLoading(true);
+    
+    const result = await restoreResi(lastDeleted, selectedStore);
+    
+    if (result.success) {
+      setDeletedResiStack(prev => prev.slice(0, -1));
+      showToast(`Resi ${lastDeleted.resi} berhasil dikembalikan! (Ctrl+Z)`);
+      await loadResiList();
+      if (onRefresh) onRefresh();
+    } else {
+      showToast(result.message, 'error');
+    }
+    
+    setLoading(false);
+  };
   
   const loadResiList = async () => {
     setLoading(true);
@@ -258,14 +308,78 @@ export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh }) => 
     }
   };
   
-  const handleDeleteResi = async (resiId: string) => {
-    if (!confirm('Yakin ingin menghapus resi ini?')) return;
+  const handleDeleteResi = async (resiId: string, isStage2: boolean = false, isStage3: boolean = false) => {
+    let confirmMsg = 'Yakin ingin menghapus resi ini?';
+    if (isStage3) {
+      confirmMsg = 'Resi ini sudah di Stage 3 (Completed). Yakin ingin menghapus dari database?';
+    } else if (isStage2) {
+      confirmMsg = 'Resi ini sudah di Stage 2. Yakin ingin menghapus dari database?';
+    }
+    if (!confirm(confirmMsg)) return;
+    
+    // Simpan data resi sebelum dihapus untuk undo
+    const resiToDelete = resiList.find(r => r.id === resiId);
     
     setLoading(true);
-    const result = await deleteResiStage1(resiId, selectedStore);
+    const result = await deleteResi(resiId, selectedStore);
     
     if (result.success) {
-      showToast('Resi berhasil dihapus');
+      // Simpan ke undo stack
+      if (resiToDelete) {
+        setDeletedResiStack(prev => [...prev, resiToDelete]);
+      }
+      showToast('Resi berhasil dihapus (Ctrl+Z untuk undo)');
+      await loadResiList();
+      if (onRefresh) onRefresh();
+    } else {
+      showToast(result.message, 'error');
+    }
+    
+    setLoading(false);
+  };
+  
+  // Fungsi untuk membuka Edit Modal
+  const handleOpenEditModal = (resi: ResiScanStage) => {
+    setEditingResi(resi);
+    setEditResiValue(resi.resi);
+    // Parse ecommerce (bisa "EKSPOR - PH" -> "EKSPOR")
+    const baseEcommerce = resi.ecommerce.split(' - ')[0] as EcommercePlatform;
+    setEditEcommerce(baseEcommerce);
+    setEditSubToko(resi.sub_toko as SubToko);
+    setEditNegaraEkspor((resi.negara_ekspor as NegaraEkspor) || 'PH');
+    setShowEditModal(true);
+  };
+  
+  // Fungsi untuk menyimpan edit
+  const handleSaveEdit = async () => {
+    if (!editingResi) return;
+    if (!editResiValue.trim()) {
+      showToast('Nomor resi tidak boleh kosong!', 'error');
+      return;
+    }
+    
+    setLoading(true);
+    
+    // Build ecommerce string dengan negara jika EKSPOR
+    const ecommerceValue = editEcommerce === 'EKSPOR' 
+      ? `EKSPOR - ${editNegaraEkspor}` 
+      : editEcommerce;
+    
+    const result = await updateResi(
+      editingResi.id,
+      {
+        resi: editResiValue.trim(),
+        ecommerce: ecommerceValue,
+        sub_toko: editSubToko,
+        negara_ekspor: editEcommerce === 'EKSPOR' ? editNegaraEkspor : null
+      },
+      selectedStore
+    );
+    
+    if (result.success) {
+      showToast('Resi berhasil diupdate!');
+      setShowEditModal(false);
+      setEditingResi(null);
       await loadResiList();
       if (onRefresh) onRefresh();
     } else {
@@ -729,7 +843,12 @@ export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh }) => 
                     <td className="px-4 py-3 text-sm">
                       <span className="px-2 py-1 bg-gray-700 rounded text-xs">
                         {resi.ecommerce}
-                        {resi.negara_ekspor && ` - ${resi.negara_ekspor}`}
+                        {resi.negara_ekspor && !resi.ecommerce.includes(resi.negara_ekspor) && ` - ${resi.negara_ekspor}`}
+                        {isInstantOrder(resi) && (
+                          <span className="ml-1 px-1 py-0.5 bg-orange-500 text-white text-[9px] font-bold rounded">
+                            INSTANT
+                          </span>
+                        )}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-sm">
@@ -744,14 +863,24 @@ export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh }) => 
                       {resi.stage1_scanned_by || '-'}
                     </td>
                     <td className="px-4 py-3 text-center">
-                      <button
-                        onClick={() => handleDeleteResi(resi.id)}
-                        disabled={resi.stage2_verified || resi.stage3_completed}
-                        className="p-2 text-red-400 hover:bg-red-600/20 rounded-lg transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                        title={resi.stage2_verified || resi.stage3_completed ? 'Tidak bisa dihapus (sudah diproses)' : 'Hapus'}
-                      >
-                        <Trash2 size={16} />
-                      </button>
+                      <div className="flex items-center justify-center gap-1">
+                        <button
+                          onClick={() => handleOpenEditModal(resi)}
+                          className="p-2 text-blue-400 hover:bg-blue-600/20 rounded-lg transition-colors"
+                          title="Edit Resi"
+                        >
+                          <Edit2 size={16} />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteResi(resi.id, resi.stage2_verified, resi.stage3_completed)}
+                          className={`p-2 hover:bg-red-600/20 rounded-lg transition-colors ${
+                            resi.stage3_completed ? 'text-green-400' : resi.stage2_verified ? 'text-orange-400' : 'text-red-400'
+                          }`}
+                          title={resi.stage3_completed ? 'Hapus (Stage 3)' : resi.stage2_verified ? 'Hapus (Stage 2)' : 'Hapus'}
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -1016,6 +1145,121 @@ export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh }) => 
                   )}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* Edit Resi Modal */}
+      {showEditModal && editingResi && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+          <div className="bg-gray-800 rounded-xl p-6 max-w-lg w-full border border-gray-700 shadow-2xl">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xl font-semibold flex items-center gap-2">
+                <Edit2 size={24} className="text-blue-400" />
+                Edit Resi
+              </h3>
+              <button
+                onClick={() => { setShowEditModal(false); setEditingResi(null); }}
+                className="p-2 hover:bg-gray-700 rounded-lg transition-colors"
+              >
+                <X size={20} />
+              </button>
+            </div>
+            
+            <div className="space-y-4">
+              {/* Nomor Resi */}
+              <div>
+                <label className="block text-sm font-medium mb-2">Nomor Resi</label>
+                <input
+                  type="text"
+                  value={editResiValue}
+                  onChange={(e) => setEditResiValue(e.target.value)}
+                  className="w-full px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg text-white font-mono focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder="Masukkan nomor resi..."
+                />
+              </div>
+              
+              {/* E-commerce */}
+              <div>
+                <label className="block text-sm font-medium mb-2">E-commerce</label>
+                <select
+                  value={editEcommerce}
+                  onChange={(e) => setEditEcommerce(e.target.value as EcommercePlatform)}
+                  className="w-full px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                  <option value="SHOPEE">Shopee</option>
+                  <option value="TIKTOK">TikTok</option>
+                  <option value="KILAT">Kilat</option>
+                  <option value="RESELLER">Reseller</option>
+                  <option value="EKSPOR">Ekspor</option>
+                </select>
+              </div>
+              
+              {/* Negara Ekspor (jika EKSPOR) */}
+              {editEcommerce === 'EKSPOR' && (
+                <div>
+                  <label className="block text-sm font-medium mb-2">Negara Ekspor</label>
+                  <select
+                    value={editNegaraEkspor}
+                    onChange={(e) => setEditNegaraEkspor(e.target.value as NegaraEkspor)}
+                    className="w-full px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  >
+                    <option value="PH">Philippines (PH)</option>
+                    <option value="MY">Malaysia (MY)</option>
+                    <option value="SG">Singapore (SG)</option>
+                    <option value="HK">Hong Kong (HK)</option>
+                  </select>
+                </div>
+              )}
+              
+              {/* Sub Toko */}
+              <div>
+                <label className="block text-sm font-medium mb-2">Toko</label>
+                <select
+                  value={editSubToko}
+                  onChange={(e) => setEditSubToko(e.target.value as SubToko)}
+                  className="w-full px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                  <option value="MJM">MJM</option>
+                  <option value="LARIS">LARIS</option>
+                  <option value="BJW">BJW</option>
+                </select>
+              </div>
+              
+              {/* Status Info */}
+              <div className="p-3 bg-gray-700/50 rounded-lg">
+                <p className="text-sm text-gray-400">
+                  Status: {editingResi.stage3_completed ? 'Stage 3 (Completed)' : editingResi.stage2_verified ? 'Stage 2' : 'Stage 1'}
+                </p>
+              </div>
+            </div>
+            
+            {/* Footer Buttons */}
+            <div className="flex gap-2 mt-6">
+              <button
+                onClick={() => { setShowEditModal(false); setEditingResi(null); }}
+                className="flex-1 px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors"
+              >
+                Batal
+              </button>
+              <button
+                onClick={handleSaveEdit}
+                disabled={loading || !editResiValue.trim()}
+                className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 disabled:cursor-not-allowed rounded-lg font-semibold transition-colors flex items-center justify-center gap-2"
+              >
+                {loading ? (
+                  <>
+                    <RefreshCw size={16} className="animate-spin" />
+                    Menyimpan...
+                  </>
+                ) : (
+                  <>
+                    <Check size={16} />
+                    Simpan
+                  </>
+                )}
+              </button>
             </div>
           </div>
         </div>

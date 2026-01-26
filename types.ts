@@ -252,6 +252,7 @@ export interface ResiScanStage {
   id: string;
   tanggal: string;
   resi: string;
+  no_pesanan?: string; // No. Pesanan - untuk deteksi INSTANT (jika resi === no_pesanan)
   ecommerce: EcommercePlatform;
   sub_toko: SubToko;
   negara_ekspor?: NegaraEkspor;
@@ -276,6 +277,15 @@ export interface ResiScanStage {
   created_at: string;
   updated_at: string;
 }
+
+// Helper: Deteksi apakah pesanan INSTANT (No. Pesanan dipakai sebagai resi)
+// INSTANT hanya berlaku untuk SHOPEE dan TIKTOK
+export const isInstantOrder = (resi: ResiScanStage): boolean => {
+  const ecomm = (resi.ecommerce || '').toUpperCase();
+  if (ecomm !== 'SHOPEE' && ecomm !== 'TIKTOK') return false;
+  // INSTANT jika resi === no_pesanan (artinya yang di-scan adalah no pesanan)
+  return !!(resi.no_pesanan && resi.resi === resi.no_pesanan);
+};
 
 // Resi Items interface
 export interface ResiItem {

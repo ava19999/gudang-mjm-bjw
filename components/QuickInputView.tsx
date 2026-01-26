@@ -1,7 +1,7 @@
 // FILE: src/components/QuickInputView.tsx
 import React, { useState, useEffect, useRef } from 'react';
 import { InventoryItem } from '../types';
-import { updateInventory, getItemByPartNumber, saveOfflineOrder } from '../services/supabaseService';
+import { updateInventory, getItemByPartNumber, saveOfflineOrder, fetchDistinctSuppliers, fetchDistinctCustomers } from '../services/supabaseService';
 import { createEmptyRow, checkIsRowComplete } from './quickInput/quickInputUtils';
 import { QuickInputRow } from './quickInput/types';
 import { QuickInputHeader } from './quickInput/QuickInputHeader';
@@ -24,6 +24,8 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
   const [mode, setMode] = useState<'in' | 'out'>('in'); // State untuk mode Masuk/Keluar
   const [rows, setRows] = useState<QuickInputRow[]>([]);
   const [suggestions, setSuggestions] = useState<InventoryItem[]>([]);
+  const [supplierList, setSupplierList] = useState<string[]>([]);
+  const [customerList, setCustomerList] = useState<string[]>([]);
   const [refreshTableTrigger, setRefreshTableTrigger] = useState(0);
   const [activeSearchIndex, setActiveSearchIndex] = useState<number | null>(null);
   const [highlightedIndex, setHighlightedIndex] = useState<number>(-1);
@@ -32,8 +34,30 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
   
   const itemsPerPage = 100;
   const COLUMNS_COUNT = 8; 
-  const searchTimeoutRef = useRef<NodeJS.Timeout>();
+  const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
+
+  // --- FETCH SUPPLIERS LIST ---
+  useEffect(() => {
+    const loadSuppliers = async () => {
+      if (selectedStore) {
+        const suppliers = await fetchDistinctSuppliers(selectedStore);
+        setSupplierList(suppliers);
+      }
+    };
+    loadSuppliers();
+  }, [selectedStore]);
+
+  // --- FETCH CUSTOMERS LIST (dari Barang Keluar) ---
+  useEffect(() => {
+    const loadCustomers = async () => {
+      if (selectedStore) {
+        const customers = await fetchDistinctCustomers(selectedStore);
+        setCustomerList(customers);
+      }
+    };
+    loadCustomers();
+  }, [selectedStore]);
 
   // --- INITIALIZATION ---
   useEffect(() => {
@@ -49,26 +73,36 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
 
   // --- HANDLERS ---
   const handleSearchKeyDown = (e: React.KeyboardEvent, id: number) => {
-    // ... (Sama seperti sebelumnya)
+    // Handle dropdown navigation for part number suggestions
     if (suggestions.length > 0 && activeSearchIndex !== null) {
         if (e.key === 'ArrowDown') {
             e.preventDefault();
+            e.stopPropagation();
             setHighlightedIndex(prev => (prev < suggestions.length - 1 ? prev + 1 : 0));
             return;
         } else if (e.key === 'ArrowUp') {
             e.preventDefault();
+            e.stopPropagation();
             setHighlightedIndex(prev => (prev > 0 ? prev - 1 : suggestions.length - 1));
             return;
         } else if (e.key === 'Enter') {
             if (highlightedIndex >= 0 && suggestions[highlightedIndex]) {
                 e.preventDefault();
+                e.stopPropagation();
                 handleSelectItem(id, suggestions[highlightedIndex]);
                 return;
             }
+        } else if (e.key === 'Escape') {
+            e.preventDefault();
+            setSuggestions([]);
+            setActiveSearchIndex(null);
+            setHighlightedIndex(-1);
+            return;
         }
     }
+    // If no dropdown or not handling dropdown keys, use grid navigation
     const rowIndex = rows.findIndex(r => r.id === id);
-    handleGridKeyDown(e, rowIndex * COLUMNS_COUNT + 0); 
+    handleGridKeyDown(e, rowIndex * COLUMNS_COUNT + 3); // Part number is column 3
   };
 
   const handleGridKeyDown = (e: React.KeyboardEvent, currentIndex: number) => {
@@ -78,6 +112,8 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
     let nextIndex = currentIndex;
     const totalInputs = rows.length * COLUMNS_COUNT;
     const target = e.target as HTMLInputElement;
+    const currentCol = currentIndex % COLUMNS_COUNT;
+    const currentRow = Math.floor(currentIndex / COLUMNS_COUNT);
 
     switch (e.key) {
         case 'Tab':
@@ -86,26 +122,40 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
             nextIndex = e.shiftKey ? currentIndex - 1 : currentIndex + 1;
             break;
         case 'ArrowRight':
-            // Pindah ke kanan jika cursor di akhir teks atau input kosong
-            if (target.selectionStart === target.value.length || target.value === '') {
-                e.preventDefault();
-                nextIndex = currentIndex + 1;
+            // Pindah ke kanan - selalu pindah jika ada kolom berikutnya
+            if (currentCol < COLUMNS_COUNT - 1) {
+                // Hanya pindah jika cursor di akhir teks atau input kosong atau select/date
+                if (target.type === 'date' || target.tagName === 'SELECT' || 
+                    target.selectionStart === target.value?.length || !target.value) {
+                    e.preventDefault();
+                    nextIndex = currentIndex + 1;
+                }
             }
             break;
         case 'ArrowLeft':
-            // Pindah ke kiri jika cursor di awal teks atau input kosong
-            if (target.selectionStart === 0 || target.value === '') {
-                e.preventDefault();
-                nextIndex = currentIndex - 1;
+            // Pindah ke kiri - selalu pindah jika ada kolom sebelumnya
+            if (currentCol > 0) {
+                // Hanya pindah jika cursor di awal teks atau input kosong atau select/date
+                if (target.type === 'date' || target.tagName === 'SELECT' || 
+                    target.selectionStart === 0 || !target.value) {
+                    e.preventDefault();
+                    nextIndex = currentIndex - 1;
+                }
             }
             break;
         case 'ArrowUp':
-            e.preventDefault();
-            nextIndex = currentIndex - COLUMNS_COUNT;
+            // Pindah ke baris atas
+            if (currentRow > 0) {
+                e.preventDefault();
+                nextIndex = currentIndex - COLUMNS_COUNT;
+            }
             break;
         case 'ArrowDown':
-            e.preventDefault();
-            nextIndex = currentIndex + COLUMNS_COUNT;
+            // Pindah ke baris bawah
+            if (currentRow < rows.length - 1) {
+                e.preventDefault();
+                nextIndex = currentIndex + COLUMNS_COUNT;
+            }
             break;
         case 'Enter':
             e.preventDefault();
@@ -123,7 +173,9 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
         const targetEl = inputRefs.current[nextIndex];
         if (targetEl) {
             targetEl.focus();
-            setTimeout(() => targetEl.select(), 0); 
+            setTimeout(() => {
+                if (targetEl.select) targetEl.select();
+            }, 0); 
         }
     }
   };
@@ -434,6 +486,8 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
           startIndex={startIndex}
           activeSearchIndex={activeSearchIndex}
           suggestions={suggestions}
+          supplierList={supplierList}
+          customerList={customerList}
           inputRefs={inputRefs}
           onPartNumberChange={handlePartNumberChange}
           onSelectItem={handleSelectItem}

@@ -1,23 +1,103 @@
 // FILE: src/components/HistoryTable.tsx
 import React from 'react';
 import { StockHistory } from '../types';
-import { Store } from 'lucide-react';
+import { Store, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react';
 import { parseHistoryReason, formatRupiah } from '../utils/dashboardHelpers';
 
-export const HistoryTable = ({ data }: { data: StockHistory[] }) => (
+export interface SortConfig {
+  key: string | null;
+  direction: 'asc' | 'desc';
+}
+
+interface HistoryTableProps {
+  data: StockHistory[];
+  sortConfig?: SortConfig;
+  onSort?: (key: string) => void;
+}
+
+const SortIcon = ({ columnKey, sortConfig }: { columnKey: string; sortConfig?: SortConfig }) => {
+  if (!sortConfig || sortConfig.key !== columnKey) {
+    return <ArrowUpDown size={12} className="ml-1 opacity-40" />;
+  }
+  return sortConfig.direction === 'asc' 
+    ? <ArrowUp size={12} className="ml-1 text-blue-400" />
+    : <ArrowDown size={12} className="ml-1 text-blue-400" />;
+};
+
+export const HistoryTable: React.FC<HistoryTableProps> = ({ data, sortConfig, onSort }) => {
+  const handleHeaderClick = (key: string) => {
+    if (onSort) onSort(key);
+  };
+
+  return (
     <div className="overflow-x-auto rounded-lg border border-gray-700">
         <table className="w-full text-left border-collapse">
-            <thead className="bg-gray-800 text-[10px] font-bold text-gray-400 uppercase tracking-wider border-b border-gray-700">
+            <thead className="bg-gray-800 text-[10px] font-bold text-gray-400 uppercase tracking-wider border-b border-gray-700 sticky top-0 z-10">
                 <tr>
-                    <th className="px-3 py-2 border-r border-gray-700 w-24">Tanggal</th>
+                    <th 
+                      className="px-3 py-2 border-r border-gray-700 w-24 cursor-pointer hover:bg-gray-700 transition-colors select-none"
+                      onClick={() => handleHeaderClick('timestamp')}
+                    >
+                      <div className="flex items-center">
+                        Tanggal
+                        <SortIcon columnKey="timestamp" sortConfig={sortConfig} />
+                      </div>
+                    </th>
                     <th className="px-3 py-2 border-r border-gray-700 w-32">Resi / Toko</th>
-                    <th className="px-3 py-2 border-r border-gray-700 w-36">Via</th>
-                    <th className="px-3 py-2 border-r border-gray-700 w-32">Pelanggan</th>
-                    <th className="px-3 py-2 border-r border-gray-700 w-28">Part No</th>
-                    <th className="px-3 py-2 border-r border-gray-700">Barang</th>
-                    <th className="px-3 py-2 border-r border-gray-700 text-right w-16">Qty</th>
-                    <th className="px-3 py-2 border-r border-gray-700 text-right w-24">Satuan</th>
-                    <th className="px-3 py-2 border-r border-gray-700 text-right w-24">Total</th>
+                    <th 
+                      className="px-3 py-2 border-r border-gray-700 w-36 cursor-pointer hover:bg-gray-700 transition-colors select-none"
+                      onClick={() => handleHeaderClick('customer')}
+                    >
+                      <div className="flex items-center">
+                        Pelanggan
+                        <SortIcon columnKey="customer" sortConfig={sortConfig} />
+                      </div>
+                    </th>
+                    <th 
+                      className="px-3 py-2 border-r border-gray-700 w-32 cursor-pointer hover:bg-gray-700 transition-colors select-none"
+                      onClick={() => handleHeaderClick('partNumber')}
+                    >
+                      <div className="flex items-center">
+                        Part No
+                        <SortIcon columnKey="partNumber" sortConfig={sortConfig} />
+                      </div>
+                    </th>
+                    <th 
+                      className="px-3 py-2 border-r border-gray-700 cursor-pointer hover:bg-gray-700 transition-colors select-none"
+                      onClick={() => handleHeaderClick('name')}
+                    >
+                      <div className="flex items-center">
+                        Barang
+                        <SortIcon columnKey="name" sortConfig={sortConfig} />
+                      </div>
+                    </th>
+                    <th 
+                      className="px-3 py-2 border-r border-gray-700 text-right w-16 cursor-pointer hover:bg-gray-700 transition-colors select-none"
+                      onClick={() => handleHeaderClick('quantity')}
+                    >
+                      <div className="flex items-center justify-end">
+                        Qty
+                        <SortIcon columnKey="quantity" sortConfig={sortConfig} />
+                      </div>
+                    </th>
+                    <th 
+                      className="px-3 py-2 border-r border-gray-700 text-right w-24 cursor-pointer hover:bg-gray-700 transition-colors select-none"
+                      onClick={() => handleHeaderClick('price')}
+                    >
+                      <div className="flex items-center justify-end">
+                        Satuan
+                        <SortIcon columnKey="price" sortConfig={sortConfig} />
+                      </div>
+                    </th>
+                    <th 
+                      className="px-3 py-2 border-r border-gray-700 text-right w-24 cursor-pointer hover:bg-gray-700 transition-colors select-none"
+                      onClick={() => handleHeaderClick('totalPrice')}
+                    >
+                      <div className="flex items-center justify-end">
+                        Total
+                        <SortIcon columnKey="totalPrice" sortConfig={sortConfig} />
+                      </div>
+                    </th>
                     <th className="px-3 py-2 text-center w-28">Keterangan</th>
                 </tr>
             </thead>
@@ -55,15 +135,10 @@ export const HistoryTable = ({ data }: { data: StockHistory[] }) => (
                                     ) : null}
                                 </div>
                             </td>
-                            <td className="px-3 py-2 align-top border-r border-gray-700">
-                                {ecommerce !== '-' ? (
-                                    <span className="px-1.5 py-0.5 rounded bg-orange-900/30 text-orange-400 text-[9px] font-bold border border-orange-800 break-words">{ecommerce}</span>
-                                ) : <span className="text-gray-600">-</span>}
-                            </td>
-                            <td className="px-3 py-2 align-top border-r border-gray-700 text-gray-300 font-medium">
+                            <td className="px-3 py-2 align-top border-r border-gray-700 text-sm text-gray-100 font-semibold">
                                 {customer !== '-' ? customer : '-'}
                             </td>
-                            <td className="px-3 py-2 align-top border-r border-gray-700 font-mono text-[10px] text-gray-400">
+                            <td className="px-3 py-2 align-top border-r border-gray-700 font-mono text-sm font-bold text-blue-300">
                                 {h.partNumber}
                             </td>
                             <td className="px-3 py-2 align-top border-r border-gray-700">
@@ -89,4 +164,5 @@ export const HistoryTable = ({ data }: { data: StockHistory[] }) => (
             </tbody>
         </table>
     </div>
-);
+  );
+};

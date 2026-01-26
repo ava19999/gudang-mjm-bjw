@@ -33,6 +33,211 @@ const parseDateToNumber = (dateVal: any): number => {
   return isNaN(parsed) ? Date.now() : parsed;
 };
 
+// --- FETCH DISTINCT ECOMMERCE VALUES ---
+export const fetchDistinctEcommerce = async (store: string | null): Promise<string[]> => {
+  const table = store === 'mjm' ? 'barang_keluar_mjm' : (store === 'bjw' ? 'barang_keluar_bjw' : null);
+  if (!table) return [];
+
+  try {
+    const { data, error } = await supabase
+      .from(table)
+      .select('ecommerce')
+      .not('ecommerce', 'is', null)
+      .not('ecommerce', 'eq', '');
+
+    if (error) {
+      console.error('Fetch Distinct Ecommerce Error:', error);
+      return [];
+    }
+
+    // Get unique values
+    const uniqueValues = [...new Set((data || []).map(d => d.ecommerce?.toUpperCase()).filter(Boolean))];
+    return uniqueValues.sort();
+  } catch (err) {
+    console.error('Fetch Distinct Ecommerce Exception:', err);
+    return [];
+  }
+};
+
+// --- FETCH DISTINCT SUPPLIERS (Customer dari Barang Masuk) ---
+export const fetchDistinctSuppliers = async (store: string | null): Promise<string[]> => {
+  const table = store === 'mjm' ? 'barang_masuk_mjm' : (store === 'bjw' ? 'barang_masuk_bjw' : null);
+  if (!table) return [];
+
+  try {
+    const { data, error } = await supabase
+      .from(table)
+      .select('customer')
+      .not('customer', 'is', null)
+      .not('customer', 'eq', '')
+      .not('customer', 'eq', '-');
+
+    if (error) {
+      console.error('Fetch Distinct Suppliers Error:', error);
+      return [];
+    }
+
+    // Get unique values and filter out empty/dash
+    const uniqueValues = [...new Set(
+      (data || [])
+        .map(d => d.customer?.trim().toUpperCase())
+        .filter(Boolean)
+        .filter(c => c !== '-' && c !== '')
+    )];
+    return uniqueValues.sort();
+  } catch (err) {
+    console.error('Fetch Distinct Suppliers Exception:', err);
+    return [];
+  }
+};
+
+// --- FETCH DISTINCT CUSTOMERS (Customer dari Barang Keluar) ---
+export const fetchDistinctCustomers = async (store: string | null): Promise<string[]> => {
+  const table = store === 'mjm' ? 'barang_keluar_mjm' : (store === 'bjw' ? 'barang_keluar_bjw' : null);
+  if (!table) return [];
+
+  try {
+    const { data, error } = await supabase
+      .from(table)
+      .select('customer')
+      .not('customer', 'is', null)
+      .not('customer', 'eq', '')
+      .not('customer', 'eq', '-');
+
+    if (error) {
+      console.error('Fetch Distinct Customers Error:', error);
+      return [];
+    }
+
+    // Get unique values and filter out empty/dash
+    const uniqueValues = [...new Set(
+      (data || [])
+        .map(d => d.customer?.trim().toUpperCase())
+        .filter(Boolean)
+        .filter(c => c !== '-' && c !== '')
+    )];
+    return uniqueValues.sort();
+  } catch (err) {
+    console.error('Fetch Distinct Customers Exception:', err);
+    return [];
+  }
+};
+
+// --- FETCH SEARCH SUGGESTIONS (untuk dropdown autocomplete) ---
+export const fetchSearchSuggestions = async (
+  store: string | null,
+  field: 'part_number' | 'name' | 'brand' | 'application',
+  searchQuery: string
+): Promise<string[]> => {
+  const table = getTableName(store);
+  if (!searchQuery || searchQuery.length < 1) return [];
+
+  try {
+    const { data, error } = await supabase
+      .from(table)
+      .select(field)
+      .ilike(field, `%${searchQuery}%`)
+      .not(field, 'is', null)
+      .not(field, 'eq', '')
+      .limit(50);
+
+    if (error) {
+      console.error(`Fetch ${field} Suggestions Error:`, error);
+      return [];
+    }
+
+    // Get unique values
+    const uniqueValues = [...new Set(
+      (data || [])
+        .map((d: any) => d[field]?.toString().trim())
+        .filter(Boolean)
+    )];
+    return uniqueValues.sort().slice(0, 20);
+  } catch (err) {
+    console.error(`Fetch ${field} Suggestions Exception:`, err);
+    return [];
+  }
+};
+
+// --- FETCH ALL DISTINCT VALUES (untuk initial load) ---
+export const fetchAllDistinctValues = async (
+  store: string | null,
+  field: 'part_number' | 'name' | 'brand' | 'application'
+): Promise<string[]> => {
+  const table = getTableName(store);
+
+  try {
+    const { data, error } = await supabase
+      .from(table)
+      .select(field)
+      .not(field, 'is', null)
+      .not(field, 'eq', '');
+
+    if (error) {
+      console.error(`Fetch All ${field} Error:`, error);
+      return [];
+    }
+
+    // Get unique values
+    const uniqueValues = [...new Set(
+      (data || [])
+        .map((d: any) => d[field]?.toString().trim())
+        .filter(Boolean)
+    )];
+    return uniqueValues.sort();
+  } catch (err) {
+    console.error(`Fetch All ${field} Exception:`, err);
+    return [];
+  }
+};
+
+// --- FETCH INVENTORY BY PART NUMBER (untuk quick search) ---
+export const fetchInventoryByPartNumber = async (
+  store: string | null,
+  searchValue: string
+): Promise<InventoryItem | null> => {
+  const table = getTableName(store);
+  if (!searchValue) return null;
+
+  try {
+    // First try exact match on part_number
+    let { data, error } = await supabase
+      .from(table)
+      .select('*')
+      .ilike('part_number', searchValue)
+      .limit(1)
+      .single();
+
+    // If not found, try searching by name
+    if (error || !data) {
+      const { data: nameData, error: nameError } = await supabase
+        .from(table)
+        .select('*')
+        .ilike('name', `%${searchValue}%`)
+        .limit(1)
+        .single();
+
+      if (nameError || !nameData) {
+        return null;
+      }
+      data = nameData;
+    }
+
+    // Fetch photo if exists
+    const partNumber = data.part_number;
+    const { data: photoData } = await supabase
+      .from('foto')
+      .select('*')
+      .eq('part_number', partNumber)
+      .single();
+
+    return mapItemFromDB(data, photoData);
+  } catch (err) {
+    console.error('Fetch Inventory By Part Number Exception:', err);
+    return null;
+  }
+};
+
 // --- HELPER: MAPPING FOTO ---
 const mapPhotoRowToImages = (photoRow: any): string[] => {
   if (!photoRow) return [];
@@ -99,7 +304,45 @@ const mapItemToDB = (data: any) => {
 
 // --- HELPER: FETCH HARGA & FOTO ---
 interface PriceData { part_number: string; harga: number; }
+interface CostPriceData { part_number: string; harga_satuan: number; }
 
+// Fetch harga modal terakhir dari barang_masuk
+const fetchLatestCostPricesForItems = async (items: any[], store?: string | null): Promise<Record<string, CostPriceData>> => {
+  if (!items || items.length === 0) return {};
+  const partNumbersToCheck = items.map(i => {
+       const pn = i.part_number || i.partNumber;
+       return typeof pn === 'string' ? pn.trim() : pn;
+  }).filter(Boolean);
+  if (partNumbersToCheck.length === 0) return {};
+
+  const logTable = getLogTableName('barang_masuk', store);
+  
+  try {
+    // Ambil semua barang masuk untuk part numbers ini, order by created_at desc
+    const { data, error } = await supabase
+      .from(logTable)
+      .select('part_number, harga_satuan, created_at')
+      .in('part_number', partNumbersToCheck)
+      .not('harga_satuan', 'is', null)
+      .gt('harga_satuan', 0)
+      .order('created_at', { ascending: false });
+    
+    if (error) return {};
+    
+    // Ambil harga satuan terakhir untuk setiap part number
+    const costPriceMap: Record<string, CostPriceData> = {};
+    (data || []).forEach((row: any) => {
+      const pk = (row.part_number || '').trim();
+      if (pk && !costPriceMap[pk]) {
+        // Hanya ambil yang pertama (terbaru) karena sudah diorder desc
+        costPriceMap[pk] = { part_number: pk, harga_satuan: Number(row.harga_satuan || 0) };
+      }
+    });
+    return costPriceMap;
+  } catch (e) { return {}; }
+};
+
+// Fetch harga jual dari list_harga_jual, fallback ke barang_keluar jika 0
 const fetchLatestPricesForItems = async (items: any[], store?: string | null): Promise<Record<string, PriceData>> => {
   if (!items || items.length === 0) return {};
   const partNumbersToCheck = items.map(i => {
@@ -109,12 +352,55 @@ const fetchLatestPricesForItems = async (items: any[], store?: string | null): P
   if (partNumbersToCheck.length === 0) return {};
 
   try {
+    // 1. Ambil harga dari list_harga_jual (pusat)
     const { data, error } = await supabase.from('list_harga_jual').select('part_number, harga').in('part_number', partNumbersToCheck);
     if (error) return {};
+    
     const priceMap: Record<string, PriceData> = {};
+    const zeroOrMissingParts: string[] = [];
+    
     (data || []).forEach((row: any) => {
-      if (row.part_number) priceMap[row.part_number.trim()] = { part_number: row.part_number, harga: Number(row.harga || 0) };
+      if (row.part_number) {
+        const pk = row.part_number.trim();
+        const harga = Number(row.harga || 0);
+        priceMap[pk] = { part_number: pk, harga };
+        if (harga === 0) zeroOrMissingParts.push(pk);
+      }
     });
+    
+    // Cari part numbers yang tidak ada di list_harga_jual
+    partNumbersToCheck.forEach(pk => {
+      if (!priceMap[pk]) zeroOrMissingParts.push(pk);
+    });
+    
+    // 2. Jika ada harga 0 atau tidak ada, cari dari barang_keluar (harga terakhir laku)
+    if (zeroOrMissingParts.length > 0) {
+      const outTable = getLogTableName('barang_keluar', store);
+      const { data: outData } = await supabase
+        .from(outTable)
+        .select('part_number, harga_satuan, created_at')
+        .in('part_number', zeroOrMissingParts)
+        .not('harga_satuan', 'is', null)
+        .gt('harga_satuan', 0)
+        .order('created_at', { ascending: false });
+      
+      // Map harga terakhir dari barang_keluar
+      const outPriceMap: Record<string, number> = {};
+      (outData || []).forEach((row: any) => {
+        const pk = (row.part_number || '').trim();
+        if (pk && !outPriceMap[pk]) {
+          outPriceMap[pk] = Number(row.harga_satuan || 0);
+        }
+      });
+      
+      // Update priceMap dengan harga dari barang_keluar jika harga = 0 atau tidak ada
+      zeroOrMissingParts.forEach(pk => {
+        if (outPriceMap[pk] && outPriceMap[pk] > 0) {
+          priceMap[pk] = { part_number: pk, harga: outPriceMap[pk] };
+        }
+      });
+    }
+    
     return priceMap;
   } catch (e) { return {}; }
 };
@@ -149,11 +435,13 @@ export const fetchInventory = async (store?: string | null): Promise<InventoryIt
 
   const photoMap = await fetchPhotosForItems(items);
   const priceMap = await fetchLatestPricesForItems(items, store);
+  const costPriceMap = await fetchLatestCostPricesForItems(items, store);
 
   return items.map(item => {
     const mapped = mapItemFromDB(item, photoMap[item.part_number]);
     const lookupKey = (item.part_number || '').trim();
-    if (priceMap[lookupKey]) mapped.price = priceMap[lookupKey].harga; 
+    if (priceMap[lookupKey]) mapped.price = priceMap[lookupKey].harga;
+    if (costPriceMap[lookupKey]) mapped.costPrice = costPriceMap[lookupKey].harga_satuan;
     return mapped;
   });
 };
@@ -164,20 +452,31 @@ export const fetchInventoryPaginated = async (store: string | null, page: number
   const to = from + perPage - 1;
   let query = supabase.from(table).select('*', { count: 'exact' });
 
-  if (filters?.search) query = query.or(`name.ilike.%${filters.search}%,part_number.ilike.%${filters.search}%`);
+  // Filter by part number
+  if (filters?.partNumber) query = query.ilike('part_number', `%${filters.partNumber}%`);
+  // Filter by name
+  if (filters?.name) query = query.ilike('name', `%${filters.name}%`);
+  // Filter by brand
   if (filters?.brand) query = query.ilike('brand', `%${filters.brand}%`);
+  // Filter by application
+  if (filters?.app) query = query.ilike('application', `%${filters.app}%`);
+  // Filter by stock type
+  if (filters?.type === 'low') query = query.gt('quantity', 0).lte('quantity', 3);
+  if (filters?.type === 'empty') query = query.eq('quantity', 0);
 
   const { data: items, count, error } = await query.range(from, to).order('name', { ascending: true });
   if (error || !items) return { data: [], total: 0 };
 
   const photoMap = await fetchPhotosForItems(items);
   const priceMap = await fetchLatestPricesForItems(items, store);
+  const costPriceMap = await fetchLatestCostPricesForItems(items, store);
 
   return { 
     data: items.map(item => {
       const mapped = mapItemFromDB(item, photoMap[item.part_number]);
       const lookupKey = (item.part_number || '').trim();
-      if (priceMap[lookupKey]) mapped.price = priceMap[lookupKey].harga; 
+      if (priceMap[lookupKey]) mapped.price = priceMap[lookupKey].harga;
+      if (costPriceMap[lookupKey]) mapped.costPrice = costPriceMap[lookupKey].harga_satuan;
       return mapped;
     }), 
     total: count || 0 
@@ -232,7 +531,35 @@ export const fetchInventoryStats = async (store: string | null): Promise<any> =>
 };
 
 export const fetchInventoryAllFiltered = async (store: string | null, filters?: any): Promise<InventoryItem[]> => {
-  return await fetchInventory(store); 
+  const table = getTableName(store);
+  let query = supabase.from(table).select('*');
+
+  // Filter by part number
+  if (filters?.partNumber) query = query.ilike('part_number', `%${filters.partNumber}%`);
+  // Filter by name
+  if (filters?.name) query = query.ilike('name', `%${filters.name}%`);
+  // Filter by brand
+  if (filters?.brand) query = query.ilike('brand', `%${filters.brand}%`);
+  // Filter by application
+  if (filters?.app) query = query.ilike('application', `%${filters.app}%`);
+  // Filter by stock type
+  if (filters?.type === 'low') query = query.gt('quantity', 0).lte('quantity', 3);
+  if (filters?.type === 'empty') query = query.eq('quantity', 0);
+
+  const { data: items, error } = await query.order('name', { ascending: true });
+  if (error || !items) return [];
+
+  const photoMap = await fetchPhotosForItems(items);
+  const priceMap = await fetchLatestPricesForItems(items, store);
+  const costPriceMap = await fetchLatestCostPricesForItems(items, store);
+
+  return items.map(item => {
+    const mapped = mapItemFromDB(item, photoMap[item.part_number]);
+    const lookupKey = (item.part_number || '').trim();
+    if (priceMap[lookupKey]) mapped.price = priceMap[lookupKey].harga;
+    if (costPriceMap[lookupKey]) mapped.costPrice = costPriceMap[lookupKey].harga_satuan;
+    return mapped;
+  });
 };
 
 // --- ADD & UPDATE & DELETE INVENTORY ---
@@ -267,7 +594,33 @@ export const updateInventory = async (arg1: any, arg2?: any, arg3?: any): Promis
 
   await savePhotosToTable(pk, item.images || []);
 
-  // 2. Insert Log Mutasi
+  // 2. Update Harga Jual di list_harga_jual (pusat)
+  if (item.price !== undefined && item.price >= 0) {
+    try {
+      const { data: existingPrice } = await supabase
+        .from('list_harga_jual')
+        .select('part_number')
+        .eq('part_number', pk)
+        .maybeSingle();
+      
+      if (existingPrice) {
+        // Update existing record
+        await supabase
+          .from('list_harga_jual')
+          .update({ harga: item.price, name: item.name })
+          .eq('part_number', pk);
+      } else {
+        // Insert new record
+        await supabase
+          .from('list_harga_jual')
+          .insert([{ part_number: pk, name: item.name, harga: item.price, created_at: getWIBDate().toISOString() }]);
+      }
+    } catch (e) {
+      console.error('Gagal update harga jual:', e);
+    }
+  }
+
+  // 3. Insert Log Mutasi
   if (transactionData) {
      try {
        const isBarangMasuk = transactionData.type === 'in';
@@ -347,7 +700,10 @@ export const fetchBarangMasukLog = async (store: string | null, page = 1, limit 
         query = query.or(`part_number.ilike.%${search}%,nama_barang.ilike.%${search}%,customer.ilike.%${search}%`);
     }
 
-    const { data, count, error } = await query.order('created_at', { ascending: false }).range(from, to);
+    // Order by id descending (newest first) as primary, then created_at as fallback
+    const { data, count, error } = await query
+        .order('id', { ascending: false })
+        .range(from, to);
 
     if (error) {
         console.error("Error fetching barang masuk:", error);
@@ -694,7 +1050,10 @@ export const fetchBarangKeluarLog = async (store: string | null, page = 1, limit
         query = query.or(`part_number.ilike.%${search}%,name.ilike.%${search}%,customer.ilike.%${search}%`);
     }
 
-    const { data, count, error } = await query.order('created_at', { ascending: false }).range(from, to);
+    // Order by id descending (newest first)
+    const { data, count, error } = await query
+        .order('id', { ascending: false })
+        .range(from, to);
 
     if (error) {
         console.error("Error fetching barang keluar:", error);
@@ -776,7 +1135,7 @@ export const fetchHistoryLogsPaginated = async (
   type: 'in' | 'out',
   page: number = 1,
   perPage: number = 50,
-  search: string = '',
+  filters: any = {},
   store?: string | null
 ): Promise<{ data: any[]; count: number }> => {
   // Determine store from context if not provided
@@ -791,13 +1150,28 @@ export const fetchHistoryLogsPaginated = async (
       .from(tableName)
       .select('*', { count: 'exact' });
     
-    // Add search filter if provided
-    if (search && search.trim()) {
-      const searchTerm = `%${search.trim()}%`;
+    // Handle both old string format and new object format for backwards compatibility
+    if (typeof filters === 'string' && filters.trim()) {
+      // Old format: search string
+      const searchTerm = `%${filters.trim()}%`;
       if (type === 'in') {
         query = query.or(`nama_barang.ilike.${searchTerm},part_number.ilike.${searchTerm},customer.ilike.${searchTerm}`);
       } else {
         query = query.or(`name.ilike.${searchTerm},part_number.ilike.${searchTerm},customer.ilike.${searchTerm},resi.ilike.${searchTerm}`);
+      }
+    } else if (typeof filters === 'object') {
+      // New format: filters object
+      // Filter by customer
+      if (filters.customer && filters.customer.trim()) {
+        query = query.ilike('customer', `%${filters.customer.trim()}%`);
+      }
+      // Filter by part number
+      if (filters.partNumber && filters.partNumber.trim()) {
+        query = query.ilike('part_number', `%${filters.partNumber.trim()}%`);
+      }
+      // Filter by ecommerce
+      if (filters.ecommerce && filters.ecommerce.trim()) {
+        query = query.ilike('ecommerce', filters.ecommerce.trim());
       }
     }
     
@@ -865,7 +1239,115 @@ export const addBarangMasuk = async () => {};
 export const addBarangKeluar = async () => {};
 export const fetchBarangMasuk = async () => [];
 export const fetchBarangKeluar = async () => [];
-export const fetchPriceHistoryBySource = async () => [];
+
+// Fetch riwayat harga modal dari barang_masuk
+export const fetchPriceHistoryBySource = async (partNumber: string, store?: string | null): Promise<{ source: string; price: number; date: string; isOfficial?: boolean }[]> => {
+  if (!partNumber) return [];
+  
+  // Try both stores if store not specified
+  const stores = store ? [store] : ['mjm', 'bjw'];
+  const allHistory: { source: string; price: number; date: string; timestamp: number; isOfficial?: boolean }[] = [];
+  
+  for (const s of stores) {
+    const logTable = getLogTableName('barang_masuk', s);
+    try {
+      const { data, error } = await supabase
+        .from(logTable)
+        .select('harga_satuan, customer, created_at')
+        .eq('part_number', partNumber.trim())
+        .not('harga_satuan', 'is', null)
+        .gt('harga_satuan', 0)
+        .order('created_at', { ascending: false })
+        .limit(50);
+      
+      if (!error && data) {
+        data.forEach((row: any) => {
+          const dateObj = new Date(row.created_at);
+          allHistory.push({
+            source: row.customer || (s === 'mjm' ? 'MJM' : 'BJW'),
+            price: Number(row.harga_satuan || 0),
+            date: dateObj.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' }),
+            timestamp: dateObj.getTime(),
+            isOfficial: false
+          });
+        });
+      }
+    } catch (e) {
+      console.error(`Error fetching price history from ${logTable}:`, e);
+    }
+  }
+  
+  // Sort by timestamp descending and return without timestamp
+  return allHistory
+    .sort((a, b) => b.timestamp - a.timestamp)
+    .map(({ source, price, date, isOfficial }) => ({ source, price, date, isOfficial }));
+};
+
+// Fetch riwayat harga jual dari list_harga_jual dan barang_keluar
+export const fetchSellPriceHistory = async (partNumber: string, store?: string | null): Promise<{ source: string; price: number; date: string; isOfficial?: boolean }[]> => {
+  if (!partNumber) return [];
+  
+  const allHistory: { source: string; price: number; date: string; timestamp: number; isOfficial: boolean }[] = [];
+  
+  // 1. Ambil harga dari list_harga_jual (harga resmi)
+  try {
+    const { data: officialData, error: officialError } = await supabase
+      .from('list_harga_jual')
+      .select('harga, name, created_at')
+      .eq('part_number', partNumber.trim())
+      .maybeSingle();
+    
+    if (!officialError && officialData && officialData.harga > 0) {
+      const dateObj = officialData.created_at ? new Date(officialData.created_at) : new Date();
+      allHistory.push({
+        source: 'HARGA RESMI',
+        price: Number(officialData.harga || 0),
+        date: dateObj.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' }),
+        timestamp: Date.now() + 1000000, // Ensure it's always at top
+        isOfficial: true
+      });
+    }
+  } catch (e) {
+    console.error('Error fetching official price:', e);
+  }
+  
+  // 2. Ambil history dari barang_keluar
+  const stores = store ? [store] : ['mjm', 'bjw'];
+  
+  for (const s of stores) {
+    const logTable = getLogTableName('barang_keluar', s);
+    try {
+      const { data, error } = await supabase
+        .from(logTable)
+        .select('harga_satuan, customer, created_at')
+        .eq('part_number', partNumber.trim())
+        .not('harga_satuan', 'is', null)
+        .gt('harga_satuan', 0)
+        .order('created_at', { ascending: false })
+        .limit(50);
+      
+      if (!error && data) {
+        data.forEach((row: any) => {
+          const dateObj = new Date(row.created_at);
+          allHistory.push({
+            source: row.customer || (s === 'mjm' ? 'MJM' : 'BJW'),
+            price: Number(row.harga_satuan || 0),
+            date: dateObj.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' }),
+            timestamp: dateObj.getTime(),
+            isOfficial: false
+          });
+        });
+      }
+    } catch (e) {
+      console.error(`Error fetching sell price history from ${logTable}:`, e);
+    }
+  }
+  
+  // Sort: official first, then by timestamp descending
+  return allHistory
+    .sort((a, b) => b.timestamp - a.timestamp)
+    .map(({ source, price, date, isOfficial }) => ({ source, price, date, isOfficial }));
+};
 export const fetchChatSessions = async () => [];
 export const fetchChatMessages = async () => [];
 export const sendChatMessage = async () => {};
