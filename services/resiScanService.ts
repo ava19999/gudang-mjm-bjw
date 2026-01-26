@@ -788,15 +788,23 @@ export const processBarangKeluarBatch = async (items: any[], store: string | nul
  * existingResiMap: Map<resi_upper, { id: string, ecommerce: string, toko: string, isFromDB: boolean }>
  * Digunakan untuk mendapatkan ecommerce/toko dari scan aplikasi
  */
+interface SkippedItemDetail {
+  resi: string;
+  order_id?: string;
+  customer?: string;
+  product_name?: string;
+  reason: string;
+}
+
 export const saveCSVToResiItems = async (
   items: ParsedCSVItem[], 
   store: string | null,
   existingResiMap?: Map<string, { id: string, ecommerce: string, toko: string, isFromDB?: boolean }>
-): Promise<{ success: boolean; message: string; count: number; skippedCount: number; skippedResis: string[]; updatedCount: number }> => {
+): Promise<{ success: boolean; message: string; count: number; skippedCount: number; skippedResis: string[]; updatedCount: number; skippedItems: SkippedItemDetail[] }> => {
   const tableName = store === 'mjm' ? 'resi_items_mjm' : (store === 'bjw' ? 'resi_items_bjw' : null);
   
-  if (!tableName) return { success: false, message: 'Toko tidak valid', count: 0, skippedCount: 0, skippedResis: [], updatedCount: 0 };
-  if (!items || items.length === 0) return { success: false, message: 'Tidak ada data untuk disimpan', count: 0, skippedCount: 0, skippedResis: [], updatedCount: 0 };
+  if (!tableName) return { success: false, message: 'Toko tidak valid', count: 0, skippedCount: 0, skippedResis: [], updatedCount: 0, skippedItems: [] };
+  if (!items || items.length === 0) return { success: false, message: 'Tidak ada data untuk disimpan', count: 0, skippedCount: 0, skippedResis: [], updatedCount: 0, skippedItems: [] };
 
   try {
     // Kumpulkan semua resi dan order_id untuk dicek
@@ -822,11 +830,14 @@ export const saveCSVToResiItems = async (
       if (row.no_pesanan) stage1ResiSet.add(String(row.no_pesanan).trim().toUpperCase());
     });
     
-    console.log(`[saveCSVToResiItems] Found ${stage1ResiSet.size} resi in Stage 1`);
+    console.log(`[saveCSVToResiItems] Found ${stage1ResiSet.size} resi/no_pesanan in Stage 1`);
+    console.log(`[saveCSVToResiItems] Stage 1 sample (first 10):`, [...stage1ResiSet].slice(0, 10));
     
     // Filter items: harus lolos barang_keluar DAN sudah scan Stage 1
     const skippedItems: ParsedCSVItem[] = [];
     const skippedNotScanned: ParsedCSVItem[] = [];
+    const skippedItemsDetail: SkippedItemDetail[] = []; // Detail untuk modal
+    
     const validItems = items.filter(item => {
       const resiUpper = (item.resi || '').trim().toUpperCase();
       const orderIdUpper = (item.order_id || '').trim().toUpperCase();
@@ -834,15 +845,31 @@ export const saveCSVToResiItems = async (
       // Jika resi atau order_id ada di barang_keluar, skip
       if (existingInBarangKeluar.has(resiUpper) || existingInBarangKeluar.has(orderIdUpper)) {
         skippedItems.push(item);
+        skippedItemsDetail.push({
+          resi: item.resi,
+          order_id: item.order_id,
+          customer: item.customer,
+          product_name: item.product_name,
+          reason: 'Sudah ada di Barang Keluar (sudah terjual)'
+        });
         return false;
       }
       
       // Jika resi BELUM scan Stage 1, skip
       if (!stage1ResiSet.has(resiUpper) && !stage1ResiSet.has(orderIdUpper)) {
+        console.log(`[saveCSVToResiItems] ⏭️ Skip - not in Stage 1: resi=${resiUpper}, order_id=${orderIdUpper}`);
         skippedNotScanned.push(item);
+        skippedItemsDetail.push({
+          resi: item.resi,
+          order_id: item.order_id,
+          customer: item.customer,
+          product_name: item.product_name,
+          reason: 'Belum di-scan di Stage 1'
+        });
         return false;
       }
       
+      console.log(`[saveCSVToResiItems] ✅ Valid - found in Stage 1: resi=${resiUpper}`);
       return true;
     });
     
@@ -868,7 +895,8 @@ export const saveCSVToResiItems = async (
         count: 0, 
         skippedCount: skippedItems.length + skippedNotScanned.length,
         skippedResis: [...skippedResis, ...skippedNotScannedResis],
-        updatedCount: 0
+        updatedCount: 0,
+        skippedItems: skippedItemsDetail
       };
     }
 
@@ -928,12 +956,19 @@ export const saveCSVToResiItems = async (
         if (existingInDB.isReady) {
           console.log(`[saveCSVToResiItems] ⏭️ Skipped resi ${item.resi} - already Ready`);
           skippedReadyCount++;
+          skippedItemsDetail.push({
+            resi: item.resi,
+            order_id: item.order_id,
+            customer: item.customer,
+            product_name: item.product_name,
+            reason: 'Sudah Ready (data lengkap)'
+          });
           continue;
         }
         
         // UPDATE hanya jika belum Ready
         // JANGAN ubah ecommerce dan toko - tetap dari data yang ada di DB
-        // KECUALI untuk SHOPEE INSTAN/KILAT, update ecommerce dari CSV
+        // KECUALI untuk SHOPEE INSTAN/KILAT atau Shopee International (PH/MY/SG/INTL)
         const updatePayload: Record<string, any> = {
           order_id: item.order_id,
           status_pesanan: item.order_status,
@@ -945,8 +980,12 @@ export const saveCSVToResiItems = async (
           customer: item.customer,
         };
         
-        // Update ecommerce jika Instan atau Kilat
-        if (item.ecommerce === 'SHOPEE INSTAN' || item.ecommerce === 'KILAT INSTAN') {
+        // Update ecommerce jika special case (Instan, Kilat, Sameday, atau International)
+        const specialEcommerceLabels = [
+          'SHOPEE INSTAN', 'KILAT INSTAN', 'SHOPEE SAMEDAY',
+          'SHOPEE PH', 'SHOPEE MY', 'SHOPEE SG', 'SHOPEE INTL'
+        ];
+        if (specialEcommerceLabels.includes(item.ecommerce)) {
           updatePayload.ecommerce = item.ecommerce;
           console.log(`[saveCSVToResiItems] 📦 Updating ecommerce to ${item.ecommerce} for resi ${item.resi}`);
         }
@@ -1021,10 +1060,11 @@ export const saveCSVToResiItems = async (
       count: insertedCount,
       skippedCount: skippedItems.length + skippedReadyCount,
       skippedResis,
-      updatedCount
+      updatedCount,
+      skippedItems: skippedItemsDetail
     };
   } catch (err: any) {
-    return { success: false, message: err.message || 'Gagal menyimpan data CSV', count: 0, skippedCount: 0, skippedResis: [], updatedCount: 0 };
+    return { success: false, message: err.message || 'Gagal menyimpan data CSV', count: 0, skippedCount: 0, skippedResis: [], updatedCount: 0, skippedItems: [] };
   }
 };
 

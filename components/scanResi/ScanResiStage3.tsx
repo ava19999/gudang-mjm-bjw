@@ -24,10 +24,11 @@ import {
 import { 
   parseShopeeCSV, 
   parseTikTokCSV, 
+  parseShopeeIntlCSV,
   detectCSVPlatform 
 } from '../../services/csvParserService';
 import { 
-  Upload, Save, Trash2, Plus, DownloadCloud, RefreshCw, Filter, CheckCircle, Loader2, Settings, Search
+  Upload, Save, Trash2, Plus, DownloadCloud, RefreshCw, Filter, CheckCircle, Loader2, Settings, Search, X, AlertTriangle
 } from 'lucide-react';
 import { EcommercePlatform, SubToko, NegaraEkspor } from '../../types';
 
@@ -52,6 +53,15 @@ interface Stage3Row {
   is_stock_valid: boolean;
   status_message: string;
   force_override_double: boolean;  // FITUR 1: Flag untuk force override status Double
+}
+
+// Interface untuk item yang di-skip saat upload CSV
+interface SkippedItem {
+  resi: string;
+  order_id?: string;
+  customer?: string;
+  product_name?: string;
+  reason: string;
 }
 
 // --- KOMPONEN DROPDOWN E-COMMERCE (SEARCHABLE) ---
@@ -231,6 +241,122 @@ const SubTokoResellerDropdown = ({ value, onChange, suggestions }: { value: stri
   );
 };
 
+// --- KOMPONEN MODAL SKIPPED ITEMS ---
+const SkippedItemsModal = ({ 
+  isOpen, 
+  onClose, 
+  items,
+  summary
+}: { 
+  isOpen: boolean; 
+  onClose: () => void; 
+  items: SkippedItem[];
+  summary: {imported: number, updated: number, skipped: number};
+}) => {
+  if (!isOpen) return null;
+
+  // Group by reason
+  const groupedByReason = items.reduce((acc, item) => {
+    if (!acc[item.reason]) acc[item.reason] = [];
+    acc[item.reason].push(item);
+    return acc;
+  }, {} as Record<string, SkippedItem[]>);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+      <div className="bg-gray-800 rounded-lg shadow-xl w-full max-w-3xl max-h-[80vh] flex flex-col">
+        {/* Header */}
+        <div className="flex items-center justify-between p-4 border-b border-gray-700">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-5 h-5 text-yellow-500" />
+            <h2 className="text-lg font-semibold text-white">Hasil Upload CSV</h2>
+          </div>
+          <button onClick={onClose} className="p-1 hover:bg-gray-700 rounded transition-colors">
+            <X className="w-5 h-5 text-gray-400" />
+          </button>
+        </div>
+
+        {/* Summary */}
+        <div className="p-4 border-b border-gray-700 bg-gray-750">
+          <div className="grid grid-cols-3 gap-4 text-center">
+            <div className="bg-green-900/30 rounded-lg p-3">
+              <div className="text-2xl font-bold text-green-400">{summary.imported}</div>
+              <div className="text-xs text-gray-400">Item Baru</div>
+            </div>
+            <div className="bg-blue-900/30 rounded-lg p-3">
+              <div className="text-2xl font-bold text-blue-400">{summary.updated}</div>
+              <div className="text-xs text-gray-400">Item Updated</div>
+            </div>
+            <div className="bg-yellow-900/30 rounded-lg p-3">
+              <div className="text-2xl font-bold text-yellow-400">{summary.skipped}</div>
+              <div className="text-xs text-gray-400">Item Skipped</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Skipped Items List */}
+        <div className="flex-1 overflow-auto p-4">
+          {items.length === 0 ? (
+            <div className="text-center text-gray-400 py-8">
+              <CheckCircle className="w-12 h-12 mx-auto mb-2 text-green-500" />
+              <p>Semua data berhasil diproses!</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {Object.entries(groupedByReason).map(([reason, reasonItems]) => (
+                <div key={reason} className="bg-gray-700/50 rounded-lg p-3">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="px-2 py-0.5 bg-yellow-600/30 text-yellow-400 text-xs rounded-full">
+                      {reasonItems.length} item
+                    </span>
+                    <span className="text-sm font-medium text-yellow-400">{reason}</span>
+                  </div>
+                  <div className="max-h-40 overflow-auto">
+                    <table className="w-full text-xs">
+                      <thead className="sticky top-0 bg-gray-700">
+                        <tr className="text-gray-400">
+                          <th className="text-left py-1 px-2">Resi / Order ID</th>
+                          <th className="text-left py-1 px-2">Customer</th>
+                          <th className="text-left py-1 px-2">Produk</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {reasonItems.map((item, idx) => (
+                          <tr key={idx} className="border-t border-gray-600/50 hover:bg-gray-600/30">
+                            <td className="py-1 px-2 font-mono text-gray-300">
+                              {item.resi || item.order_id || '-'}
+                            </td>
+                            <td className="py-1 px-2 text-gray-400 truncate max-w-[150px]">
+                              {item.customer || '-'}
+                            </td>
+                            <td className="py-1 px-2 text-gray-400 truncate max-w-[200px]">
+                              {item.product_name || '-'}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="p-4 border-t border-gray-700">
+          <button
+            onClick={onClose}
+            className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors"
+          >
+            Tutup
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
   const { selectedStore } = useStore();
   const [rows, setRows] = useState<Stage3Row[]>([]);
@@ -256,6 +382,11 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
   const [resiSearchQuery, setResiSearchQuery] = useState('');
   const [showResiDropdown, setShowResiDropdown] = useState(false);
   const resiSearchRef = useRef<HTMLDivElement>(null);
+
+  // SKIPPED ITEMS MODAL STATE
+  const [showSkippedModal, setShowSkippedModal] = useState(false);
+  const [skippedItems, setSkippedItems] = useState<SkippedItem[]>([]);
+  const [uploadSummary, setUploadSummary] = useState<{imported: number, updated: number, skipped: number}>({imported: 0, updated: 0, skipped: 0});
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -644,9 +775,10 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
       const platform = detectCSVPlatform(csvText);
       let parsedItems: any[] = [];
       
-      // Parsing berdasarkan deteksi format file (Shopee/TikTok)
+      // Parsing berdasarkan deteksi format file (Shopee/TikTok/Shopee International)
       // Namun attribute ecommerce/toko akan kita override dengan pilihan user
       if (platform === 'shopee') parsedItems = parseShopeeCSV(csvText);
+      else if (platform === 'shopee-intl') parsedItems = parseShopeeIntlCSV(csvText);
       else if (platform === 'tiktok') parsedItems = parseTikTokCSV(csvText);
       else { 
         // Fallback coba parse Shopee standar jika tidak terdeteksi
@@ -671,22 +803,32 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
       
       const existingInBarangKeluar = await checkExistingInBarangKeluar(allToCheckBarangKeluar, selectedStore);
       
+      // Kumpulkan skipped items dengan alasan
+      const allSkippedItems: SkippedItem[] = [];
+      
       // Filter: buang item yang sudah ada di barang_keluar
-      const skippedByBarangKeluar: any[] = [];
       const afterBarangKeluarFilter = parsedItems.filter(item => {
         const resiUpper = String(item.resi || '').trim().toUpperCase();
         const orderIdUpper = String(item.order_id || '').trim().toUpperCase();
         
         if (existingInBarangKeluar.has(resiUpper) || existingInBarangKeluar.has(orderIdUpper)) {
-          skippedByBarangKeluar.push(item);
+          allSkippedItems.push({
+            resi: item.resi,
+            order_id: item.order_id,
+            customer: item.customer,
+            product_name: item.product_name,
+            reason: 'Sudah ada di Barang Keluar (sudah terjual)'
+          });
           return false;
         }
         return true;
       });
       
       if (afterBarangKeluarFilter.length === 0) {
-        const skippedResis = [...new Set(skippedByBarangKeluar.map(i => i.resi))].slice(0, 10).join(', ');
-        alert(`Semua ${parsedItems.length} resi sudah ada di Barang Keluar (sudah terjual)!\n\nResi: ${skippedResis}...`);
+        // Semua item di-skip, tampilkan modal
+        setSkippedItems(allSkippedItems);
+        setUploadSummary({ imported: 0, updated: 0, skipped: allSkippedItems.length });
+        setShowSkippedModal(true);
         setLoading(false);
         return;
       }
@@ -771,38 +913,27 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
           
           const result = await saveCSVToResiItems(correctedItems, selectedStore, existingResiMap);
           
-          // Gabungkan info skip dari pre-filter dan dari saveCSVToResiItems
-          const totalSkipped = skippedByBarangKeluar.length + result.skippedCount;
-          const allSkippedResis = [
-            ...new Set([
-              ...skippedByBarangKeluar.map(i => i.resi),
-              ...result.skippedResis
-            ])
-          ];
-          
-          // Buat pesan hasil
-          const updateInfo = result.updatedCount > 0 
-            ? `\n📝 ${result.updatedCount} resi sudah ada → data CSV diisi ke baris yang ada (ecommerce & toko tetap dari scan)` 
-            : '';
-          
-          if (totalSkipped > 0) {
-            // Ada item yang di-skip karena sudah ada di Barang Keluar
-            const skippedMsg = allSkippedResis.slice(0, 10).join(', ');
-            const moreMsg = allSkippedResis.length > 10 ? ` dan ${allSkippedResis.length - 10} lainnya` : '';
-            alert(
-              `✅ Berhasil import ${result.count} item baru sebagai ${uploadEcommerce} (${uploadSubToko}).${updateInfo}\n\n` +
-              `⚠️ ${totalSkipped} item di-SKIP karena sudah ada di Barang Keluar (sudah terjual/keluar):\n` +
-              `${skippedMsg}${moreMsg}`
-            );
-          } else if (result.success) {
-            alert(`✅ Berhasil import ${result.count} item baru sebagai ${uploadEcommerce} (${uploadSubToko}).${updateInfo}`);
-          } else {
-            alert(result.message);
+          // Tambahkan skipped items dari saveCSVToResiItems (belum scan Stage 1, sudah Ready, dll)
+          if (result.skippedItems && result.skippedItems.length > 0) {
+            allSkippedItems.push(...result.skippedItems);
           }
+          
+          // Set data untuk modal
+          setUploadSummary({
+            imported: result.count,
+            updated: result.updatedCount,
+            skipped: allSkippedItems.length
+          });
+          setSkippedItems(allSkippedItems);
+          
+          // Tampilkan modal hasil upload
+          setShowSkippedModal(true);
+          
       } else {
         // Semua item sudah di-filter
-        const skippedResis = [...new Set(skippedByBarangKeluar.map(i => i.resi))].slice(0, 10).join(', ');
-        alert(`Semua item sudah ada di Barang Keluar!\n\nResi: ${skippedResis}...`);
+        setUploadSummary({ imported: 0, updated: 0, skipped: allSkippedItems.length });
+        setSkippedItems(allSkippedItems);
+        setShowSkippedModal(true);
       }
 
       await loadSavedDataFromDB();
@@ -1639,6 +1770,14 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
           </tbody>
         </table>
       </div>
+
+      {/* Modal untuk menampilkan item yang di-skip saat upload CSV */}
+      <SkippedItemsModal
+        isOpen={showSkippedModal}
+        onClose={() => setShowSkippedModal(false)}
+        items={skippedItems}
+        summary={uploadSummary}
+      />
     </div>
   );
 };
