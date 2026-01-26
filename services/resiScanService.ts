@@ -31,6 +31,55 @@ const mapToBoolean = (data: any[]) => {
 // ============================================================================
 
 /**
+ * Cari resi di semua tabel untuk debugging
+ */
+export const findResiEverywhere = async (
+  resi: string,
+  store: string | null
+): Promise<{ found: boolean; location: string; details?: any }> => {
+  const scanTable = getTableName(store);
+  const keluarTable = getBarangKeluarTable(store);
+  const resiNormalized = resi.trim().toUpperCase();
+  
+  try {
+    // 1. Cek di scan_resi
+    const { data: scanData } = await supabase
+      .from(scanTable)
+      .select('id, resi, status, stage1_scanned, stage2_verified, tanggal')
+      .ilike('resi', resiNormalized)
+      .limit(1);
+    
+    if (scanData && scanData.length > 0) {
+      return { 
+        found: true, 
+        location: `scan_resi (status: ${scanData[0].status})`,
+        details: scanData[0]
+      };
+    }
+    
+    // 2. Cek di barang_keluar
+    const { data: keluarData } = await supabase
+      .from(keluarTable)
+      .select('id, resi, customer, tanggal, created_at')
+      .ilike('resi', resiNormalized)
+      .limit(1);
+    
+    if (keluarData && keluarData.length > 0) {
+      return { 
+        found: true, 
+        location: 'barang_keluar (sudah terjual)',
+        details: keluarData[0]
+      };
+    }
+    
+    return { found: false, location: 'tidak ditemukan' };
+  } catch (err) {
+    console.error('findResiEverywhere error:', err);
+    return { found: false, location: 'error' };
+  }
+};
+
+/**
  * Cek apakah resi atau order_id sudah ada di barang_keluar
  * Return Set of resi yang sudah ada
  */
@@ -88,16 +137,18 @@ export const scanResiStage1 = async (
 ): Promise<{ success: boolean; message: string; data?: ResiScanStage }> => {
   try {
     const table = getTableName(store);
+    const resiNormalized = data.resi.trim().toUpperCase();
     
     // CEK DUPLIKAT: Pastikan resi belum pernah di-scan sebelumnya
     const { data: existing } = await supabase
       .from(table)
-      .select('id, resi')
-      .eq('resi', data.resi)
+      .select('id, resi, status')
+      .ilike('resi', resiNormalized)
       .limit(1);
     
     if (existing && existing.length > 0) {
-      return { success: false, message: 'Resi sudah pernah di-scan sebelumnya!' };
+      const statusInfo = existing[0].status ? ` (status: ${existing[0].status})` : '';
+      return { success: false, message: `Resi sudah ada di database${statusInfo}!` };
     }
     
     // CEK BARANG KELUAR: Pastikan resi belum ada di barang_keluar (sudah terjual/keluar)
@@ -109,7 +160,6 @@ export const scanResiStage1 = async (
     const insertData = {
       id: (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : Math.random().toString(36).slice(2),
       resi: data.resi,
-      no_pesanan: data.resi, // Simpan juga sebagai no_pesanan untuk deteksi INSTANT
       ecommerce: data.ecommerce,
       sub_toko: data.sub_toko,
       negara_ekspor: data.negara_ekspor || null,
@@ -197,7 +247,6 @@ export const scanResiStage1Bulk = async (
     const insertData = newItems.map(item => ({
       id: (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : Math.random().toString(36).slice(2),
       resi: item.resi,
-      no_pesanan: item.resi, // Simpan juga sebagai no_pesanan untuk deteksi INSTANT
       ecommerce: item.ecommerce,
       sub_toko: item.sub_toko,
       negara_ekspor: item.negara_ekspor || null,
@@ -228,43 +277,78 @@ export const scanResiStage1Bulk = async (
 
 export const getResiStage1List = async (store: string | null) => {
   const table = getTableName(store);
+  console.log('[getResiStage1List] store:', store, 'table:', table);
+  
+  // Ambil semua data dari tabel tanpa filter apapun dulu
   const { data, error } = await supabase
     .from(table)
     .select('*')
-    .eq('stage1_scanned', 'true') 
-    .order('stage1_scanned_at', { ascending: false })
+    .order('tanggal', { ascending: false })
     .limit(500);
 
-  if (error) return [];
+  console.log('[getResiStage1List] result:', { count: data?.length, error, firstItem: data?.[0] });
+
+  if (error) {
+    console.error('getResiStage1List error:', error);
+    return [];
+  }
+  
+  // Filter manual: ambil yang bukan completed
+  const filtered = (data || []).filter((d: any) => d.status !== 'completed');
+  console.log('[getResiStage1List] filtered count:', filtered.length);
+  
+  return mapToBoolean(filtered);
+};
+
+// Fungsi pencarian resi - cari di semua status
+export const searchResiByNumber = async (resiQuery: string, store: string | null) => {
+  const table = getTableName(store);
+  const { data, error } = await supabase
+    .from(table)
+    .select('*')
+    .ilike('resi', `%${resiQuery}%`)
+    .order('tanggal', { ascending: false })
+    .limit(100);
+
+  if (error) {
+    console.error('searchResiByNumber error:', error);
+    return [];
+  }
   return mapToBoolean(data || []);
 };
 
 // Ambil semua resi Stage 1 yang belum completed (untuk Stage 3)
 export const getAllPendingStage1Resi = async (store: string | null) => {
   const table = getTableName(store);
+  // Ambil resi yang stage1_scanned = true DAN status bukan completed
+  // atau status IS NULL (data lama)
   const { data, error } = await supabase
     .from(table)
     .select('*')
     .eq('stage1_scanned', 'true')
-    .neq('status', 'completed')
-    .order('stage1_scanned_at', { ascending: false })
+    .or('status.is.null,status.neq.completed')
+    .order('tanggal', { ascending: false })
     .limit(500);
 
   if (error) return [];
   return mapToBoolean(data || []);
 };
 
-export const deleteResiStage1 = async (id: string, store: string | null) => {
+export const deleteResiStage1 = async (id: string, store: string | null, forceDelete: boolean = false) => {
   const table = getTableName(store);
-  const { data } = await supabase.from(table).select('stage2_verified').eq('id', id).single();
   
-  if (data?.stage2_verified === 'true') {
-    return { success: false, message: 'Tidak bisa dihapus, sudah masuk Stage 2!' };
+  // Jika tidak force delete, cek apakah sudah masuk Stage 2
+  if (!forceDelete) {
+    const { data } = await supabase.from(table).select('stage2_verified, status').eq('id', id).single();
+    
+    if (data?.stage2_verified === 'true' || data?.status === 'stage2' || data?.status === 'completed') {
+      return { success: false, message: `Tidak bisa dihapus, status: ${data?.status || 'stage2'}. Gunakan opsi hapus paksa jika perlu.` };
+    }
   }
 
   const { error } = await supabase.from(table).delete().eq('id', id);
   if (error) return { success: false, message: error.message };
-  return { success: true, message: 'Resi dihapus.' };
+  return { success: true, message: 'Resi berhasil dihapus dari database.' };
 };
 
 // Delete resi - bisa menghapus Stage 1, Stage 2, atau Stage 3
