@@ -171,7 +171,14 @@ export const parseShopeeCSV = (text: string): ParsedCSVItem[] => {
   // Dedupe set
   const seenKeys = new Set<string>();
   
-  return dataRows.map(line => {
+  // Tracking untuk debugging
+  let totalProcessed = 0;
+  let skippedCancelled = 0;
+  let skippedNoResi = 0;
+  let skippedDuplicate = 0;
+  
+  const results = dataRows.map(line => {
+    totalProcessed++;
     const cols = parseCSVLine(line);
     if (cols.length < 5) return null;
 
@@ -181,13 +188,15 @@ export const parseShopeeCSV = (text: string): ParsedCSVItem[] => {
       : '';
     const statusLower = rawStatus.toLowerCase();
     
-    // SKIP: Hanya "Dibatalkan" atau "Batal" (BUKAN "Pembatalan Diajukan")
-    // "Pembatalan Diajukan" masih boleh masuk karena pesanan belum benar-benar dibatalkan
+    // SKIP: Hanya jika status BENAR-BENAR "Dibatalkan" atau "Batal"
+    // "Pembatalan Diajukan" / "Cancellation Requested" masih boleh masuk karena pesanan belum benar-benar dibatalkan
+    // Cek exact match untuk avoid false positive
     const isCancelled = statusLower === 'batal' || 
                         statusLower === 'dibatalkan' || 
                         statusLower === 'cancelled' ||
                         statusLower === 'canceled';
     if (isCancelled || statusLower.includes('belum bayar')) {
+      skippedCancelled++;
       return null;
     }
 
@@ -216,22 +225,28 @@ export const parseShopeeCSV = (text: string): ParsedCSVItem[] => {
     // Prioritas: cek "kilat" dulu karena "kilat instan" mengandung kedua kata
     const isKilat = shippingOptionLower.includes('kilat');
     const isSameday = shippingOptionLower.includes('same day') || shippingOptionLower.includes('sameday');
-    const isInstant = shippingOptionLower.includes('instant') && !isKilat;
+    const isInstant = (shippingOptionLower.includes('instant') || shippingOptionLower.includes('instan')) && !isKilat;
     
     let ecommerceLabel = 'SHOPEE';
     if (isKilat) {
+      // Kilat Instan - gunakan No. Pesanan
       if (orderId) resi = orderId;
       ecommerceLabel = 'KILAT INSTAN';
     } else if (isSameday) {
+      // Same Day - gunakan No. Pesanan (termasuk Instant Same Day)
       if (orderId) resi = orderId;
       ecommerceLabel = 'SHOPEE SAMEDAY';
     } else if (isInstant) {
+      // Instant - gunakan No. Pesanan
       if (orderId) resi = orderId;
       ecommerceLabel = 'SHOPEE INSTAN';
     }
     
     // SKIP jika resi masih kosong
-    if (!resi) return null;
+    if (!resi) {
+      skippedNoResi++;
+      return null;
+    }
 
     // Format customer
     const customer = formatCustomer(cols[idxUser] || '');
@@ -241,9 +256,14 @@ export const parseShopeeCSV = (text: string): ParsedCSVItem[] => {
     const namaVariasi = (idxNamaVariasi !== -1) ? cols[idxNamaVariasi] : '';
     const productName = formatNamaProduk(namaProduk, namaVariasi);
     
-    // Dedupe check
-    const dedupeKey = `${resi}||${customer}||${productName}`;
-    if (seenKeys.has(dedupeKey)) return null;
+    // Dedupe check - gunakan resi + SKU untuk akurasi lebih baik
+    // Customer dan product name bisa bervariasi formatting-nya
+    const sku = (idxSKU !== -1 && cols[idxSKU]) ? cols[idxSKU].replace(/["']/g, '') : '';
+    const dedupeKey = `${resi}||${sku}||${productName}`;
+    if (seenKeys.has(dedupeKey)) {
+      skippedDuplicate++;
+      return null;
+    }
     seenKeys.add(dedupeKey);
 
     // Parse harga
@@ -263,6 +283,16 @@ export const parseShopeeCSV = (text: string): ParsedCSVItem[] => {
       ecommerce: ecommerceLabel
     };
   }).filter((item): item is ParsedCSVItem => item !== null);
+  
+  // Log summary
+  console.log('[Shopee CSV] Parse Summary:');
+  console.log('  Total rows:', totalProcessed);
+  console.log('  Valid items:', results.length);
+  console.log('  Skipped - Cancelled/Unpaid:', skippedCancelled);
+  console.log('  Skipped - No Resi:', skippedNoResi);
+  console.log('  Skipped - Duplicate:', skippedDuplicate);
+  
+  return results;
 };
 
 // ============================================================================
@@ -314,7 +344,8 @@ export const parseShopeeIntlCSV = (text: string): ParsedCSVItem[] => {
       : '';
     const statusLower = rawStatus.toLowerCase();
     
-    // SKIP: Hanya jika status tepat "Cancelled" atau "Canceled" (bukan "Cancellation Requested")
+    // SKIP: Hanya jika status BENAR-BENAR "Cancelled" atau "Unpaid"
+    // "Cancellation Requested" masih boleh masuk karena pesanan belum benar-benar dibatalkan
     const isCancelled = statusLower === 'cancelled' || 
                         statusLower === 'canceled' ||
                         statusLower === 'unpaid';
@@ -403,7 +434,6 @@ export const parseTikTokCSV = (text: string): ParsedCSVItem[] => {
   const idxResi = headers.findIndex(h => h.includes('Tracking ID'));
   const idxOrder = headers.findIndex(h => h.includes('Order ID'));
   const idxStatus = headers.findIndex(h => h.includes('Order Status'));
-  const idxShipping = headers.findIndex(h => h.includes('Shipping Provider') || h.includes('Shipping Option'));
   const idxUser = headers.findIndex(h => h.includes('Buyer Username'));
   const idxSKU = headers.findIndex(h => h.includes('Seller SKU'));
   const idxProductName = headers.findIndex(h => h.includes('Product Name'));
@@ -413,9 +443,17 @@ export const parseTikTokCSV = (text: string): ParsedCSVItem[] => {
 
   // Dedupe set
   const seenKeys = new Set<string>();
+  
+  // Tracking untuk debugging
+  let totalProcessed = 0;
+  let skippedCancelled = 0;
+  let skippedNoOrderId = 0;
+  let skippedDuplicate = 0;
 
-  return dataRows.map(line => {
+  const results = dataRows.map(line => {
+    totalProcessed++;
     const cols = parseCSVLine(line);
+    
     if (cols.length < headers.length * 0.5) return null; // Skip jika terlalu sedikit kolom
 
     // Get status dan filter
@@ -424,28 +462,33 @@ export const parseTikTokCSV = (text: string): ParsedCSVItem[] => {
       : '';
     const statusLower = rawStatus.toLowerCase();
 
-    // SKIP: Hanya jika status tepat "Dibatalkan" atau "Cancelled" (bukan "Pembatalan Diajukan")
+    // SKIP: Hanya jika status BENAR-BENAR "Dibatalkan" atau "Cancelled"
+    // "Pembatalan Diajukan" / "Cancellation Requested" masih boleh masuk karena pesanan belum benar-benar dibatalkan
+    // Cek exact match untuk menghindari false positive
     const isCancelled = statusLower === 'dibatalkan' || 
                         statusLower === 'cancelled' ||
                         statusLower === 'canceled';
     const isUnpaid = statusLower.includes('belum dibayar') || statusLower.includes('unpaid');
     if (isCancelled || isUnpaid) {
+      skippedCancelled++;
       return null;
     }
 
-    // Get resi (Tracking ID) - SKIP jika kosong
-    // Gunakan fixScientificNotation untuk menangani kasus scientific notation
-    let resi = (idxResi !== -1 && cols[idxResi]) 
-      ? cols[idxResi].replace(/["']/g, '').trim() 
-      : '';
-    resi = fixScientificNotation(resi);
-    if (!resi) return null;
-    
-    // Get order_id - juga fix scientific notation
+    // TIKTOK menggunakan Order ID sebagai resi (bukan Tracking ID)
+    // Get order_id - fix scientific notation
     let orderId = (idxOrder !== -1 && cols[idxOrder]) 
       ? cols[idxOrder].replace(/["']/g, '').trim() 
       : '';
     orderId = fixScientificNotation(orderId);
+    
+    // SKIP jika Order ID kosong
+    if (!orderId) {
+      skippedNoOrderId++;
+      return null;
+    }
+    
+    // Gunakan Order ID sebagai resi
+    let resi = orderId;
 
     // Format customer
     const customer = formatCustomer(cols[idxUser] || '');
@@ -455,9 +498,13 @@ export const parseTikTokCSV = (text: string): ParsedCSVItem[] => {
     const variation = (idxVariation !== -1) ? cols[idxVariation] : '';
     const productName = formatNamaProduk(namaProduk, variation);
     
-    // Dedupe check
-    const dedupeKey = `${resi}||${customer}||${productName}`;
-    if (seenKeys.has(dedupeKey)) return null;
+    // Dedupe check - gunakan order_id (resi) + SKU untuk akurasi
+    const sku = (idxSKU !== -1 && cols[idxSKU]) ? cols[idxSKU].replace(/["']/g, '') : '';
+    const dedupeKey = `${resi}||${sku}||${productName}`;
+    if (seenKeys.has(dedupeKey)) {
+      skippedDuplicate++;
+      return null;
+    }
     seenKeys.add(dedupeKey);
 
     // Parse harga
@@ -467,7 +514,7 @@ export const parseTikTokCSV = (text: string): ParsedCSVItem[] => {
       resi,
       order_id: orderId,
       order_status: rawStatus,
-      shipping_option: (idxShipping !== -1 && cols[idxShipping]) ? cols[idxShipping].replace(/["']/g, '') : '',
+      shipping_option: '',
       customer,
       part_number: (idxSKU !== -1 && cols[idxSKU]) ? cols[idxSKU].replace(/["']/g, '') : '',
       product_name: productName,
@@ -477,4 +524,14 @@ export const parseTikTokCSV = (text: string): ParsedCSVItem[] => {
       ecommerce: 'TIKTOK'
     };
   }).filter((item): item is ParsedCSVItem => item !== null);
+  
+  // Log summary
+  console.log('[TikTok CSV] Parse Summary:');
+  console.log('  Total rows:', totalProcessed);
+  console.log('  Valid items:', results.length);
+  console.log('  Skipped - Cancelled/Unpaid:', skippedCancelled);
+  console.log('  Skipped - No Order ID:', skippedNoOrderId);
+  console.log('  Skipped - Duplicate:', skippedDuplicate);
+  
+  return results;
 };

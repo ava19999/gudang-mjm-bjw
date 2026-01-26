@@ -1653,9 +1653,9 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                   <td className="border border-gray-600 px-1 text-center text-[11px]">
                     <div className="flex flex-col items-center gap-0.5">
                       <span>{row.ecommerce}</span>
-                      {/* Badge INSTANT di bawah ecommerce jika resi === no_pesanan (kecuali RESELLER dan EKSPOR) */}
-                      {row.resi && row.no_pesanan && row.resi === row.no_pesanan && 
-                       row.ecommerce !== 'RESELLER' && !row.ecommerce?.startsWith('EKSPOR') && (
+                      {/* Badge INSTANT: untuk SHOPEE (jika resi === no_pesanan) ATAU TikTok (jika label INSTAN) */}
+                      {((row.resi && row.no_pesanan && row.resi === row.no_pesanan && row.ecommerce?.toUpperCase().includes('SHOPEE')) ||
+                        row.ecommerce?.toUpperCase().includes('INSTAN')) && (
                         <span className="px-1 py-0.5 bg-orange-500 text-white text-[8px] font-bold rounded">INSTANT</span>
                       )}
                     </div>

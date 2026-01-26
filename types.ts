@@ -279,10 +279,11 @@ export interface ResiScanStage {
 }
 
 // Helper: Deteksi apakah pesanan INSTANT (No. Pesanan dipakai sebagai resi)
-// INSTANT hanya berlaku untuk SHOPEE dan TIKTOK
+// INSTANT hanya berlaku untuk SHOPEE (BUKAN TIKTOK)
 export const isInstantOrder = (resi: ResiScanStage): boolean => {
   const ecomm = (resi.ecommerce || '').toUpperCase();
-  if (ecomm !== 'SHOPEE' && ecomm !== 'TIKTOK') return false;
+  // TIKTOK selalu menggunakan Order ID, jadi bukan "instant" dalam konteks ini
+  if (ecomm !== 'SHOPEE') return false;
   // INSTANT jika resi === no_pesanan (artinya yang di-scan adalah no pesanan)
   return !!(resi.no_pesanan && resi.resi === resi.no_pesanan);
 };
