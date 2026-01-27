@@ -369,10 +369,12 @@ export interface ParsedCSVItem {
   part_number: string;      // SKU / Number Part
   product_name: string;     // Nama Produk
   quantity: number;         // Jumlah
-  total_price: number;      // Total Harga Produk (IDR)
+  total_price: number;      // Total Harga Produk (IDR atau mata uang asing untuk Ekspor)
   customer: string;         // Username (Pembeli)
-  ecommerce: string;        // 'SHOPEE' | 'TIKTOK'
+  ecommerce: string;        // 'SHOPEE' | 'TIKTOK' | 'EKSPOR - PH' | etc
   original_currency_val: string; 
+  detected_country?: string; // Negara terdeteksi dari Order ID (untuk Ekspor: PH/MY/SG/HK)
+  sub_toko?: string;        // Sub toko (opsional, diisi saat upload)
   // 'toko' (MJM/BJW) akan dihandle saat insert database di component
 }
 

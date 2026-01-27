@@ -2,22 +2,67 @@
 import { ParsedCSVItem } from '../types';
 
 // ============================================================================
+// CURRENCY CONVERSION RATES (untuk Ekspor)
+// Rate: 1 mata uang asing = X IDR
+// Update rate ini secara berkala sesuai kurs terkini
+// ============================================================================
+export const CURRENCY_RATES: Record<string, number> = {
+  'PHP': 280,    // 1 PHP = 280 IDR (Philippines Peso)
+  'PH': 280,     // alias
+  'MYR': 3600,   // 1 MYR = 3600 IDR (Malaysian Ringgit)
+  'MY': 3600,    // alias
+  'SGD': 12000,  // 1 SGD = 12000 IDR (Singapore Dollar)
+  'SG': 12000,   // alias
+  'HKD': 2100,   // 1 HKD = 2100 IDR (Hong Kong Dollar)
+  'HK': 2100,    // alias
+  'IDR': 1,      // No conversion
+  'ID': 1,       // alias
+};
+
+// Fungsi konversi mata uang asing ke IDR
+export const convertToIDR = (amount: number, country: string): number => {
+  const countryUpper = (country || '').toUpperCase().trim();
+  const rate = CURRENCY_RATES[countryUpper] || 1;
+  return Math.round(amount * rate);
+};
+
+// Parse harga dari foreign currency (tanpa konversi, hanya parse angka)
+export const parseForeignCurrency = (val: string): number => {
+  if (!val) return 0;
+  // Buang semua karakter non-angka kecuali titik, koma, minus
+  let numStr = val.replace(/[^0-9.,-]/g, '');
+  
+  // Format international biasanya: 1,234.56 atau 1234.56
+  // Koma adalah ribuan, titik adalah desimal
+  numStr = numStr.replace(/,/g, ''); // Buang koma (ribuan)
+  
+  return parseFloat(numStr) || 0;
+};
+
+// ============================================================================
 // HELPER FUNCTIONS
 // ============================================================================
 
 // Konversi scientific notation ke string angka penuh
 // Contoh: "1.10032E+13" -> "11003200000000" atau "1.10032055095560E13" -> "11003205509556"
+// PENTING: Hanya proses jika BENAR-BENAR scientific notation (hanya angka, titik, E, +/-)
+// Jangan proses resi alfanumerik seperti "2601154E8R7Y5F" yang kebetulan mengandung huruf E
 const fixScientificNotation = (val: string): string => {
   if (!val) return '';
   const trimmed = val.trim();
   
-  // Cek apakah dalam format scientific notation (mengandung E atau e)
-  if (/[eE][+-]?\d+/.test(trimmed)) {
+  // Cek apakah dalam format scientific notation yang VALID
+  // Pattern: hanya angka, optional titik desimal, lalu E/e, optional +/-, lalu angka
+  // Contoh valid: "1.10032E+13", "2.5E10", "1E+5"
+  // Contoh TIDAK valid: "2601154E8R7Y5F" (ada huruf lain selain E)
+  const scientificPattern = /^[+-]?\d+\.?\d*[eE][+-]?\d+$/;
+  
+  if (scientificPattern.test(trimmed)) {
     try {
       // Parse sebagai number lalu konversi ke string tanpa scientific notation
       const num = parseFloat(trimmed);
       if (!isNaN(num)) {
-        // Gunakan toFixed(0) untuk mendapat integer, atau toLocaleString untuk format penuh
+        // Gunakan toLocaleString untuk format penuh tanpa scientific notation
         return num.toLocaleString('fullwide', { useGrouping: false });
       }
     } catch (e) {
@@ -118,6 +163,13 @@ const parseCSVLine = (line: string): string[] => {
 // PLATFORM DETECTION
 // ============================================================================
 export const detectCSVPlatform = (text: string): 'shopee' | 'shopee-intl' | 'tiktok' | 'unknown' => {
+  // TikTok: Header mengandung "Tracking ID" dan "Seller SKU" atau "Order Status" (TikTok specific)
+  // Cek TikTok DULU sebelum Shopee International karena keduanya punya "Order ID"
+  if ((text.includes('Tracking ID') && text.includes('Seller SKU')) || 
+      (text.includes('Order ID') && text.includes('Seller SKU') && text.includes('SKU Subtotal'))) {
+    return 'tiktok';
+  }
+  
   // Shopee Indonesia: Header mengandung "No. Resi" atau "No. Pesanan" + "Username (Pembeli)"
   const isShopeeID = (
     (text.includes('No. Resi') || text.includes('No. Pesanan')) && 
@@ -131,9 +183,6 @@ export const detectCSVPlatform = (text: string): 'shopee' | 'shopee-intl' | 'tik
     (text.includes('Tracking Number') || text.includes('Product Name') || text.includes('Buyer Username'))
   );
   if (isShopeeIntl) return 'shopee-intl';
-  
-  // TikTok: Header mengandung "Tracking ID" dan "Seller SKU"
-  if (text.includes('Tracking ID') && text.includes('Seller SKU')) return 'tiktok';
   
   return 'unknown';
 };
@@ -182,23 +231,11 @@ export const parseShopeeCSV = (text: string): ParsedCSVItem[] => {
     const cols = parseCSVLine(line);
     if (cols.length < 5) return null;
 
-    // Get status dan filter
+    // Get status - TIDAK FILTER di sini, biarkan STEP 0 di handleFileUpload yang filter
+    // Supaya item batal bisa muncul di modal skip
     const rawStatus = (idxStatus !== -1 && cols[idxStatus]) 
       ? cols[idxStatus].replace(/["']/g, '').trim() 
       : '';
-    const statusLower = rawStatus.toLowerCase();
-    
-    // SKIP: Hanya jika status BENAR-BENAR "Dibatalkan" atau "Batal"
-    // "Pembatalan Diajukan" / "Cancellation Requested" masih boleh masuk karena pesanan belum benar-benar dibatalkan
-    // Cek exact match untuk avoid false positive
-    const isCancelled = statusLower === 'batal' || 
-                        statusLower === 'dibatalkan' || 
-                        statusLower === 'cancelled' ||
-                        statusLower === 'canceled';
-    if (isCancelled || statusLower.includes('belum bayar')) {
-      skippedCancelled++;
-      return null;
-    }
 
     // Get resi - SKIP jika kosong
     // Gunakan fixScientificNotation untuk menangani kasus 1.10032E+13 -> 11003205509556
@@ -338,20 +375,11 @@ export const parseShopeeIntlCSV = (text: string): ParsedCSVItem[] => {
     // SKIP jika Order ID kosong
     if (!orderId) return null;
     
-    // Get status dan filter
+    // Get status - TIDAK FILTER di sini, biarkan STEP 0 di handleFileUpload yang filter
+    // Supaya item batal bisa muncul di modal skip
     const rawStatus = (idxStatus !== -1 && cols[idxStatus]) 
       ? cols[idxStatus].replace(/["']/g, '').trim() 
       : '';
-    const statusLower = rawStatus.toLowerCase();
-    
-    // SKIP: Hanya jika status BENAR-BENAR "Cancelled" atau "Unpaid"
-    // "Cancellation Requested" masih boleh masuk karena pesanan belum benar-benar dibatalkan
-    const isCancelled = statusLower === 'cancelled' || 
-                        statusLower === 'canceled' ||
-                        statusLower === 'unpaid';
-    if (isCancelled) {
-      return null;
-    }
     
     // Get tracking number (untuk referensi saja)
     let trackingNumber = (idxTracking !== -1 && cols[idxTracking]) 
@@ -392,8 +420,22 @@ export const parseShopeeIntlCSV = (text: string): ParsedCSVItem[] => {
     if (seenKeys.has(dedupeKey)) return null;
     seenKeys.add(dedupeKey);
     
-    // Parse harga
-    const totalPrice = (idxTotal !== -1) ? parseCurrencyIDR(cols[idxTotal]) : 0;
+    // Parse harga - simpan nilai asli dalam mata uang asing (JANGAN konversi di sini)
+    // Konversi ke IDR akan dilakukan di Stage 3 saat upload untuk Ekspor
+    const rawPriceVal = (idxTotal !== -1) ? cols[idxTotal] : '0';
+    const totalPriceForeign = parseForeignCurrency(rawPriceVal);
+    
+    // Deteksi negara untuk referensi (PH/MY/SG)
+    let detectedCountry = 'PH'; // Default PH
+    if (orderIdUpper.includes('MY') || orderIdUpper.endsWith('MY')) {
+      detectedCountry = 'MY';
+    } else if (orderIdUpper.includes('SG') || orderIdUpper.endsWith('SG')) {
+      detectedCountry = 'SG';
+    } else if (orderIdUpper.includes('HK') || orderIdUpper.endsWith('HK')) {
+      detectedCountry = 'HK';
+    } else if (orderIdUpper.includes('PH') || orderIdUpper.endsWith('PH')) {
+      detectedCountry = 'PH';
+    }
     
     return {
       resi: orderId, // ORDER ID sebagai RESI
@@ -404,10 +446,11 @@ export const parseShopeeIntlCSV = (text: string): ParsedCSVItem[] => {
       part_number: (idxSKU !== -1 && cols[idxSKU]) ? cols[idxSKU].replace(/["']/g, '') : '',
       product_name: productName,
       quantity: (idxQty !== -1) ? (parseInt(cols[idxQty]) || 1) : 1,
-      total_price: totalPrice,
-      original_currency_val: (idxTotal !== -1) ? cols[idxTotal] : '0',
-      ecommerce: ecommerceLabel
-    };
+      total_price: totalPriceForeign, // Harga dalam mata uang asing (belum dikonversi)
+      original_currency_val: rawPriceVal,
+      ecommerce: ecommerceLabel,
+      detected_country: detectedCountry // Negara terdeteksi dari Order ID
+    } as ParsedCSVItem;
   }).filter((item): item is ParsedCSVItem => item !== null);
 };
 
@@ -433,13 +476,16 @@ export const parseTikTokCSV = (text: string): ParsedCSVItem[] => {
   // Map column indexes
   const idxResi = headers.findIndex(h => h.includes('Tracking ID'));
   const idxOrder = headers.findIndex(h => h.includes('Order ID'));
-  const idxStatus = headers.findIndex(h => h.includes('Order Status'));
+  const idxStatus = headers.findIndex(h => h.toLowerCase().includes('order status') || h.toLowerCase().includes('status pesanan'));
   const idxUser = headers.findIndex(h => h.includes('Buyer Username'));
   const idxSKU = headers.findIndex(h => h.includes('Seller SKU'));
   const idxProductName = headers.findIndex(h => h.includes('Product Name'));
   const idxVariation = headers.findIndex(h => h.includes('Variation'));
   const idxQty = headers.findIndex(h => h.includes('Quantity'));
   const idxTotal = headers.findIndex(h => h.includes('SKU Subtotal After Discount'));
+  
+  console.log('[TikTok CSV] Headers:', headers);
+  console.log('[TikTok CSV] idxStatus:', idxStatus, 'column name:', idxStatus !== -1 ? headers[idxStatus] : 'NOT FOUND');
 
   // Dedupe set
   const seenKeys = new Set<string>();
@@ -456,23 +502,11 @@ export const parseTikTokCSV = (text: string): ParsedCSVItem[] => {
     
     if (cols.length < headers.length * 0.5) return null; // Skip jika terlalu sedikit kolom
 
-    // Get status dan filter
+    // Get status - TIDAK FILTER di sini, biarkan STEP 0 di handleFileUpload yang filter
+    // Supaya item batal bisa muncul di modal skip
     const rawStatus = (idxStatus !== -1 && cols[idxStatus]) 
       ? cols[idxStatus].replace(/["']/g, '').trim() 
       : '';
-    const statusLower = rawStatus.toLowerCase();
-
-    // SKIP: Hanya jika status BENAR-BENAR "Dibatalkan" atau "Cancelled"
-    // "Pembatalan Diajukan" / "Cancellation Requested" masih boleh masuk karena pesanan belum benar-benar dibatalkan
-    // Cek exact match untuk menghindari false positive
-    const isCancelled = statusLower === 'dibatalkan' || 
-                        statusLower === 'cancelled' ||
-                        statusLower === 'canceled';
-    const isUnpaid = statusLower.includes('belum dibayar') || statusLower.includes('unpaid');
-    if (isCancelled || isUnpaid) {
-      skippedCancelled++;
-      return null;
-    }
 
     // TIKTOK menggunakan Order ID sebagai resi (bukan Tracking ID)
     // Get order_id - fix scientific notation

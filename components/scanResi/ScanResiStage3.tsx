@@ -25,7 +25,9 @@ import {
   parseShopeeCSV, 
   parseTikTokCSV, 
   parseShopeeIntlCSV,
-  detectCSVPlatform 
+  detectCSVPlatform,
+  convertToIDR,
+  CURRENCY_RATES
 } from '../../services/csvParserService';
 import { 
   Upload, Save, Trash2, Plus, DownloadCloud, RefreshCw, Filter, CheckCircle, Loader2, Settings, Search, X, AlertTriangle
@@ -242,6 +244,305 @@ const SubTokoResellerDropdown = ({ value, onChange, suggestions }: { value: stri
 };
 
 // --- KOMPONEN MODAL SKIPPED ITEMS ---
+// Interface untuk item yang di-update
+interface UpdatedItem {
+  resi: string;
+  order_id?: string;
+  customer?: string;
+  product_name?: string;
+  ecommerce?: string;
+}
+
+// Interface untuk log proses
+interface ProcessLog {
+  type: 'info' | 'success' | 'skip' | 'error';
+  resi: string;
+  message: string;
+}
+
+const UploadResultModal = ({ 
+  isOpen, 
+  onClose, 
+  skippedItems,
+  updatedItems,
+  summary,
+  isProcessing,
+  processLogs
+}: { 
+  isOpen: boolean; 
+  onClose: () => void; 
+  skippedItems: SkippedItem[];
+  updatedItems: UpdatedItem[];
+  summary: {imported: number, updated: number, skipped: number};
+  isProcessing: boolean;
+  processLogs: ProcessLog[];
+}) => {
+  const [activeTab, setActiveTab] = useState<'updated' | 'skipped'>('updated');
+  const logContainerRef = useRef<HTMLDivElement>(null);
+  
+  // Auto-scroll log ke bawah
+  useEffect(() => {
+    if (logContainerRef.current && isProcessing) {
+      logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
+    }
+  }, [processLogs, isProcessing]);
+  
+  if (!isOpen) return null;
+
+  // Group skipped by reason
+  const groupedByReason = skippedItems.reduce((acc, item) => {
+    if (!acc[item.reason]) acc[item.reason] = [];
+    acc[item.reason].push(item);
+    return acc;
+  }, {} as Record<string, SkippedItem[]>);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+      <div className="bg-gray-800 rounded-lg shadow-xl w-full max-w-4xl max-h-[85vh] flex flex-col">
+        {/* Header */}
+        <div className="flex items-center justify-between p-4 border-b border-gray-700">
+          <div className="flex items-center gap-2">
+            {isProcessing ? (
+              <Loader2 className="w-5 h-5 text-blue-500 animate-spin" />
+            ) : (
+              <CheckCircle className="w-5 h-5 text-green-500" />
+            )}
+            <h2 className="text-lg font-semibold text-white">
+              {isProcessing ? 'Sedang Memproses Data CSV...' : 'Hasil Upload CSV'}
+            </h2>
+          </div>
+          {!isProcessing && (
+            <button onClick={onClose} className="p-1 hover:bg-gray-700 rounded transition-colors">
+              <X className="w-5 h-5 text-gray-400" />
+            </button>
+          )}
+        </div>
+
+        {/* Processing Log View */}
+        {isProcessing && (
+          <div className="flex-1 flex flex-col p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <Loader2 className="w-4 h-4 text-blue-400 animate-spin" />
+              <span className="text-sm text-gray-300">Memproses {processLogs.length} item...</span>
+            </div>
+            
+            {/* Log Container - seperti terminal */}
+            <div 
+              ref={logContainerRef}
+              className="flex-1 bg-gray-900 rounded-lg p-3 overflow-auto font-mono text-xs max-h-[400px] border border-gray-700"
+            >
+              {processLogs.map((log, idx) => (
+                <div key={idx} className={`py-1 flex items-start gap-2 ${
+                  log.type === 'success' ? 'text-green-400' :
+                  log.type === 'skip' ? 'text-yellow-400' :
+                  log.type === 'error' ? 'text-red-400' :
+                  'text-gray-400'
+                }`}>
+                  <span className="text-gray-600 select-none w-6 text-right shrink-0">{idx + 1}.</span>
+                  <span className={`shrink-0 ${
+                    log.type === 'success' ? 'text-green-500' :
+                    log.type === 'skip' ? 'text-yellow-500' :
+                    log.type === 'error' ? 'text-red-500' :
+                    'text-blue-500'
+                  }`}>
+                    {log.type === 'success' ? '✓' :
+                     log.type === 'skip' ? '⏭' :
+                     log.type === 'error' ? '✗' : '→'}
+                  </span>
+                  <span className="text-blue-300 font-semibold shrink-0">{log.resi}</span>
+                  <span className="text-gray-500">-</span>
+                  <span>{log.message}</span>
+                </div>
+              ))}
+              {processLogs.length === 0 && (
+                <div className="text-gray-500 text-center py-4">Menunggu proses...</div>
+              )}
+            </div>
+            
+            {/* Progress bar */}
+            <div className="mt-3">
+              <div className="w-full bg-gray-700 rounded-full h-1.5">
+                <div className="bg-blue-500 h-1.5 rounded-full transition-all duration-300" 
+                     style={{width: `${Math.min(processLogs.length * 2, 100)}%`}}></div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Summary - only show when done */}
+        {!isProcessing && (
+          <>
+            <div className="p-4 border-b border-gray-700 bg-gray-750">
+              <div className="grid grid-cols-3 gap-4 text-center">
+                <div className="bg-green-900/30 rounded-lg p-3">
+                  <div className="text-2xl font-bold text-green-400">{summary.imported}</div>
+                  <div className="text-xs text-gray-400">Item Baru</div>
+                </div>
+                <div 
+                  className={`bg-blue-900/30 rounded-lg p-3 cursor-pointer transition-all ${activeTab === 'updated' ? 'ring-2 ring-blue-500' : 'hover:bg-blue-900/50'}`}
+                  onClick={() => setActiveTab('updated')}
+                >
+                  <div className="text-2xl font-bold text-blue-400">{summary.updated}</div>
+                  <div className="text-xs text-gray-400">Item Diperbarui</div>
+                </div>
+                <div 
+                  className={`bg-yellow-900/30 rounded-lg p-3 cursor-pointer transition-all ${activeTab === 'skipped' ? 'ring-2 ring-yellow-500' : 'hover:bg-yellow-900/50'}`}
+                  onClick={() => setActiveTab('skipped')}
+                >
+                  <div className="text-2xl font-bold text-yellow-400">{summary.skipped}</div>
+                  <div className="text-xs text-gray-400">Item Dilewati</div>
+                </div>
+              </div>
+            </div>
+
+            {/* Tab Navigation */}
+            <div className="flex border-b border-gray-700">
+              <button
+                className={`flex-1 py-3 text-sm font-medium transition-colors ${
+                  activeTab === 'updated' 
+                    ? 'text-blue-400 border-b-2 border-blue-400 bg-blue-900/20' 
+                    : 'text-gray-400 hover:text-gray-200 hover:bg-gray-700/50'
+                }`}
+                onClick={() => setActiveTab('updated')}
+              >
+                <CheckCircle className="w-4 h-4 inline mr-2" />
+                Diperbarui ({updatedItems.length})
+              </button>
+              <button
+                className={`flex-1 py-3 text-sm font-medium transition-colors ${
+                  activeTab === 'skipped' 
+                    ? 'text-yellow-400 border-b-2 border-yellow-400 bg-yellow-900/20' 
+                    : 'text-gray-400 hover:text-gray-200 hover:bg-gray-700/50'
+                }`}
+                onClick={() => setActiveTab('skipped')}
+              >
+                <AlertTriangle className="w-4 h-4 inline mr-2" />
+                Dilewati ({skippedItems.length})
+              </button>
+            </div>
+
+            {/* Tab Content */}
+            <div className="flex-1 overflow-auto p-4">
+              {/* Updated Tab */}
+              {activeTab === 'updated' && (
+                <div>
+                  {updatedItems.length === 0 ? (
+                    <div className="text-center text-gray-400 py-8">
+                      <p>Tidak ada item yang diperbarui</p>
+                    </div>
+                  ) : (
+                    <div className="bg-gray-700/50 rounded-lg p-3">
+                      <div className="max-h-60 overflow-auto">
+                        <table className="w-full text-xs">
+                          <thead className="sticky top-0 bg-gray-700">
+                            <tr className="text-gray-400">
+                              <th className="text-left py-2 px-2">No</th>
+                              <th className="text-left py-2 px-2">Resi / Order ID</th>
+                              <th className="text-left py-2 px-2">Customer</th>
+                              <th className="text-left py-2 px-2">Produk</th>
+                              <th className="text-left py-2 px-2">Platform</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {updatedItems.map((item, idx) => (
+                              <tr key={idx} className="border-t border-gray-600/50 hover:bg-blue-900/20">
+                                <td className="py-1.5 px-2 text-gray-500">{idx + 1}</td>
+                                <td className="py-1.5 px-2 font-mono text-blue-300">
+                                  {item.resi || item.order_id || '-'}
+                                </td>
+                                <td className="py-1.5 px-2 text-gray-300 truncate max-w-[120px]">
+                                  {item.customer || '-'}
+                                </td>
+                                <td className="py-1.5 px-2 text-gray-400 truncate max-w-[180px]">
+                                  {item.product_name || '-'}
+                                </td>
+                                <td className="py-1.5 px-2">
+                                  <span className="px-1.5 py-0.5 bg-blue-600/30 text-blue-300 text-xs rounded">
+                                    {item.ecommerce || '-'}
+                                  </span>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Skipped Tab */}
+              {activeTab === 'skipped' && (
+                <div>
+                  {skippedItems.length === 0 ? (
+                    <div className="text-center text-gray-400 py-8">
+                      <CheckCircle className="w-12 h-12 mx-auto mb-2 text-green-500" />
+                      <p>Semua data berhasil diproses!</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {Object.entries(groupedByReason).map(([reason, reasonItems]) => (
+                        <div key={reason} className="bg-gray-700/50 rounded-lg p-3">
+                          <div className="flex items-center gap-2 mb-2">
+                            <AlertTriangle className="w-4 h-4 text-yellow-500" />
+                            <span className="px-2 py-0.5 bg-yellow-600/30 text-yellow-400 text-xs rounded-full">
+                              {reasonItems.length} item
+                            </span>
+                            <span className="text-sm font-medium text-yellow-400">{reason}</span>
+                          </div>
+                          <div className="max-h-40 overflow-auto">
+                            <table className="w-full text-xs">
+                              <thead className="sticky top-0 bg-gray-700">
+                                <tr className="text-gray-400">
+                                  <th className="text-left py-1 px-2">No</th>
+                                  <th className="text-left py-1 px-2">Resi / Order ID</th>
+                                  <th className="text-left py-1 px-2">Customer</th>
+                                  <th className="text-left py-1 px-2">Produk</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {reasonItems.map((item, idx) => (
+                                  <tr key={idx} className="border-t border-gray-600/50 hover:bg-yellow-900/20">
+                                    <td className="py-1 px-2 text-gray-500">{idx + 1}</td>
+                                    <td className="py-1 px-2 font-mono text-yellow-300">
+                                      {item.resi || item.order_id || '-'}
+                                    </td>
+                                    <td className="py-1 px-2 text-gray-400 truncate max-w-[120px]">
+                                      {item.customer || '-'}
+                                    </td>
+                                    <td className="py-1 px-2 text-gray-400 truncate max-w-[180px]">
+                                      {item.product_name || '-'}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="p-4 border-t border-gray-700">
+              <button
+                onClick={onClose}
+                className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors"
+              >
+                Tutup
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// Keep old modal for backward compatibility (will be replaced)
 const SkippedItemsModal = ({ 
   isOpen, 
   onClose, 
@@ -386,7 +687,10 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
   // SKIPPED ITEMS MODAL STATE
   const [showSkippedModal, setShowSkippedModal] = useState(false);
   const [skippedItems, setSkippedItems] = useState<SkippedItem[]>([]);
+  const [updatedItems, setUpdatedItems] = useState<UpdatedItem[]>([]);
   const [uploadSummary, setUploadSummary] = useState<{imported: number, updated: number, skipped: number}>({imported: 0, updated: 0, skipped: 0});
+  const [isProcessingUpload, setIsProcessingUpload] = useState(false);
+  const [processLogs, setProcessLogs] = useState<ProcessLog[]>([]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -762,7 +1066,22 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
     if (!file) return;
     setLoading(true);
     
+    // Buka modal progress
+    setIsProcessingUpload(true);
+    setProcessLogs([]);
+    setShowSkippedModal(true);
+    setSkippedItems([]);
+    setUpdatedItems([]);
+    setUploadSummary({ imported: 0, updated: 0, skipped: 0 });
+    
+    // Helper untuk menambah log
+    const addLog = (type: 'info' | 'success' | 'skip' | 'error', resi: string, message: string) => {
+      setProcessLogs(prev => [...prev, { type, resi, message }]);
+    };
+    
     try {
+      addLog('info', 'SISTEM', 'Membaca file CSV/Excel...');
+      
       const data = await file.arrayBuffer();
       // Tambahkan opsi cellText: true dan cellDates: true untuk mempertahankan format asli
       const workbook = XLSX.read(data, { type: 'array', cellText: true, cellDates: true });
@@ -773,6 +1092,8 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
       const csvText = XLSX.utils.sheet_to_csv(worksheet, { rawNumbers: true });
 
       const platform = detectCSVPlatform(csvText);
+      addLog('info', 'SISTEM', `Format terdeteksi: ${platform === 'shopee' ? 'Shopee Indonesia' : platform === 'tiktok' ? 'TikTok' : platform === 'shopee-intl' ? 'Shopee International' : 'Unknown'}`);
+      
       let parsedItems: any[] = [];
       
       // Parsing berdasarkan deteksi format file (Shopee/TikTok/Shopee International)
@@ -784,6 +1105,8 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
         // Fallback coba parse Shopee standar jika tidak terdeteksi
         parsedItems = parseShopeeCSV(csvText);
         if(parsedItems.length === 0) {
+             setIsProcessingUpload(false);
+             setShowSkippedModal(false);
              alert('Format File tidak dikenali! Pastikan header kolom "No. Resi" atau "No. Pesanan" ada.'); 
              setLoading(false); 
              return; 
@@ -791,27 +1114,72 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
       }
 
       if (parsedItems.length === 0) {
+        addLog('error', 'SISTEM', 'Tidak ada data valid dalam file');
+        setIsProcessingUpload(false);
+        setShowSkippedModal(false);
         alert('Tidak ada data valid (Mungkin status Batal/Belum Bayar?).');
         setLoading(false);
         return;
       }
 
+      addLog('info', 'SISTEM', `Ditemukan ${parsedItems.length} item, memproses satu per satu...`);
+
+      // === STEP 0: FILTER STATUS BATAL/CANCEL/UNPAID ===
+      // Safety net: filter ulang item dengan status batal/cancel/unpaid
+      const allSkippedItems: SkippedItem[] = [];
+      
+      const afterStatusFilter = parsedItems.filter(item => {
+        const orderStatus = String(item.order_status || '').toLowerCase();
+        const isCancelled = orderStatus.includes('batal') || orderStatus.includes('cancel');
+        const isUnpaid = orderStatus.includes('belum dibayar') || 
+                         orderStatus.includes('unpaid') || 
+                         orderStatus.includes('menunggu bayar') ||
+                         orderStatus.includes('menunggu pembayaran') ||
+                         orderStatus.includes('awaiting payment');
+        
+        if (isCancelled || isUnpaid) {
+          const resiDisplay = item.resi || item.order_id || '-';
+          addLog('skip', resiDisplay, `Dilewati - ${item.order_status}`);
+          allSkippedItems.push({
+            resi: item.resi,
+            order_id: item.order_id,
+            customer: item.customer,
+            product_name: item.product_name,
+            reason: `Status pesanan: ${item.order_status}`
+          });
+          return false;
+        }
+        return true;
+      });
+      
+      console.log(`[handleFileUpload] After status filter: ${afterStatusFilter.length} valid, ${allSkippedItems.length} skipped (cancelled/unpaid)`);
+      
+      if (afterStatusFilter.length === 0) {
+        addLog('info', 'SISTEM', 'Semua item dilewati karena status batal/belum bayar');
+        setSkippedItems(allSkippedItems);
+        setUploadSummary({ imported: 0, updated: 0, skipped: allSkippedItems.length });
+        setIsProcessingUpload(false);
+        setLoading(false);
+        return;
+      }
+
+      addLog('info', 'SISTEM', `Mengecek ${afterStatusFilter.length} item di database...`);
+
       // === STEP 1: CEK BARANG_KELUAR - Filter item yang sudah terjual ===
-      const allResiFromCSV = parsedItems.map(i => i.resi).filter(Boolean);
-      const allOrderIdFromCSV = parsedItems.map(i => i.order_id).filter(Boolean);
+      const allResiFromCSV = afterStatusFilter.map(i => i.resi).filter(Boolean);
+      const allOrderIdFromCSV = afterStatusFilter.map(i => i.order_id).filter(Boolean);
       const allToCheckBarangKeluar = [...new Set([...allResiFromCSV, ...allOrderIdFromCSV])];
       
       const existingInBarangKeluar = await checkExistingInBarangKeluar(allToCheckBarangKeluar, selectedStore);
       
-      // Kumpulkan skipped items dengan alasan
-      const allSkippedItems: SkippedItem[] = [];
-      
       // Filter: buang item yang sudah ada di barang_keluar
-      const afterBarangKeluarFilter = parsedItems.filter(item => {
+      const afterBarangKeluarFilter = afterStatusFilter.filter(item => {
         const resiUpper = String(item.resi || '').trim().toUpperCase();
         const orderIdUpper = String(item.order_id || '').trim().toUpperCase();
         
         if (existingInBarangKeluar.has(resiUpper) || existingInBarangKeluar.has(orderIdUpper)) {
+          const resiDisplay = item.resi || item.order_id || '-';
+          addLog('skip', resiDisplay, 'Dilewati - Sudah ada di Barang Keluar');
           allSkippedItems.push({
             resi: item.resi,
             order_id: item.order_id,
@@ -826,12 +1194,15 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
       
       if (afterBarangKeluarFilter.length === 0) {
         // Semua item di-skip, tampilkan modal
+        addLog('info', 'SISTEM', 'Semua item dilewati karena sudah ada di Barang Keluar');
         setSkippedItems(allSkippedItems);
         setUploadSummary({ imported: 0, updated: 0, skipped: allSkippedItems.length });
-        setShowSkippedModal(true);
+        setIsProcessingUpload(false);
         setLoading(false);
         return;
       }
+
+      addLog('info', 'SISTEM', `Mengecek data Stage 1 untuk ${afterBarangKeluarFilter.length} item...`);
 
       // === STEP 2: Ambil info dari Stage 1 untuk ecommerce ===
       const resiList = afterBarangKeluarFilter.map(i => i.resi);
@@ -856,6 +1227,9 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
         const orderIdUpper = (item.order_id || '').trim().toUpperCase();
         let s1Data = s1MapByResi.get(resiUpper) || s1MapByOrder.get(orderIdUpper);
         
+        // Tentukan negara untuk konversi harga (khusus Ekspor)
+        let negaraForConversion = '';
+        
         if (s1Data) {
           // Ada di Stage 1, gunakan ecommerce dari sana
           let ecomFromS1 = s1Data.ecommerce || '';
@@ -863,9 +1237,15 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
           // Jika hanya "EKSPOR" tapi ada negara_ekspor, gabungkan
           if (ecomFromS1 === 'EKSPOR' && s1Data.negara_ekspor) {
             item.ecommerce = `EKSPOR - ${s1Data.negara_ekspor}`;
+            negaraForConversion = s1Data.negara_ekspor;
           } else if (ecomFromS1.startsWith('EKSPOR')) {
             // Sudah format lengkap atau tidak ada negara
             item.ecommerce = ecomFromS1;
+            // Extract negara dari ecommerce (misal "EKSPOR - PH" -> "PH")
+            const parts = ecomFromS1.split(' - ');
+            if (parts.length > 1) {
+              negaraForConversion = parts[1].trim();
+            }
           } else {
             // Bukan ekspor, gunakan dari Stage 1
             item.ecommerce = ecomFromS1 || uploadEcommerce;
@@ -874,9 +1254,23 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
           // Tidak ada di Stage 1, gunakan pilihan user
           if (uploadEcommerce === 'EKSPOR') {
             item.ecommerce = `EKSPOR - ${uploadNegara}`;
+            negaraForConversion = uploadNegara;
           } else {
             item.ecommerce = uploadEcommerce;
           }
+        }
+        
+        // === KONVERSI HARGA KE IDR (khusus EKSPOR / Shopee International) ===
+        // Jika ini adalah item Ekspor dan platform adalah shopee-intl, konversi harga ke IDR
+        if (negaraForConversion && (platform === 'shopee-intl' || item.ecommerce.startsWith('EKSPOR'))) {
+          // Gunakan negara dari detected_country jika ada, atau dari setting
+          const countryForRate = (item as any).detected_country || negaraForConversion;
+          const originalPrice = item.total_price; // Harga dalam mata uang asing
+          const convertedPrice = convertToIDR(originalPrice, countryForRate);
+          
+          console.log(`[Ekspor] Converting price: ${originalPrice} ${countryForRate} -> ${convertedPrice} IDR (rate: ${CURRENCY_RATES[countryForRate] || 1})`);
+          
+          item.total_price = convertedPrice;
         }
         
         item.sub_toko = uploadSubToko;
@@ -911,12 +1305,27 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
             }
           }
           
+          addLog('info', 'SISTEM', `Menyimpan ${correctedItems.length} item ke database...`);
+          
+          // Log setiap item yang akan disimpan
+          for (const item of correctedItems) {
+            const resiDisplay = item.resi || item.order_id || '-';
+            addLog('success', resiDisplay, `Memproses - ${item.customer || 'Customer'}`);
+          }
+          
           const result = await saveCSVToResiItems(correctedItems, selectedStore, existingResiMap);
           
           // Tambahkan skipped items dari saveCSVToResiItems (belum scan Stage 1, sudah Ready, dll)
           if (result.skippedItems && result.skippedItems.length > 0) {
+            for (const sk of result.skippedItems) {
+              const resiDisplay = sk.resi || sk.order_id || '-';
+              addLog('skip', resiDisplay, sk.reason);
+            }
             allSkippedItems.push(...result.skippedItems);
           }
+          
+          // Log sukses final
+          addLog('info', 'SISTEM', `✓ Selesai: ${result.count} baru, ${result.updatedCount} update, ${allSkippedItems.length} skip`);
           
           // Set data untuk modal
           setUploadSummary({
@@ -925,21 +1334,25 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
             skipped: allSkippedItems.length
           });
           setSkippedItems(allSkippedItems);
+          setUpdatedItems(result.updatedItems || []);
           
-          // Tampilkan modal hasil upload
-          setShowSkippedModal(true);
+          // Selesai processing
+          setIsProcessingUpload(false);
           
       } else {
         // Semua item sudah di-filter
         setUploadSummary({ imported: 0, updated: 0, skipped: allSkippedItems.length });
         setSkippedItems(allSkippedItems);
-        setShowSkippedModal(true);
+        setUpdatedItems([]);
+        setIsProcessingUpload(false);
       }
 
       await loadSavedDataFromDB();
       
     } catch (err: any) { 
       console.error(err);
+      setIsProcessingUpload(false);
+      setShowSkippedModal(false);
       alert(`Error Import: ${err.message}`); 
     } finally { 
       setLoading(false); 
@@ -1771,12 +2184,15 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
         </table>
       </div>
 
-      {/* Modal untuk menampilkan item yang di-skip saat upload CSV */}
-      <SkippedItemsModal
+      {/* Modal untuk menampilkan proses dan hasil upload CSV */}
+      <UploadResultModal
         isOpen={showSkippedModal}
         onClose={() => setShowSkippedModal(false)}
-        items={skippedItems}
+        skippedItems={skippedItems}
+        updatedItems={updatedItems}
         summary={uploadSummary}
+        isProcessing={isProcessingUpload}
+        processLogs={processLogs}
       />
     </div>
   );
