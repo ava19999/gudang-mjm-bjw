@@ -272,8 +272,9 @@ const mapItemFromDB = (item: any, photoData?: any): InventoryItem => {
     id: pk, 
     partNumber: pk,
     name: item.name,
-    brand: item.brand,
-    application: item.application,
+    // UI label swap fix: display application as brand and vice versa
+    brand: item.application,
+    application: item.brand,
     shelf: item.shelf,
     quantity: Number(item.quantity || 0),
     price: 0, 
@@ -292,8 +293,9 @@ const mapItemToDB = (data: any) => {
   const dbPayload: any = {
     part_number: data.partNumber || data.part_number, 
     name: data.name,
-    brand: data.brand,
-    application: data.application,
+    // UI label swap fix: save brand field to application column and vice versa
+    brand: data.application,
+    application: data.brand,
     shelf: data.shelf,
     quantity: Number(data.quantity) || 0,
     created_at: getWIBDate().toISOString()
@@ -456,10 +458,10 @@ export const fetchInventoryPaginated = async (store: string | null, page: number
   if (filters?.partNumber) query = query.ilike('part_number', `%${filters.partNumber}%`);
   // Filter by name
   if (filters?.name) query = query.ilike('name', `%${filters.name}%`);
-  // Filter by brand
-  if (filters?.brand) query = query.ilike('brand', `%${filters.brand}%`);
-  // Filter by application
-  if (filters?.app) query = query.ilike('application', `%${filters.app}%`);
+  // Filter by brand (searches application column - UI label swap fix)
+  if (filters?.brand) query = query.ilike('application', `%${filters.brand}%`);
+  // Filter by application (searches brand column - UI label swap fix)
+  if (filters?.app) query = query.ilike('brand', `%${filters.app}%`);
   // Filter by stock type
   if (filters?.type === 'low') query = query.gt('quantity', 0).lte('quantity', 3);
   if (filters?.type === 'empty') query = query.eq('quantity', 0);
@@ -538,10 +540,10 @@ export const fetchInventoryAllFiltered = async (store: string | null, filters?: 
   if (filters?.partNumber) query = query.ilike('part_number', `%${filters.partNumber}%`);
   // Filter by name
   if (filters?.name) query = query.ilike('name', `%${filters.name}%`);
-  // Filter by brand
-  if (filters?.brand) query = query.ilike('brand', `%${filters.brand}%`);
-  // Filter by application
-  if (filters?.app) query = query.ilike('application', `%${filters.app}%`);
+  // Filter by brand (searches application column - UI label swap fix)
+  if (filters?.brand) query = query.ilike('application', `%${filters.brand}%`);
+  // Filter by application (searches brand column - UI label swap fix)
+  if (filters?.app) query = query.ilike('brand', `%${filters.app}%`);
   // Filter by stock type
   if (filters?.type === 'low') query = query.gt('quantity', 0).lte('quantity', 3);
   if (filters?.type === 'empty') query = query.eq('quantity', 0);
@@ -746,8 +748,10 @@ export const fetchShopItems = async (
     if (searchTerm) query = query.or(`name.ilike.%${searchTerm}%,part_number.ilike.%${searchTerm}%`);
     if (partNumberSearch) query = query.ilike('part_number', `%${partNumberSearch}%`);
     if (nameSearch) query = query.ilike('name', `%${nameSearch}%`);
-    if (brandSearch) query = query.ilike('brand', `%${brandSearch}%`);
-    if (applicationSearch) query = query.ilike('application', `%${applicationSearch}%`);
+    // UI label swap fix: brandSearch searches application column
+    if (brandSearch) query = query.ilike('application', `%${brandSearch}%`);
+    // UI label swap fix: applicationSearch searches brand column
+    if (applicationSearch) query = query.ilike('brand', `%${applicationSearch}%`);
 
     const { data: items, count, error } = await query.range(from, to).order('name', { ascending: true });
 
@@ -1603,5 +1607,285 @@ export const updateReturStatus = async (
   } catch (e: any) {
     console.error('updateReturStatus Error:', e);
     return { success: false, msg: e.message || 'Gagal update status' };
+  }
+};
+
+// --- BARANG KOSONG (LOW STOCK) FUNCTIONS ---
+
+export interface LowStockItem {
+  partNumber: string;
+  name: string;
+  brand: string;
+  application: string;
+  quantity: number;
+  shelf: string;
+  suppliers: SupplierHistory[];
+}
+
+export interface SupplierHistory {
+  supplier: string;
+  lastDate: string;
+  lastPrice: number;
+  totalQtyPurchased: number;
+  purchaseCount: number;
+}
+
+export interface SupplierOrderGroup {
+  supplier: string;
+  items: LowStockOrderItem[];
+  totalItems: number;
+}
+
+export interface LowStockOrderItem {
+  partNumber: string;
+  name: string;
+  brand: string;
+  application: string;
+  currentStock: number;
+  shelf: string;
+  lastPrice: number;
+  orderQty: number;
+  isSelected: boolean;
+}
+
+// Fetch all items with quantity < threshold (default 5)
+export const fetchLowStockItems = async (store: string | null, threshold: number = 5): Promise<LowStockItem[]> => {
+  const table = getTableName(store);
+  if (!table) return [];
+
+  try {
+    // Fetch items with low stock
+    const { data: items, error } = await supabase
+      .from(table)
+      .select('*')
+      .lt('quantity', threshold)
+      .order('quantity', { ascending: true });
+
+    if (error || !items) {
+      console.error('fetchLowStockItems Error:', error);
+      return [];
+    }
+
+    // Fetch supplier history for each item
+    const result: LowStockItem[] = [];
+    
+    for (const item of items) {
+      const suppliers = await fetchSupplierHistoryForItem(store, item.part_number);
+      result.push({
+        partNumber: item.part_number,
+        name: item.name || '',
+        // UI label swap fix applied
+        brand: item.application || '',
+        application: item.brand || '',
+        quantity: item.quantity || 0,
+        shelf: item.shelf || '',
+        suppliers
+      });
+    }
+
+    return result;
+  } catch (err) {
+    console.error('fetchLowStockItems Exception:', err);
+    return [];
+  }
+};
+
+// Fetch supplier history for a specific part number
+export const fetchSupplierHistoryForItem = async (store: string | null, partNumber: string): Promise<SupplierHistory[]> => {
+  const logTable = getLogTableName('barang_masuk', store);
+  if (!logTable) return [];
+
+  try {
+    const { data, error } = await supabase
+      .from(logTable)
+      .select('customer, created_at, harga_satuan, qty_masuk')
+      .eq('part_number', partNumber)
+      .not('customer', 'is', null)
+      .not('customer', 'eq', '')
+      .not('customer', 'eq', '-')
+      .order('created_at', { ascending: false });
+
+    if (error || !data) {
+      console.error('fetchSupplierHistoryForItem Error:', error);
+      return [];
+    }
+
+    // Group by supplier
+    const supplierMap: Record<string, { 
+      lastDate: string; 
+      lastPrice: number; 
+      totalQty: number; 
+      count: number 
+    }> = {};
+
+    for (const row of data) {
+      const supplier = (row.customer || '').trim().toUpperCase();
+      if (!supplier || supplier === '-') continue;
+
+      if (!supplierMap[supplier]) {
+        supplierMap[supplier] = {
+          lastDate: row.created_at,
+          lastPrice: row.harga_satuan || 0,
+          totalQty: row.qty_masuk || 0,
+          count: 1
+        };
+      } else {
+        supplierMap[supplier].totalQty += row.qty_masuk || 0;
+        supplierMap[supplier].count += 1;
+        // Keep the latest date and price
+        if (new Date(row.created_at) > new Date(supplierMap[supplier].lastDate)) {
+          supplierMap[supplier].lastDate = row.created_at;
+          supplierMap[supplier].lastPrice = row.harga_satuan || 0;
+        }
+      }
+    }
+
+    return Object.entries(supplierMap).map(([supplier, data]) => ({
+      supplier,
+      lastDate: data.lastDate,
+      lastPrice: data.lastPrice,
+      totalQtyPurchased: data.totalQty,
+      purchaseCount: data.count
+    })).sort((a, b) => new Date(b.lastDate).getTime() - new Date(a.lastDate).getTime());
+  } catch (err) {
+    console.error('fetchSupplierHistoryForItem Exception:', err);
+    return [];
+  }
+};
+
+// Get items grouped by supplier for ordering
+export const getLowStockGroupedBySupplier = async (store: string | null, threshold: number = 5): Promise<SupplierOrderGroup[]> => {
+  const lowStockItems = await fetchLowStockItems(store, threshold);
+  
+  // Group items by their primary supplier (most recent)
+  const supplierGroups: Record<string, LowStockOrderItem[]> = {};
+  const noSupplierItems: LowStockOrderItem[] = [];
+
+  for (const item of lowStockItems) {
+    const orderItem: LowStockOrderItem = {
+      partNumber: item.partNumber,
+      name: item.name,
+      brand: item.brand,
+      application: item.application,
+      currentStock: item.quantity,
+      shelf: item.shelf,
+      lastPrice: item.suppliers[0]?.lastPrice || 0,
+      orderQty: 0,
+      isSelected: false
+    };
+
+    if (item.suppliers.length > 0) {
+      const primarySupplier = item.suppliers[0].supplier;
+      if (!supplierGroups[primarySupplier]) {
+        supplierGroups[primarySupplier] = [];
+      }
+      supplierGroups[primarySupplier].push(orderItem);
+    } else {
+      noSupplierItems.push(orderItem);
+    }
+  }
+
+  const result: SupplierOrderGroup[] = Object.entries(supplierGroups)
+    .map(([supplier, items]) => ({
+      supplier,
+      items,
+      totalItems: items.length
+    }))
+    .sort((a, b) => b.totalItems - a.totalItems);
+
+  // Add "Tanpa Supplier" group if exists
+  if (noSupplierItems.length > 0) {
+    result.push({
+      supplier: 'TANPA SUPPLIER',
+      items: noSupplierItems,
+      totalItems: noSupplierItems.length
+    });
+  }
+
+  return result;
+};
+
+// Save order to supplier (creates a record of the order)
+export interface SupplierOrder {
+  id?: number;
+  created_at?: string;
+  supplier: string;
+  items: { partNumber: string; name: string; qty: number; price: number }[];
+  status: 'PENDING' | 'ORDERED' | 'RECEIVED';
+  notes: string;
+  total_items: number;
+  total_value: number;
+}
+
+export const saveSupplierOrder = async (store: string | null, order: SupplierOrder): Promise<{ success: boolean; msg: string }> => {
+  // For now, we'll store orders in localStorage since we may not have a dedicated table
+  try {
+    const storageKey = `supplier_orders_${store || 'default'}`;
+    const existingOrders = JSON.parse(localStorage.getItem(storageKey) || '[]');
+    
+    const newOrder = {
+      ...order,
+      id: Date.now(),
+      created_at: new Date().toISOString(),
+      status: 'PENDING' as const
+    };
+    
+    existingOrders.unshift(newOrder);
+    localStorage.setItem(storageKey, JSON.stringify(existingOrders));
+    
+    return { success: true, msg: 'Order berhasil disimpan' };
+  } catch (err) {
+    console.error('saveSupplierOrder Error:', err);
+    return { success: false, msg: 'Gagal menyimpan order' };
+  }
+};
+
+export const fetchSupplierOrders = async (store: string | null): Promise<SupplierOrder[]> => {
+  try {
+    const storageKey = `supplier_orders_${store || 'default'}`;
+    const orders = JSON.parse(localStorage.getItem(storageKey) || '[]');
+    return orders;
+  } catch (err) {
+    console.error('fetchSupplierOrders Error:', err);
+    return [];
+  }
+};
+
+export const updateSupplierOrderStatus = async (
+  store: string | null, 
+  orderId: number, 
+  status: 'PENDING' | 'ORDERED' | 'RECEIVED'
+): Promise<{ success: boolean; msg: string }> => {
+  try {
+    const storageKey = `supplier_orders_${store || 'default'}`;
+    const orders = JSON.parse(localStorage.getItem(storageKey) || '[]');
+    
+    const orderIndex = orders.findIndex((o: SupplierOrder) => o.id === orderId);
+    if (orderIndex === -1) {
+      return { success: false, msg: 'Order tidak ditemukan' };
+    }
+    
+    orders[orderIndex].status = status;
+    localStorage.setItem(storageKey, JSON.stringify(orders));
+    
+    return { success: true, msg: 'Status order diupdate' };
+  } catch (err) {
+    console.error('updateSupplierOrderStatus Error:', err);
+    return { success: false, msg: 'Gagal update status' };
+  }
+};
+
+export const deleteSupplierOrder = async (store: string | null, orderId: number): Promise<{ success: boolean; msg: string }> => {
+  try {
+    const storageKey = `supplier_orders_${store || 'default'}`;
+    const orders = JSON.parse(localStorage.getItem(storageKey) || '[]');
+    
+    const filtered = orders.filter((o: SupplierOrder) => o.id !== orderId);
+    localStorage.setItem(storageKey, JSON.stringify(filtered));
+    
+    return { success: true, msg: 'Order dihapus' };
+  } catch (err) {
+    console.error('deleteSupplierOrder Error:', err);
+    return { success: false, msg: 'Gagal menghapus order' };
   }
 };

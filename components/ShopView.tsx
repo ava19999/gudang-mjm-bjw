@@ -108,7 +108,7 @@ export const ShopView: React.FC<ShopViewProps> = ({
   useEffect(() => {
     const timer = setTimeout(async () => {
       if (brandSearch.length >= 1) {
-        const suggestions = await fetchSearchSuggestions(selectedStore, 'brand', brandSearch);
+        const suggestions = await fetchSearchSuggestions(selectedStore, 'application', brandSearch);
         setBrandOptions(suggestions);
       } else {
         setBrandOptions([]);
@@ -120,7 +120,7 @@ export const ShopView: React.FC<ShopViewProps> = ({
   useEffect(() => {
     const timer = setTimeout(async () => {
       if (applicationSearch.length >= 1) {
-        const suggestions = await fetchSearchSuggestions(selectedStore, 'application', applicationSearch);
+        const suggestions = await fetchSearchSuggestions(selectedStore, 'brand', applicationSearch);
         setApplicationOptions(suggestions);
       } else {
         setApplicationOptions([]);
