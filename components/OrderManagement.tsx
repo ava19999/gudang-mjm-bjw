@@ -780,7 +780,7 @@ export const OrderManagement: React.FC = () => {
   );
 
   return (
-    <div className="bg-gray-800 m-4 rounded-2xl border border-gray-700 shadow-xl min-h-[80vh] flex flex-col text-gray-100 overflow-hidden">
+    <div className="bg-gray-800 m-4 rounded-2xl border border-gray-700 shadow-xl flex flex-col text-gray-100" style={{ height: 'calc(100vh - 120px)' }}>
       {toast && <Toast msg={toast.msg} type={toast.type} onClose={() => setToast(null)} />}
 
       {/* HEADER - Fixed */}
@@ -811,88 +811,88 @@ export const OrderManagement: React.FC = () => {
         ))}
       </div>
 
-      {/* SEARCH FILTERS - Fixed (tidak ikut scroll) */}
-      <div className="p-4 bg-gray-900 border-b border-gray-700 flex-shrink-0">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
-          {/* Customer Search with Keyboard-Navigable Dropdown */}
-          <AutocompleteDropdown
-            value={customerFilter}
-            onChange={setCustomerFilter}
-            options={filteredCustomerOptions}
-            placeholder="Cari Customer..."
-            icon={<User size={16} />}
-          />
-          
-          {/* Part Number Search with Keyboard-Navigable Dropdown */}
-          <AutocompleteDropdown
-            value={partNumberFilter}
-            onChange={setPartNumberFilter}
-            options={filteredPartNumberOptions}
-            placeholder="Cari Part Number..."
-            icon={<Hash size={16} />}
-          />
-          
-          {/* Ecommerce Dropdown */}
-          <div className="relative">
-            <ShoppingBag className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
-            <select 
-              className="w-full pl-10 pr-4 py-3 bg-gray-800 border border-gray-700 rounded-xl text-sm focus:ring-2 focus:ring-purple-500 outline-none text-white appearance-none cursor-pointer"
-              value={ecommerceFilter}
-              onChange={(e) => setEcommerceFilter(e.target.value)}
-            >
-              <option value="all">Semua Sumber</option>
-              {ecommerceOptions.map(ecom => (
-                <option key={ecom} value={ecom}>{ecom}</option>
-              ))}
-            </select>
-          </div>
-          
-          {/* General Search (backward compatibility) */}
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
-            <input 
-              type="text" 
-              placeholder="Cari lainnya (Resi, Barang)..." 
-              className="w-full pl-10 pr-4 py-3 bg-gray-800 border border-gray-700 rounded-xl text-sm focus:ring-2 focus:ring-purple-500 outline-none text-white placeholder-gray-500"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+      {/* SCROLLABLE CONTENT AREA - hanya bagian ini yang scroll */}
+      <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden bg-gray-900 rounded-b-2xl">
+        {/* SEARCH FILTERS - Sticky saat scroll */}
+        <div className="sticky top-0 z-30 p-4 bg-gray-900 border-b border-gray-700 shadow-lg backdrop-blur-sm">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
+            {/* Customer Search with Keyboard-Navigable Dropdown */}
+            <AutocompleteDropdown
+              value={customerFilter}
+              onChange={setCustomerFilter}
+              options={filteredCustomerOptions}
+              placeholder="Cari Customer..."
+              icon={<User size={16} />}
             />
+            
+            {/* Part Number Search with Keyboard-Navigable Dropdown */}
+            <AutocompleteDropdown
+              value={partNumberFilter}
+              onChange={setPartNumberFilter}
+              options={filteredPartNumberOptions}
+              placeholder="Cari Part Number..."
+              icon={<Hash size={16} />}
+            />
+            
+            {/* Ecommerce Dropdown */}
+            <div className="relative">
+              <ShoppingBag className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
+              <select 
+                className="w-full pl-10 pr-4 py-3 bg-gray-800 border border-gray-700 rounded-xl text-sm focus:ring-2 focus:ring-purple-500 outline-none text-white appearance-none cursor-pointer"
+                value={ecommerceFilter}
+                onChange={(e) => setEcommerceFilter(e.target.value)}
+              >
+                <option value="all">Semua Sumber</option>
+                {ecommerceOptions.map(ecom => (
+                  <option key={ecom} value={ecom}>{ecom}</option>
+                ))}
+              </select>
+            </div>
+            
+            {/* General Search (backward compatibility) */}
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
+              <input 
+                type="text" 
+                placeholder="Cari lainnya (Resi, Barang)..." 
+                className="w-full pl-10 pr-4 py-3 bg-gray-800 border border-gray-700 rounded-xl text-sm focus:ring-2 focus:ring-purple-500 outline-none text-white placeholder-gray-500"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
+            </div>
           </div>
-        </div>
-        
-        {/* Bulk Action Bar for OFFLINE Tab */}
-        {activeTab === 'OFFLINE' && filteredGroupedOffline.length > 0 && (
-          <div className="bg-gray-800 border border-gray-600 rounded-xl p-3 flex items-center justify-between mt-3">
-            <div className="flex items-center gap-3">
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={selectedGroups.size === filteredGroupedOffline.length && filteredGroupedOffline.length > 0}
-                  onChange={toggleSelectAll}
-                  className="w-5 h-5 rounded border-gray-600 bg-gray-700 text-blue-500 focus:ring-blue-500 cursor-pointer"
-                />
-                <span className="text-sm font-bold text-gray-300">Pilih Semua</span>
-              </label>
+          
+          {/* Bulk Action Bar for OFFLINE Tab */}
+          {activeTab === 'OFFLINE' && filteredGroupedOffline.length > 0 && (
+            <div className="bg-gray-800 border border-gray-600 rounded-xl p-3 flex items-center justify-between mt-3">
+              <div className="flex items-center gap-3">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={selectedGroups.size === filteredGroupedOffline.length && filteredGroupedOffline.length > 0}
+                    onChange={toggleSelectAll}
+                    className="w-5 h-5 rounded border-gray-600 bg-gray-700 text-blue-500 focus:ring-blue-500 cursor-pointer"
+                  />
+                  <span className="text-sm font-bold text-gray-300">Pilih Semua</span>
+                </label>
+                {selectedGroups.size > 0 && (
+                  <span className="text-sm text-purple-400 font-bold">
+                    ({selectedGroups.size} pesanan dipilih)
+                  </span>
+                )}
+              </div>
               {selectedGroups.size > 0 && (
-                <span className="text-sm text-purple-400 font-bold">
-                  ({selectedGroups.size} pesanan dipilih)
-                </span>
+                <button 
+                  onClick={handleBulkAccSelected}
+                  className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-500 shadow-lg shadow-blue-900/30 text-sm font-bold flex items-center gap-2 transition-colors"
+                >
+                  <Check size={18}/> ACC {selectedGroups.size} PESANAN
+                </button>
               )}
             </div>
-            {selectedGroups.size > 0 && (
-              <button 
-                onClick={handleBulkAccSelected}
-                className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-500 shadow-lg shadow-blue-900/30 text-sm font-bold flex items-center gap-2 transition-colors"
-              >
-                <Check size={18}/> ACC {selectedGroups.size} PESANAN
-              </button>
-            )}
-          </div>
-        )}
-      </div>
+          )}
+        </div>
 
-      {/* SCROLLABLE CONTENT AREA - hanya bagian ini yang scroll */}
-      <div className="flex-1 overflow-auto bg-gray-900">
         <div className="p-4">
           {/* --- 1. TAB OFFLINE (GROUPED VIEW) --- */}
           {activeTab === 'OFFLINE' && (
