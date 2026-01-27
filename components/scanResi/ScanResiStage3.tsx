@@ -15,6 +15,7 @@ import {
   getBulkPartNumberInfo,
   insertProductAlias,
   deleteProcessedResiItems,
+  deleteProcessedScanResi,
   deleteResiItemById,
   deleteScanResiById,
   checkResiOrOrderStatus,
@@ -1616,6 +1617,11 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
         part_number: r.part_number
       }));
       await deleteProcessedResiItems(selectedStore, itemsToDelete);
+      
+      // Delete processed items from scan_resi (Stage 1)
+      // Mengumpulkan semua resi yang unik untuk dihapus dari scan_resi
+      const resiListToDelete = [...new Set(validRows.map(r => r.resi).filter(Boolean))];
+      await deleteProcessedScanResi(selectedStore, resiListToDelete);
       
       alert(`Sukses: ${result.processed} item diproses.`);
       setRows(prev => prev.filter(r => !validRows.find(v => v.id === r.id)));

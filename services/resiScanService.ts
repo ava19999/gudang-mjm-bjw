@@ -739,31 +739,16 @@ export const processBarangKeluarBatch = async (items: any[], store: string | nul
         continue;
       }
 
-      // 3. Update Status di Tabel SCAN RESI
-      const { data: pendingRows } = await supabase
+      // 3. HAPUS dari Tabel SCAN RESI (bukan update, tapi delete)
+      // Resi yang sudah diproses ke barang_keluar harus dihapus dari scan_resi
+      const { error: scanDeleteErr } = await supabase
         .from(scanTable)
-        .select('id')
-        .eq('resi', item.resi)
-        .neq('status', 'completed')
-        .limit(1); 
+        .delete()
+        .eq('resi', item.resi);
       
-      if (pendingRows && pendingRows.length > 0) {
-        const updateData: any = {
-            status: 'completed',
-            part_number: item.part_number,
-            barang: item.nama_pesanan,
-            qty_out: item.qty_keluar,
-            total_harga: item.harga_total,
-            customer: item.customer
-        };
-        const numOrder = Number(item.order_id);
-        if (!isNaN(numOrder) && item.order_id) {
-            updateData.no_pesanan = numOrder;
-        }
-        await supabase
-          .from(scanTable)
-          .update(updateData)
-          .eq('id', pendingRows[0].id);
+      if (scanDeleteErr) {
+        console.warn(`Gagal hapus scan_resi untuk ${item.resi}:`, scanDeleteErr.message);
+        // Tidak menggagalkan proses, hanya warning
       }
 
       // 4. Update Status di Tabel CSV
@@ -1227,6 +1212,34 @@ export const insertProductAlias = async (
     console.error('Error insert alias:', err);
     return { success: false };
   }
+};
+
+/**
+ * Hapus item dari scan_resi (Stage 1) setelah diproses ke barang_keluar
+ */
+export const deleteProcessedScanResi = async (
+  store: string | null,
+  resis: string[]
+): Promise<{ success: boolean; deleted: number }> => {
+  const table = getTableName(store);
+  if (!table || resis.length === 0) return { success: false, deleted: 0 };
+
+  let deletedCount = 0;
+
+  for (const resi of resis) {
+    try {
+      const { error } = await supabase
+        .from(table)
+        .delete()
+        .eq('resi', resi);
+
+      if (!error) deletedCount++;
+    } catch (err) {
+      console.warn('Delete scan_resi item gagal:', err);
+    }
+  }
+
+  return { success: true, deleted: deletedCount };
 };
 
 /**
