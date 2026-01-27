@@ -42,6 +42,8 @@ export interface SoldItemRow {
   customer: string;
   part_number: string;
   name: string;
+  brand?: string;
+  application?: string;
   qty_keluar: number;
   harga_total: number;
   resi: string;
@@ -279,11 +281,10 @@ export interface ResiScanStage {
 }
 
 // Helper: Deteksi apakah pesanan INSTANT (No. Pesanan dipakai sebagai resi)
-// INSTANT hanya berlaku untuk SHOPEE (BUKAN TIKTOK)
+// INSTANT hanya berlaku untuk SHOPEE dan TIKTOK
 export const isInstantOrder = (resi: ResiScanStage): boolean => {
   const ecomm = (resi.ecommerce || '').toUpperCase();
-  // TIKTOK selalu menggunakan Order ID, jadi bukan "instant" dalam konteks ini
-  if (ecomm !== 'SHOPEE') return false;
+  if (ecomm !== 'SHOPEE' && ecomm !== 'TIKTOK') return false;
   // INSTANT jika resi === no_pesanan (artinya yang di-scan adalah no pesanan)
   return !!(resi.no_pesanan && resi.resi === resi.no_pesanan);
 };
@@ -369,12 +370,10 @@ export interface ParsedCSVItem {
   part_number: string;      // SKU / Number Part
   product_name: string;     // Nama Produk
   quantity: number;         // Jumlah
-  total_price: number;      // Total Harga Produk (IDR atau mata uang asing untuk Ekspor)
+  total_price: number;      // Total Harga Produk (IDR)
   customer: string;         // Username (Pembeli)
-  ecommerce: string;        // 'SHOPEE' | 'TIKTOK' | 'EKSPOR - PH' | etc
+  ecommerce: string;        // 'SHOPEE' | 'TIKTOK'
   original_currency_val: string; 
-  detected_country?: string; // Negara terdeteksi dari Order ID (untuk Ekspor: PH/MY/SG/HK)
-  sub_toko?: string;        // Sub toko (opsional, diisi saat upload)
   // 'toko' (MJM/BJW) akan dihandle saat insert database di component
 }
 
