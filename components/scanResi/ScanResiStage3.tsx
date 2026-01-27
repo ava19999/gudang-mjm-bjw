@@ -16,6 +16,7 @@ import {
   insertProductAlias,
   deleteProcessedResiItems,
   deleteResiItemById,
+  deleteScanResiById,
   checkResiOrOrderStatus,
   checkExistingInBarangKeluar,
   getStage1ResiList,
@@ -72,7 +73,7 @@ const EcommerceDropdown = ({ value, onChange }: { value: string, onChange: (v: s
   const [input, setInput] = useState(value);
   const ref = useRef<HTMLDivElement>(null);
 
-  const ecommerceOptions = ['SHOPEE', 'TIKTOK', 'KILAT', 'RESELLER', 'EKSPOR'];
+  const ecommerceOptions = ['SHOPEE', 'TIKTOK', 'TIKTOK INSTAN', 'KILAT', 'RESELLER', 'EKSPOR'];
 
   useEffect(() => { setInput(value); }, [value]);
 
@@ -131,6 +132,7 @@ const EcommerceFilterDropdown = ({ value, onChange }: { value: string, onChange:
   const ecommerceOptions = [
     'SHOPEE', 
     'TIKTOK', 
+    'TIKTOK INSTAN',
     'KILAT', 
     'RESELLER', 
     'EKSPOR',
@@ -1126,11 +1128,19 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
 
       // === STEP 0: FILTER STATUS BATAL/CANCEL/UNPAID ===
       // Safety net: filter ulang item dengan status batal/cancel/unpaid
+      // KECUALI "Pembatalan Diajukan" - ini TIDAK di-skip karena masih bisa diproses
       const allSkippedItems: SkippedItem[] = [];
       
       const afterStatusFilter = parsedItems.filter(item => {
         const orderStatus = String(item.order_status || '').toLowerCase();
-        const isCancelled = orderStatus.includes('batal') || orderStatus.includes('cancel');
+        
+        // "Pembatalan Diajukan" / "Cancellation Requested" TIDAK di-skip
+        const isPembatalanDiajukan = orderStatus.includes('pembatalan diajukan') || 
+                                      orderStatus.includes('cancellation requested') ||
+                                      orderStatus.includes('pengajuan pembatalan');
+        
+        // Hanya skip jika BATAL TOTAL (sudah dibatalkan), bukan sekedar "diajukan"
+        const isCancelled = (orderStatus.includes('batal') || orderStatus.includes('cancel')) && !isPembatalanDiajukan;
         const isUnpaid = orderStatus.includes('belum dibayar') || 
                          orderStatus.includes('unpaid') || 
                          orderStatus.includes('menunggu bayar') ||
@@ -1230,6 +1240,15 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
         // Tentukan negara untuk konversi harga (khusus Ekspor)
         let negaraForConversion = '';
         
+        // SIMPAN ecommerce dari parser (bisa berisi label khusus seperti TIKTOK INSTAN)
+        const ecommerceFromParser = item.ecommerce || '';
+        
+        // Cek apakah ecommerce dari parser memiliki label khusus (INSTAN/SAMEDAY)
+        // Jika ya, pertahankan label tersebut
+        const hasSpecialLabel = ecommerceFromParser.includes('INSTAN') || 
+                                ecommerceFromParser.includes('SAMEDAY') ||
+                                ecommerceFromParser.includes('KILAT');
+        
         if (s1Data) {
           // Ada di Stage 1, gunakan ecommerce dari sana
           let ecomFromS1 = s1Data.ecommerce || '';
@@ -1251,8 +1270,12 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
             item.ecommerce = ecomFromS1 || uploadEcommerce;
           }
         } else {
-          // Tidak ada di Stage 1, gunakan pilihan user
-          if (uploadEcommerce === 'EKSPOR') {
+          // Tidak ada di Stage 1
+          // PENTING: Jika ecommerce dari parser punya label khusus, PERTAHANKAN
+          if (hasSpecialLabel) {
+            // Pertahankan label khusus dari parser (misal: TIKTOK INSTAN, SHOPEE SAMEDAY, dll)
+            item.ecommerce = ecommerceFromParser;
+          } else if (uploadEcommerce === 'EKSPOR') {
             item.ecommerce = `EKSPOR - ${uploadNegara}`;
             negaraForConversion = uploadNegara;
           } else {
@@ -1482,18 +1505,46 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
     });
   };
 
-  // Handler untuk hapus row - juga hapus dari database
+  // Handler untuk hapus row - juga hapus dari database dengan konfirmasi
   const handleDeleteRow = async (rowId: string) => {
+    // Cari row untuk mendapatkan info resi
+    const rowToDelete = rows.find(r => r.id === rowId);
+    const resiInfo = rowToDelete?.resi || 'item ini';
+    
+    // Konfirmasi sebelum hapus
+    const confirmed = window.confirm(
+      `Hapus resi "${resiInfo}"?\n\nItem akan dihapus permanen dan tidak akan muncul lagi di Pending DB (kecuali di-scan ulang).`
+    );
+    
+    if (!confirmed) return;
+    
     // Hapus dari state lokal dulu untuk responsivitas
     setRows(prev => prev.filter(r => r.id !== rowId));
     
-    // Jika ID dimulai dengan "db-", berarti sudah ada di database, hapus juga dari sana
+    let deleteResult = { success: false, message: '' };
+    
+    // Jika ID dimulai dengan "db-", hapus dari resi_items
     if (rowId.startsWith('db-')) {
-      const result = await deleteResiItemById(selectedStore, rowId);
-      if (!result.success) {
-        console.warn('Gagal hapus dari database:', result.message);
-        // Opsional: bisa reload data jika gagal
-      }
+      deleteResult = await deleteResiItemById(selectedStore, rowId);
+    }
+    // Jika ID dimulai dengan "s1-", hapus dari scan_resi (Stage 1)
+    else if (rowId.startsWith('s1-')) {
+      deleteResult = await deleteScanResiById(selectedStore, rowId);
+    }
+    // ID lainnya (temporary) - hanya hapus dari state lokal
+    else {
+      deleteResult = { success: true, message: 'Item dihapus dari daftar' };
+    }
+    
+    // Tampilkan notifikasi
+    if (deleteResult.success) {
+      // Notifikasi sukses
+      alert(`✅ Resi "${resiInfo}" berhasil dihapus`);
+    } else {
+      console.warn('Gagal hapus dari database:', deleteResult.message);
+      alert(`❌ Gagal menghapus: ${deleteResult.message}`);
+      // Reload data jika gagal
+      await loadSavedDataFromDB();
     }
   };
 

@@ -846,8 +846,16 @@ export const saveCSVToResiItems = async (
       const orderIdUpper = (item.order_id || '').trim().toUpperCase();
       
       // === SAFETY NET: Skip cancelled/unpaid orders (terutama untuk TikTok) ===
+      // KECUALI "Pembatalan Diajukan" - ini TIDAK di-skip karena masih bisa diproses
       const orderStatus = (item.order_status || '').toLowerCase();
-      const isCancelledOrder = orderStatus.includes('batal') || orderStatus.includes('cancel');
+      
+      // "Pembatalan Diajukan" / "Cancellation Requested" TIDAK di-skip
+      const isPembatalanDiajukan = orderStatus.includes('pembatalan diajukan') || 
+                                    orderStatus.includes('cancellation requested') ||
+                                    orderStatus.includes('pengajuan pembatalan');
+      
+      // Hanya skip jika BATAL TOTAL (sudah dibatalkan), bukan sekedar "diajukan"
+      const isCancelledOrder = (orderStatus.includes('batal') || orderStatus.includes('cancel')) && !isPembatalanDiajukan;
       const isUnpaidOrder = orderStatus.includes('belum dibayar') || 
                             orderStatus.includes('unpaid') || 
                             orderStatus.includes('menunggu bayar') ||
@@ -1025,6 +1033,7 @@ export const saveCSVToResiItems = async (
         // Update ecommerce jika special case (Instan, Kilat, Sameday, atau International)
         const specialEcommerceLabels = [
           'SHOPEE INSTAN', 'KILAT INSTAN', 'SHOPEE SAMEDAY',
+          'TIKTOK INSTAN',
           'SHOPEE PH', 'SHOPEE MY', 'SHOPEE SG', 'SHOPEE INTL'
         ];
         if (specialEcommerceLabels.includes(item.ecommerce)) {
@@ -1059,9 +1068,18 @@ export const saveCSVToResiItems = async (
         let ecommerce = item.ecommerce;
         let toko = (item as any).sub_toko || store?.toUpperCase();
         
+        // Cek apakah ecommerce dari CSV punya label khusus (INSTAN/SAMEDAY/KILAT)
+        const hasSpecialLabel = ecommerce.includes('INSTAN') || 
+                                ecommerce.includes('SAMEDAY') || 
+                                ecommerce.includes('KILAT');
+        
         if (scanData) {
-          // Ada data dari scan, gunakan ecommerce/toko dari sana
-          ecommerce = scanData.ecommerce;
+          // Ada data dari scan
+          // PENTING: Jika ecommerce CSV punya label khusus, PERTAHANKAN
+          // Hanya ambil toko dari scan, tapi label ecommerce tetap dari CSV
+          if (!hasSpecialLabel) {
+            ecommerce = scanData.ecommerce;
+          }
           toko = scanData.toko;
         }
         
@@ -1268,5 +1286,37 @@ export const deleteResiItemById = async (
   } catch (err: any) {
     console.error('Delete resi item exception:', err);
     return { success: false, message: err.message || 'Gagal menghapus item' };
+  }
+};
+
+/**
+ * Hapus satu item dari scan_resi (Stage 1) berdasarkan ID
+ * Digunakan saat user menghapus row di Stage 3 yang berasal dari Stage 1 scan
+ */
+export const deleteScanResiById = async (
+  store: string | null,
+  id: string | number
+): Promise<{ success: boolean; message: string }> => {
+  const table = getTableName(store);
+  if (!table) return { success: false, message: 'Toko tidak valid' };
+
+  try {
+    // ID dari scan biasanya format "s1-123", perlu extract angkanya
+    const dbId = String(id).startsWith('s1-') ? String(id).replace('s1-', '') : String(id);
+    
+    const { error } = await supabase
+      .from(table)
+      .delete()
+      .eq('id', dbId);
+
+    if (error) {
+      console.error('Delete scan_resi by ID gagal:', error);
+      return { success: false, message: error.message };
+    }
+
+    return { success: true, message: 'Item scan berhasil dihapus' };
+  } catch (err: any) {
+    console.error('Delete scan_resi exception:', err);
+    return { success: false, message: err.message || 'Gagal menghapus item scan' };
   }
 };

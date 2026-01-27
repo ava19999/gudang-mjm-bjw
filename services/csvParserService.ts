@@ -460,7 +460,9 @@ export const parseShopeeIntlCSV = (text: string): ParsedCSVItem[] => {
 // Skip: Baris 2 (biasanya data report atau kosong)
 // Data: Mulai Baris 3
 // Filter: Skip "Dibatalkan" dan "Belum dibayar"
-// Skip jika Tracking ID kosong
+// RESI LOGIC:
+//   - Default: Gunakan Tracking ID sebagai resi
+//   - Instan/Same Day: Gunakan Order ID sebagai resi, label "TIKTOK INSTAN"
 // Dedupe: Sama resi + customer + nama_produk = skip
 // ============================================================================
 export const parseTikTokCSV = (text: string): ParsedCSVItem[] => {
@@ -477,6 +479,13 @@ export const parseTikTokCSV = (text: string): ParsedCSVItem[] => {
   const idxResi = headers.findIndex(h => h.includes('Tracking ID'));
   const idxOrder = headers.findIndex(h => h.includes('Order ID'));
   const idxStatus = headers.findIndex(h => h.toLowerCase().includes('order status') || h.toLowerCase().includes('status pesanan'));
+  // Delivery Option bisa dalam bahasa Inggris atau Indonesia
+  const idxDeliveryOption = headers.findIndex(h => 
+    h.includes('Delivery Option') || 
+    h.includes('Opsi Pengiriman') ||
+    h.toLowerCase().includes('delivery option') ||
+    h.toLowerCase().includes('opsi pengiriman')
+  );
   const idxUser = headers.findIndex(h => h.includes('Buyer Username'));
   const idxSKU = headers.findIndex(h => h.includes('Seller SKU'));
   const idxProductName = headers.findIndex(h => h.includes('Product Name'));
@@ -486,6 +495,8 @@ export const parseTikTokCSV = (text: string): ParsedCSVItem[] => {
   
   console.log('[TikTok CSV] Headers:', headers);
   console.log('[TikTok CSV] idxStatus:', idxStatus, 'column name:', idxStatus !== -1 ? headers[idxStatus] : 'NOT FOUND');
+  console.log('[TikTok CSV] idxDeliveryOption:', idxDeliveryOption, 'column name:', idxDeliveryOption !== -1 ? headers[idxDeliveryOption] : 'NOT FOUND');
+  console.log('[TikTok CSV] idxResi (Tracking ID):', idxResi, 'column name:', idxResi !== -1 ? headers[idxResi] : 'NOT FOUND');
 
   // Dedupe set
   const seenKeys = new Set<string>();
@@ -493,7 +504,7 @@ export const parseTikTokCSV = (text: string): ParsedCSVItem[] => {
   // Tracking untuk debugging
   let totalProcessed = 0;
   let skippedCancelled = 0;
-  let skippedNoOrderId = 0;
+  let skippedNoResi = 0;
   let skippedDuplicate = 0;
 
   const results = dataRows.map(line => {
@@ -508,21 +519,64 @@ export const parseTikTokCSV = (text: string): ParsedCSVItem[] => {
       ? cols[idxStatus].replace(/["']/g, '').trim() 
       : '';
 
-    // TIKTOK menggunakan Order ID sebagai resi (bukan Tracking ID)
-    // Get order_id - fix scientific notation
+    // Get Tracking ID - fix scientific notation
+    let trackingId = (idxResi !== -1 && cols[idxResi]) 
+      ? cols[idxResi].replace(/["']/g, '').trim() 
+      : '';
+    trackingId = fixScientificNotation(trackingId);
+
+    // Get Order ID - fix scientific notation
     let orderId = (idxOrder !== -1 && cols[idxOrder]) 
       ? cols[idxOrder].replace(/["']/g, '').trim() 
       : '';
     orderId = fixScientificNotation(orderId);
     
-    // SKIP jika Order ID kosong
-    if (!orderId) {
-      skippedNoOrderId++;
-      return null;
+    // Get Delivery Option untuk deteksi Instan/Same Day
+    const deliveryOption = (idxDeliveryOption !== -1 && cols[idxDeliveryOption]) 
+      ? cols[idxDeliveryOption].replace(/["']/g, '').trim() 
+      : '';
+    const deliveryOptionLower = deliveryOption.toLowerCase();
+    
+    // DEBUG: Log delivery option untuk melihat nilai sebenarnya
+    if (deliveryOption) {
+      console.log('[TikTok CSV] Delivery Option:', deliveryOption, '| Lower:', deliveryOptionLower);
     }
     
-    // Gunakan Order ID sebagai resi
-    let resi = orderId;
+    // LOGIC RESI TIKTOK:
+    // Cek kolom "Delivery Option" untuk kata instant/instan/sameday/same day/on-demand
+    // - Jika Instan/Same Day/On-Demand: Gunakan Order ID sebagai resi, label "TIKTOK INSTAN"
+    // - Jika Regular: Gunakan Tracking ID sebagai resi, label "TIKTOK"
+    
+    // Tambahkan variasi penulisan yang mungkin ada di TikTok CSV
+    const isInstant = deliveryOptionLower.includes('instant') || 
+                      deliveryOptionLower.includes('instan') ||
+                      deliveryOptionLower.includes('on-demand') ||
+                      deliveryOptionLower.includes('on demand') ||
+                      deliveryOptionLower.includes('express');
+    const isSameday = deliveryOptionLower.includes('same day') || 
+                      deliveryOptionLower.includes('sameday') ||
+                      deliveryOptionLower.includes('same-day');
+    const isInstantOrSameday = isInstant || isSameday;
+    
+    let resi = '';
+    let ecommerceLabel = 'TIKTOK';
+    
+    if (isInstantOrSameday) {
+      // Instan/Same Day: Gunakan Order ID sebagai resi
+      resi = orderId;
+      ecommerceLabel = 'TIKTOK INSTAN';
+      console.log('[TikTok CSV] DETECTED INSTANT/SAMEDAY:', deliveryOption, '-> Label:', ecommerceLabel);
+    } else {
+      // Regular: Gunakan Tracking ID sebagai resi
+      resi = trackingId;
+      ecommerceLabel = 'TIKTOK';
+    }
+    
+    // SKIP jika resi kosong
+    if (!resi) {
+      skippedNoResi++;
+      return null;
+    }
 
     // Format customer
     const customer = formatCustomer(cols[idxUser] || '');
@@ -532,7 +586,7 @@ export const parseTikTokCSV = (text: string): ParsedCSVItem[] => {
     const variation = (idxVariation !== -1) ? cols[idxVariation] : '';
     const productName = formatNamaProduk(namaProduk, variation);
     
-    // Dedupe check - gunakan order_id (resi) + SKU untuk akurasi
+    // Dedupe check - gunakan resi + SKU untuk akurasi
     const sku = (idxSKU !== -1 && cols[idxSKU]) ? cols[idxSKU].replace(/["']/g, '') : '';
     const dedupeKey = `${resi}||${sku}||${productName}`;
     if (seenKeys.has(dedupeKey)) {
@@ -548,14 +602,14 @@ export const parseTikTokCSV = (text: string): ParsedCSVItem[] => {
       resi,
       order_id: orderId,
       order_status: rawStatus,
-      shipping_option: '',
+      shipping_option: deliveryOption,
       customer,
       part_number: (idxSKU !== -1 && cols[idxSKU]) ? cols[idxSKU].replace(/["']/g, '') : '',
       product_name: productName,
       quantity: (idxQty !== -1) ? (parseInt(cols[idxQty]) || 1) : 1,
       total_price: totalPriceIDR,
       original_currency_val: (idxTotal !== -1) ? cols[idxTotal] : '0',
-      ecommerce: 'TIKTOK'
+      ecommerce: ecommerceLabel
     };
   }).filter((item): item is ParsedCSVItem => item !== null);
   
@@ -564,7 +618,7 @@ export const parseTikTokCSV = (text: string): ParsedCSVItem[] => {
   console.log('  Total rows:', totalProcessed);
   console.log('  Valid items:', results.length);
   console.log('  Skipped - Cancelled/Unpaid:', skippedCancelled);
-  console.log('  Skipped - No Order ID:', skippedNoOrderId);
+  console.log('  Skipped - No Resi (Tracking ID/Order ID):', skippedNoResi);
   console.log('  Skipped - Duplicate:', skippedDuplicate);
   
   return results;
