@@ -1626,6 +1626,8 @@ export interface SupplierHistory {
   supplier: string;
   lastDate: string;
   lastPrice: number;
+  lastPriceCash: number;
+  lastPriceTempo: number;
   totalQtyPurchased: number;
   purchaseCount: number;
 }
@@ -1644,17 +1646,26 @@ export interface LowStockOrderItem {
   currentStock: number;
   shelf: string;
   lastPrice: number;
+  lastPriceCash: number;
+  lastPriceTempo: number;
   orderQty: number;
   isSelected: boolean;
 }
 
-// Fetch all items with quantity < threshold (default 5)
-export const fetchLowStockItems = async (store: string | null, threshold: number = 5): Promise<LowStockItem[]> => {
+// Fetch all items with quantity < threshold (default 5) - Optimized with batch loading
+export const fetchLowStockItems = async (
+  store: string | null, 
+  threshold: number = 5,
+  onProgress?: (progress: number, currentItem: string) => void
+): Promise<LowStockItem[]> => {
   const table = getTableName(store);
-  if (!table) return [];
+  const logTable = getLogTableName('barang_masuk', store);
+  if (!table || !logTable) return [];
 
   try {
-    // Fetch items with low stock
+    // Step 1: Fetch items with low stock (10%)
+    onProgress?.(5, 'Mengambil data stok...');
+    
     const { data: items, error } = await supabase
       .from(table)
       .select('*')
@@ -1666,23 +1677,141 @@ export const fetchLowStockItems = async (store: string | null, threshold: number
       return [];
     }
 
-    // Fetch supplier history for each item
-    const result: LowStockItem[] = [];
+    if (items.length === 0) {
+      onProgress?.(100, 'Selesai');
+      return [];
+    }
+
+    onProgress?.(15, `Ditemukan ${items.length} barang stok rendah`);
+
+    // Step 2: Batch fetch ALL supplier history in ONE query (much faster!)
+    const partNumbers = items.map(i => i.part_number);
     
-    for (const item of items) {
-      const suppliers = await fetchSupplierHistoryForItem(store, item.part_number);
+    onProgress?.(20, 'Mengambil data supplier...');
+    
+    const { data: supplierData, error: supplierError } = await supabase
+      .from(logTable)
+      .select('part_number, customer, created_at, harga_satuan, qty_masuk, tempo')
+      .in('part_number', partNumbers)
+      .not('customer', 'is', null)
+      .not('customer', 'eq', '')
+      .not('customer', 'eq', '-')
+      .order('created_at', { ascending: false });
+
+    if (supplierError) {
+      console.error('fetchLowStockItems Supplier Error:', supplierError);
+    }
+
+    onProgress?.(60, 'Memproses data supplier...');
+
+    // Step 3: Group supplier data by part_number
+    const supplierByPart: Record<string, typeof supplierData> = {};
+    if (supplierData) {
+      for (const row of supplierData) {
+        if (!supplierByPart[row.part_number]) {
+          supplierByPart[row.part_number] = [];
+        }
+        supplierByPart[row.part_number].push(row);
+      }
+    }
+
+    onProgress?.(75, 'Menyusun hasil...');
+
+    // Step 4: Build result with supplier history
+    const result: LowStockItem[] = [];
+    const totalItems = items.length;
+    
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      const partSupplierData = supplierByPart[item.part_number] || [];
+      
+      // Process supplier data for this item
+      const supplierMap: Record<string, { 
+        lastDate: string; 
+        lastPrice: number;
+        lastPriceCash: number;
+        lastPriceTempo: number;
+        lastCashDate: string;
+        lastTempoDate: string;
+        totalQty: number; 
+        count: number 
+      }> = {};
+
+      for (const row of partSupplierData) {
+        const supplier = (row.customer || '').trim().toUpperCase();
+        if (!supplier || supplier === '-') continue;
+
+        const tempo = (row.tempo || 'CASH').toUpperCase();
+        const isTempo = tempo.includes('TEMPO') || tempo.includes('3 BLN') || tempo.includes('3BLN');
+        const price = row.harga_satuan || 0;
+        const rowDate = row.created_at;
+
+        if (!supplierMap[supplier]) {
+          supplierMap[supplier] = {
+            lastDate: rowDate,
+            lastPrice: price,
+            lastPriceCash: isTempo ? 0 : price,
+            lastPriceTempo: isTempo ? price : 0,
+            lastCashDate: isTempo ? '' : rowDate,
+            lastTempoDate: isTempo ? rowDate : '',
+            totalQty: row.qty_masuk || 0,
+            count: 1
+          };
+        } else {
+          supplierMap[supplier].totalQty += row.qty_masuk || 0;
+          supplierMap[supplier].count += 1;
+          
+          if (new Date(rowDate) > new Date(supplierMap[supplier].lastDate)) {
+            supplierMap[supplier].lastDate = rowDate;
+            supplierMap[supplier].lastPrice = price;
+          }
+          
+          if (!isTempo && price > 0) {
+            if (!supplierMap[supplier].lastCashDate || new Date(rowDate) > new Date(supplierMap[supplier].lastCashDate)) {
+              supplierMap[supplier].lastPriceCash = price;
+              supplierMap[supplier].lastCashDate = rowDate;
+            }
+          }
+          
+          if (isTempo && price > 0) {
+            if (!supplierMap[supplier].lastTempoDate || new Date(rowDate) > new Date(supplierMap[supplier].lastTempoDate)) {
+              supplierMap[supplier].lastPriceTempo = price;
+              supplierMap[supplier].lastTempoDate = rowDate;
+            }
+          }
+        }
+      }
+
+      const suppliers: SupplierHistory[] = Object.entries(supplierMap)
+        .map(([supplier, data]) => ({
+          supplier,
+          lastDate: data.lastDate,
+          lastPrice: data.lastPrice,
+          lastPriceCash: data.lastPriceCash,
+          lastPriceTempo: data.lastPriceTempo,
+          totalQtyPurchased: data.totalQty,
+          purchaseCount: data.count
+        }))
+        .sort((a, b) => new Date(b.lastDate).getTime() - new Date(a.lastDate).getTime());
+
       result.push({
         partNumber: item.part_number,
         name: item.name || '',
-        // UI label swap fix applied
         brand: item.application || '',
         application: item.brand || '',
         quantity: item.quantity || 0,
         shelf: item.shelf || '',
         suppliers
       });
+
+      // Update progress every 10 items
+      if (i % 10 === 0) {
+        const progress = 75 + Math.floor((i / totalItems) * 25);
+        onProgress?.(progress, `Memproses ${i + 1}/${totalItems}...`);
+      }
     }
 
+    onProgress?.(100, 'Selesai!');
     return result;
   } catch (err) {
     console.error('fetchLowStockItems Exception:', err);
@@ -1698,7 +1827,7 @@ export const fetchSupplierHistoryForItem = async (store: string | null, partNumb
   try {
     const { data, error } = await supabase
       .from(logTable)
-      .select('customer, created_at, harga_satuan, qty_masuk')
+      .select('customer, created_at, harga_satuan, qty_masuk, tempo')
       .eq('part_number', partNumber)
       .not('customer', 'is', null)
       .not('customer', 'eq', '')
@@ -1710,10 +1839,14 @@ export const fetchSupplierHistoryForItem = async (store: string | null, partNumb
       return [];
     }
 
-    // Group by supplier
+    // Group by supplier with separate CASH and TEMPO prices
     const supplierMap: Record<string, { 
       lastDate: string; 
-      lastPrice: number; 
+      lastPrice: number;
+      lastPriceCash: number;
+      lastPriceTempo: number;
+      lastCashDate: string;
+      lastTempoDate: string;
       totalQty: number; 
       count: number 
     }> = {};
@@ -1722,20 +1855,46 @@ export const fetchSupplierHistoryForItem = async (store: string | null, partNumb
       const supplier = (row.customer || '').trim().toUpperCase();
       if (!supplier || supplier === '-') continue;
 
+      const tempo = (row.tempo || 'CASH').toUpperCase();
+      const isTempo = tempo.includes('TEMPO') || tempo.includes('3 BLN') || tempo.includes('3BLN');
+      const price = row.harga_satuan || 0;
+      const rowDate = row.created_at;
+
       if (!supplierMap[supplier]) {
         supplierMap[supplier] = {
-          lastDate: row.created_at,
-          lastPrice: row.harga_satuan || 0,
+          lastDate: rowDate,
+          lastPrice: price,
+          lastPriceCash: isTempo ? 0 : price,
+          lastPriceTempo: isTempo ? price : 0,
+          lastCashDate: isTempo ? '' : rowDate,
+          lastTempoDate: isTempo ? rowDate : '',
           totalQty: row.qty_masuk || 0,
           count: 1
         };
       } else {
         supplierMap[supplier].totalQty += row.qty_masuk || 0;
         supplierMap[supplier].count += 1;
-        // Keep the latest date and price
-        if (new Date(row.created_at) > new Date(supplierMap[supplier].lastDate)) {
-          supplierMap[supplier].lastDate = row.created_at;
-          supplierMap[supplier].lastPrice = row.harga_satuan || 0;
+        
+        // Update latest overall date/price
+        if (new Date(rowDate) > new Date(supplierMap[supplier].lastDate)) {
+          supplierMap[supplier].lastDate = rowDate;
+          supplierMap[supplier].lastPrice = price;
+        }
+        
+        // Update CASH price if this is the latest CASH transaction
+        if (!isTempo && price > 0) {
+          if (!supplierMap[supplier].lastCashDate || new Date(rowDate) > new Date(supplierMap[supplier].lastCashDate)) {
+            supplierMap[supplier].lastPriceCash = price;
+            supplierMap[supplier].lastCashDate = rowDate;
+          }
+        }
+        
+        // Update TEMPO price if this is the latest TEMPO transaction
+        if (isTempo && price > 0) {
+          if (!supplierMap[supplier].lastTempoDate || new Date(rowDate) > new Date(supplierMap[supplier].lastTempoDate)) {
+            supplierMap[supplier].lastPriceTempo = price;
+            supplierMap[supplier].lastTempoDate = rowDate;
+          }
         }
       }
     }
@@ -1744,6 +1903,8 @@ export const fetchSupplierHistoryForItem = async (store: string | null, partNumb
       supplier,
       lastDate: data.lastDate,
       lastPrice: data.lastPrice,
+      lastPriceCash: data.lastPriceCash,
+      lastPriceTempo: data.lastPriceTempo,
       totalQtyPurchased: data.totalQty,
       purchaseCount: data.count
     })).sort((a, b) => new Date(b.lastDate).getTime() - new Date(a.lastDate).getTime());
@@ -1754,14 +1915,19 @@ export const fetchSupplierHistoryForItem = async (store: string | null, partNumb
 };
 
 // Get items grouped by supplier for ordering
-export const getLowStockGroupedBySupplier = async (store: string | null, threshold: number = 5): Promise<SupplierOrderGroup[]> => {
-  const lowStockItems = await fetchLowStockItems(store, threshold);
+export const getLowStockGroupedBySupplier = async (
+  store: string | null, 
+  threshold: number = 5,
+  onProgress?: (progress: number, currentItem: string) => void
+): Promise<SupplierOrderGroup[]> => {
+  const lowStockItems = await fetchLowStockItems(store, threshold, onProgress);
   
   // Group items by their primary supplier (most recent)
   const supplierGroups: Record<string, LowStockOrderItem[]> = {};
   const noSupplierItems: LowStockOrderItem[] = [];
 
   for (const item of lowStockItems) {
+    const primarySupplierData = item.suppliers[0];
     const orderItem: LowStockOrderItem = {
       partNumber: item.partNumber,
       name: item.name,
@@ -1769,7 +1935,9 @@ export const getLowStockGroupedBySupplier = async (store: string | null, thresho
       application: item.application,
       currentStock: item.quantity,
       shelf: item.shelf,
-      lastPrice: item.suppliers[0]?.lastPrice || 0,
+      lastPrice: primarySupplierData?.lastPrice || 0,
+      lastPriceCash: primarySupplierData?.lastPriceCash || 0,
+      lastPriceTempo: primarySupplierData?.lastPriceTempo || 0,
       orderQty: 0,
       isSelected: false
     };

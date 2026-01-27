@@ -139,7 +139,12 @@ const SupplierCard: React.FC<SupplierCardProps> = ({
                   <th className="p-2 text-left">Nama Barang</th>
                   <th className="p-2 text-center">Stok</th>
                   <th className="p-2 text-center">Rak</th>
-                  <th className="p-2 text-right">Harga Terakhir</th>
+                  <th className="p-2 text-right">
+                    <span className="text-green-400">CASH</span>
+                  </th>
+                  <th className="p-2 text-right">
+                    <span className="text-orange-400">TEMPO</span>
+                  </th>
                   <th className="p-2 text-center">Qty Order</th>
                   <th className="p-2 text-right">Subtotal</th>
                   <th className="p-2 text-center">Riwayat</th>
@@ -149,7 +154,9 @@ const SupplierCard: React.FC<SupplierCardProps> = ({
                 {items.map((item, idx) => {
                   const isSelected = selectedItems.has(item.partNumber);
                   const qty = orderQtys[item.partNumber] || 0;
-                  const subtotal = qty * item.lastPrice;
+                  // Use the higher of cash or tempo price for subtotal calculation
+                  const activePrice = item.lastPriceCash > 0 ? item.lastPriceCash : item.lastPriceTempo;
+                  const subtotal = qty * activePrice;
 
                   return (
                     <tr 
@@ -183,8 +190,19 @@ const SupplierCard: React.FC<SupplierCardProps> = ({
                         </span>
                       </td>
                       <td className="p-2 text-center text-gray-400">{item.shelf || '-'}</td>
-                      <td className="p-2 text-right text-green-400 font-medium">
-                        {item.lastPrice > 0 ? formatCurrency(item.lastPrice) : '-'}
+                      <td className="p-2 text-right">
+                        {item.lastPriceCash > 0 ? (
+                          <span className="text-green-400 font-medium">{formatCurrency(item.lastPriceCash)}</span>
+                        ) : (
+                          <span className="text-gray-600">-</span>
+                        )}
+                      </td>
+                      <td className="p-2 text-right">
+                        {item.lastPriceTempo > 0 ? (
+                          <span className="text-orange-400 font-medium">{formatCurrency(item.lastPriceTempo)}</span>
+                        ) : (
+                          <span className="text-gray-600">-</span>
+                        )}
                       </td>
                       <td className="p-2">
                         <div className="flex items-center justify-center gap-1">
@@ -373,10 +391,18 @@ const HistoryModal: React.FC<HistoryModalProps> = ({ isOpen, partNumber, itemNam
                     </div>
                     <span className="text-xs text-gray-400">{formatDate(h.lastDate)}</span>
                   </div>
-                  <div className="grid grid-cols-3 gap-2 text-xs">
+                  <div className="grid grid-cols-4 gap-2 text-xs">
                     <div className="bg-gray-900 p-2 rounded-lg">
-                      <p className="text-gray-500">Harga Terakhir</p>
-                      <p className="font-bold text-green-400">{formatCurrency(h.lastPrice)}</p>
+                      <p className="text-gray-500">Harga CASH</p>
+                      <p className={`font-bold ${h.lastPriceCash > 0 ? 'text-green-400' : 'text-gray-600'}`}>
+                        {h.lastPriceCash > 0 ? formatCurrency(h.lastPriceCash) : '-'}
+                      </p>
+                    </div>
+                    <div className="bg-gray-900 p-2 rounded-lg">
+                      <p className="text-gray-500">Harga TEMPO</p>
+                      <p className={`font-bold ${h.lastPriceTempo > 0 ? 'text-orange-400' : 'text-gray-600'}`}>
+                        {h.lastPriceTempo > 0 ? formatCurrency(h.lastPriceTempo) : '-'}
+                      </p>
                     </div>
                     <div className="bg-gray-900 p-2 rounded-lg">
                       <p className="text-gray-500">Total Qty</p>
@@ -584,9 +610,12 @@ export const BarangKosongView: React.FC = () => {
 
   // State
   const [loading, setLoading] = useState(true);
+  const [loadProgress, setLoadProgress] = useState(0);
+  const [loadStatus, setLoadStatus] = useState('');
   const [supplierGroups, setSupplierGroups] = useState<SupplierOrderGroup[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [stockThreshold, setStockThreshold] = useState(5);
+  const [priceType, setPriceType] = useState<'cash' | 'tempo'>('cash');
   const [expandedSuppliers, setExpandedSuppliers] = useState<Set<string>>(new Set());
   const [selectedItems, setSelectedItems] = useState<Record<string, Set<string>>>({});
   const [orderQtys, setOrderQtys] = useState<Record<string, Record<string, number>>>({});
@@ -617,8 +646,17 @@ export const BarangKosongView: React.FC = () => {
   // Load data
   const loadData = async () => {
     setLoading(true);
+    setLoadProgress(0);
+    setLoadStatus('Memulai...');
     try {
-      const groups = await getLowStockGroupedBySupplier(selectedStore, stockThreshold);
+      const groups = await getLowStockGroupedBySupplier(
+        selectedStore, 
+        stockThreshold,
+        (progress, status) => {
+          setLoadProgress(progress);
+          setLoadStatus(status);
+        }
+      );
       setSupplierGroups(groups);
       
       // Initialize selected items and quantities
@@ -969,9 +1007,29 @@ export const BarangKosongView: React.FC = () => {
       {/* Content */}
       <div className="p-4 space-y-4">
         {loading ? (
-          <div className="flex flex-col items-center justify-center py-20 text-gray-500">
-            <RefreshCw size={32} className="animate-spin mb-3 text-blue-500" />
-            <p className="text-sm">Memuat data...</p>
+          <div className="flex flex-col items-center justify-center py-20">
+            {/* Progress Bar */}
+            <div className="w-full max-w-md mb-6">
+              <div className="flex justify-between items-center mb-2">
+                <span className="text-sm font-medium text-blue-400">Loading Data...</span>
+                <span className="text-sm font-bold text-white">{loadProgress}%</span>
+              </div>
+              <div className="w-full bg-gray-700 rounded-full h-3 overflow-hidden">
+                <div 
+                  className="bg-gradient-to-r from-blue-600 to-purple-600 h-full rounded-full transition-all duration-300 ease-out"
+                  style={{ width: `${loadProgress}%` }}
+                />
+              </div>
+              <p className="text-xs text-gray-400 mt-2 text-center">{loadStatus}</p>
+            </div>
+            
+            {/* Animated Icon */}
+            <div className="relative">
+              <div className="absolute inset-0 bg-blue-500/20 rounded-full animate-ping" />
+              <div className="bg-gray-800 p-4 rounded-full border border-gray-700">
+                <RefreshCw size={28} className="animate-spin text-blue-500" />
+              </div>
+            </div>
           </div>
         ) : filteredGroups.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 text-gray-500">
