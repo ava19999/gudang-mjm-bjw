@@ -251,7 +251,7 @@ export const FloatingQuickAccess: React.FC<FloatingQuickAccessProps> = ({
   return (
     <div 
       ref={wrapperRef} 
-      className="fixed z-50"
+      className="fixed z-[9999]"
       style={{ 
         right: position.x || 16,
         bottom: position.y || 80

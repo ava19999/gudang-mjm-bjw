@@ -32,7 +32,7 @@ import {
   CURRENCY_RATES
 } from '../../services/csvParserService';
 import { 
-  Upload, Save, Trash2, Plus, DownloadCloud, RefreshCw, Filter, CheckCircle, Loader2, Settings, Search, X, AlertTriangle
+  Upload, Save, Trash2, Plus, DownloadCloud, RefreshCw, Filter, CheckCircle, Loader2, Settings, Search, X, AlertTriangle, Package
 } from 'lucide-react';
 import { EcommercePlatform, SubToko, NegaraEkspor } from '../../types';
 
@@ -51,6 +51,7 @@ interface Stage3Row {
   qty_keluar: number;
   harga_total: number;
   harga_satuan: number;
+  mata_uang: string;          // Mata uang (IDR, PHP, MYR, SGD, HKD) - untuk Ekspor
   no_pesanan: string;
   customer: string;
   is_db_verified: boolean;
@@ -242,6 +243,370 @@ const SubTokoResellerDropdown = ({ value, onChange, suggestions }: { value: stri
           ))}
         </div>
       )}
+    </div>
+  );
+};
+
+// --- KOMPONEN MODAL PROCESSING BARANG KELUAR ---
+interface ProcessingItem {
+  id: string;
+  resi: string;
+  part_number: string;
+  nama_barang: string;
+  qty: number;
+  customer: string;
+  status: 'pending' | 'processing' | 'success' | 'error';
+  errorMessage?: string;
+}
+
+const ProcessingModal = ({ 
+  isOpen, 
+  items,
+  progress,
+  currentItem,
+  isComplete,
+  successCount,
+  errorCount,
+  onClose
+}: { 
+  isOpen: boolean;
+  items: ProcessingItem[];
+  progress: number;
+  currentItem: string;
+  isComplete: boolean;
+  successCount: number;
+  errorCount: number;
+  onClose: () => void;
+}) => {
+  const logContainerRef = useRef<HTMLDivElement>(null);
+  
+  // Auto-scroll ke item yang sedang diproses
+  useEffect(() => {
+    if (logContainerRef.current && !isComplete) {
+      logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
+    }
+  }, [items, isComplete]);
+  
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+      <div className="bg-gray-800 rounded-xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col border border-gray-600">
+        {/* Header */}
+        <div className="flex items-center justify-between p-4 border-b border-gray-700">
+          <div className="flex items-center gap-3">
+            {!isComplete ? (
+              <Loader2 className="w-6 h-6 text-blue-500 animate-spin" />
+            ) : errorCount > 0 ? (
+              <AlertTriangle className="w-6 h-6 text-yellow-500" />
+            ) : (
+              <CheckCircle className="w-6 h-6 text-green-500" />
+            )}
+            <h2 className="text-lg font-bold text-white">
+              {!isComplete ? 'Memproses Barang Keluar...' : 'Proses Selesai'}
+            </h2>
+          </div>
+        </div>
+
+        {/* Progress Bar */}
+        <div className="px-4 py-3 border-b border-gray-700 bg-gray-750">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-sm text-gray-300">Progress</span>
+            <span className="text-sm font-bold text-blue-400">{Math.round(progress)}%</span>
+          </div>
+          <div className="w-full h-3 bg-gray-700 rounded-full overflow-hidden">
+            <div 
+              className={`h-full rounded-full transition-all duration-300 ease-out ${
+                isComplete 
+                  ? errorCount > 0 ? 'bg-gradient-to-r from-yellow-500 to-yellow-400' : 'bg-gradient-to-r from-green-500 to-green-400'
+                  : 'bg-gradient-to-r from-blue-600 via-purple-500 to-blue-600'
+              }`}
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+          {!isComplete && currentItem && (
+            <div className="mt-2 text-xs text-gray-400 truncate">
+              Sedang memproses: <span className="text-blue-300 font-mono">{currentItem}</span>
+            </div>
+          )}
+        </div>
+
+        {/* Summary Stats */}
+        <div className="px-4 py-2 border-b border-gray-700 bg-gray-750/50">
+          <div className="grid grid-cols-3 gap-3 text-center">
+            <div className="bg-gray-700/50 rounded-lg p-2">
+              <div className="text-xl font-bold text-white">{items.length}</div>
+              <div className="text-[10px] text-gray-400">Total Item</div>
+            </div>
+            <div className="bg-green-900/30 rounded-lg p-2">
+              <div className="text-xl font-bold text-green-400">{successCount}</div>
+              <div className="text-[10px] text-gray-400">Sukses</div>
+            </div>
+            <div className="bg-red-900/30 rounded-lg p-2">
+              <div className="text-xl font-bold text-red-400">{errorCount}</div>
+              <div className="text-[10px] text-gray-400">Gagal</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Processing Log */}
+        <div ref={logContainerRef} className="flex-1 overflow-auto p-3 space-y-1 min-h-[200px] max-h-[300px]">
+          {items.map((item, idx) => (
+            <div 
+              key={`${item.resi}-${item.part_number}-${idx}`}
+              className={`flex items-center gap-2 p-2 rounded text-xs ${
+                item.status === 'processing' ? 'bg-blue-900/30 border border-blue-600' :
+                item.status === 'success' ? 'bg-green-900/20' :
+                item.status === 'error' ? 'bg-red-900/20' :
+                'bg-gray-700/30'
+              }`}
+            >
+              {/* Status Icon */}
+              <div className="flex-shrink-0 w-5">
+                {item.status === 'processing' && <Loader2 size={14} className="text-blue-400 animate-spin" />}
+                {item.status === 'success' && <CheckCircle size={14} className="text-green-400" />}
+                {item.status === 'error' && <X size={14} className="text-red-400" />}
+                {item.status === 'pending' && <div className="w-2 h-2 rounded-full bg-gray-500 mx-1" />}
+              </div>
+              
+              {/* Item Info */}
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-yellow-400 text-[11px]">{item.part_number}</span>
+                  <span className="text-gray-400">×{item.qty}</span>
+                </div>
+                <div className="text-gray-300 truncate">{item.nama_barang}</div>
+                <div className="flex items-center gap-2 text-[10px] text-gray-500">
+                  <span>{item.customer}</span>
+                  <span className="text-blue-400 font-mono">{item.resi}</span>
+                </div>
+                {item.errorMessage && (
+                  <div className={`text-[10px] mt-0.5 ${item.status === 'error' ? 'text-red-400' : 'text-gray-400'}`}>
+                    {item.errorMessage}
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Footer */}
+        <div className="p-4 border-t border-gray-700">
+          <button
+            onClick={onClose}
+            disabled={!isComplete}
+            className={`w-full py-2.5 rounded-lg font-bold text-sm transition-all ${
+              isComplete 
+                ? 'bg-blue-600 hover:bg-blue-500 text-white' 
+                : 'bg-gray-700 text-gray-500 cursor-not-allowed'
+            }`}
+          >
+            {isComplete ? 'Tutup' : 'Menunggu proses selesai...'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// --- DELETE CONFIRMATION MODAL ---
+interface DeleteItem {
+  id: string;
+  resi: string;
+  part_number: string;
+  nama_barang: string;
+  customer: string;
+  ecommerce: string;
+  sub_toko: string;
+}
+
+const DeleteConfirmModal = ({
+  isOpen,
+  onClose,
+  onConfirm,
+  items,
+  isDeleting,
+  deleteProgress,
+  deleteComplete,
+  deletedCount,
+  errorCount
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+  items: DeleteItem[];
+  isDeleting: boolean;
+  deleteProgress: number;
+  deleteComplete: boolean;
+  deletedCount: number;
+  errorCount: number;
+}) => {
+  if (!isOpen) return null;
+
+  // Group items by resi
+  const groupedByResi = items.reduce((acc, item) => {
+    if (!acc[item.resi]) {
+      acc[item.resi] = [];
+    }
+    acc[item.resi].push(item);
+    return acc;
+  }, {} as Record<string, DeleteItem[]>);
+
+  const resiCount = Object.keys(groupedByResi).length;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+      <div className="bg-gray-800 rounded-xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col border border-red-600/50">
+        {/* Header */}
+        <div className="flex items-center justify-between p-4 border-b border-gray-700 bg-red-900/20">
+          <div className="flex items-center gap-3">
+            {isDeleting && !deleteComplete ? (
+              <Loader2 className="w-6 h-6 text-red-500 animate-spin" />
+            ) : deleteComplete ? (
+              <CheckCircle className="w-6 h-6 text-green-500" />
+            ) : (
+              <AlertTriangle className="w-6 h-6 text-red-500" />
+            )}
+            <h2 className="text-lg font-bold text-white">
+              {deleteComplete ? 'Penghapusan Selesai' : isDeleting ? 'Menghapus Data...' : 'Konfirmasi Hapus Data'}
+            </h2>
+          </div>
+          {!isDeleting && (
+            <button onClick={onClose} className="text-gray-400 hover:text-white p-1 rounded hover:bg-gray-700">
+              <X size={20} />
+            </button>
+          )}
+        </div>
+
+        {/* Progress Bar - only show when deleting */}
+        {isDeleting && (
+          <div className="px-4 py-3 border-b border-gray-700 bg-gray-750">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm text-gray-300">Progress Hapus</span>
+              <span className="text-sm font-bold text-red-400">{Math.round(deleteProgress)}%</span>
+            </div>
+            <div className="w-full h-3 bg-gray-700 rounded-full overflow-hidden">
+              <div 
+                className={`h-full rounded-full transition-all duration-300 ease-out ${
+                  deleteComplete 
+                    ? 'bg-gradient-to-r from-green-500 to-green-400'
+                    : 'bg-gradient-to-r from-red-600 via-red-500 to-red-600'
+                }`}
+                style={{ width: `${deleteProgress}%` }}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Warning Message */}
+        {!isDeleting && !deleteComplete && (
+          <div className="px-4 py-3 border-b border-gray-700 bg-yellow-900/20">
+            <div className="flex items-start gap-2 text-yellow-300 text-sm">
+              <AlertTriangle size={18} className="flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="font-bold">Peringatan! Data akan dihapus PERMANEN:</p>
+                <ul className="mt-1 text-xs text-yellow-200/80 list-disc list-inside">
+                  <li>Item dari tabel Stage 3 (resi_items)</li>
+                  <li>Resi dari Stage 1 (scan_resi) - harus scan ulang jika ingin memproses lagi</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Summary Stats */}
+        <div className="px-4 py-2 border-b border-gray-700 bg-gray-750/50">
+          <div className="grid grid-cols-3 gap-3 text-center">
+            <div className="bg-gray-700/50 rounded-lg p-2">
+              <div className="text-xl font-bold text-white">{resiCount}</div>
+              <div className="text-[10px] text-gray-400">Total Resi</div>
+            </div>
+            <div className="bg-gray-700/50 rounded-lg p-2">
+              <div className="text-xl font-bold text-white">{items.length}</div>
+              <div className="text-[10px] text-gray-400">Total Item</div>
+            </div>
+            {isDeleting && (
+              <div className="bg-red-900/30 rounded-lg p-2">
+                <div className="text-xl font-bold text-red-400">{deletedCount}</div>
+                <div className="text-[10px] text-gray-400">Terhapus</div>
+              </div>
+            )}
+            {!isDeleting && (
+              <div className="bg-red-900/30 rounded-lg p-2">
+                <div className="text-xl font-bold text-red-400">
+                  <Trash2 size={20} className="mx-auto" />
+                </div>
+                <div className="text-[10px] text-gray-400">Akan Dihapus</div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* List of items to delete */}
+        <div className="flex-1 overflow-auto p-3 space-y-2 min-h-[200px] max-h-[300px]">
+          {Object.entries(groupedByResi).map(([resi, resiItems]) => (
+            <div key={resi} className="bg-gray-700/30 rounded-lg p-2 border border-gray-600">
+              {/* Resi Header */}
+              <div className="flex items-center justify-between mb-2 pb-2 border-b border-gray-600">
+                <div className="flex items-center gap-2">
+                  <Package size={14} className="text-blue-400" />
+                  <span className="font-mono text-blue-300 text-sm">{resi}</span>
+                </div>
+                <div className="flex items-center gap-2 text-[10px]">
+                  <span className="px-1.5 py-0.5 bg-gray-600 rounded">{resiItems[0]?.ecommerce}</span>
+                  <span className="px-1.5 py-0.5 bg-gray-600 rounded">{resiItems[0]?.sub_toko}</span>
+                  <span className="px-1.5 py-0.5 bg-red-600/50 rounded text-red-200">{resiItems.length} item</span>
+                </div>
+              </div>
+              
+              {/* Items in this resi */}
+              <div className="space-y-1">
+                {resiItems.map((item, idx) => (
+                  <div key={idx} className="flex items-center gap-2 text-xs text-gray-300 bg-gray-800/50 rounded px-2 py-1">
+                    <span className="font-mono text-yellow-400 w-24 truncate">{item.part_number || '-'}</span>
+                    <span className="flex-1 truncate">{item.nama_barang || '-'}</span>
+                    <span className="text-gray-500 truncate max-w-[80px]">{item.customer}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Footer */}
+        <div className="p-4 border-t border-gray-700 flex gap-3">
+          {!isDeleting && !deleteComplete ? (
+            <>
+              <button
+                onClick={onClose}
+                className="flex-1 py-2.5 rounded-lg font-bold text-sm bg-gray-700 hover:bg-gray-600 text-white transition-all"
+              >
+                Batal
+              </button>
+              <button
+                onClick={onConfirm}
+                className="flex-1 py-2.5 rounded-lg font-bold text-sm bg-red-600 hover:bg-red-500 text-white transition-all flex items-center justify-center gap-2"
+              >
+                <Trash2 size={16} /> Hapus {resiCount} Resi
+              </button>
+            </>
+          ) : deleteComplete ? (
+            <button
+              onClick={onClose}
+              className="w-full py-2.5 rounded-lg font-bold text-sm bg-blue-600 hover:bg-blue-500 text-white transition-all"
+            >
+              Tutup
+            </button>
+          ) : (
+            <button
+              disabled
+              className="w-full py-2.5 rounded-lg font-bold text-sm bg-gray-700 text-gray-500 cursor-not-allowed"
+            >
+              Menunggu proses selesai...
+            </button>
+          )}
+        </div>
+      </div>
     </div>
   );
 };
@@ -671,6 +1036,24 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
   // SELECTED RESI FOR PROCESS
   const [selectedResis, setSelectedResis] = useState<Set<string>>(new Set());
   
+  // PROCESSING MODAL STATE
+  const [showProcessingModal, setShowProcessingModal] = useState(false);
+  const [processingItems, setProcessingItems] = useState<ProcessingItem[]>([]);
+  const [processingProgress, setProcessingProgress] = useState(0);
+  const [processingCurrentItem, setProcessingCurrentItem] = useState('');
+  const [processingComplete, setProcessingComplete] = useState(false);
+  const [processingSuccessCount, setProcessingSuccessCount] = useState(0);
+  const [processingErrorCount, setProcessingErrorCount] = useState(0);
+  
+  // DELETE MODAL STATE
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deleteItems, setDeleteItems] = useState<DeleteItem[]>([]);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteProgress, setDeleteProgress] = useState(0);
+  const [deleteComplete, setDeleteComplete] = useState(false);
+  const [deletedCount, setDeletedCount] = useState(0);
+  const [deleteErrorCount, setDeleteErrorCount] = useState(0);
+  
   // FILTER STATES (VIEW)
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [filterEcommerce, setFilterEcommerce] = useState<string>('');
@@ -687,6 +1070,10 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
   // RESI SEARCH STATE
   const [stage1ResiList, setStage1ResiList] = useState<Array<{resi: string, no_pesanan?: string, ecommerce: string, sub_toko: string, stage2_verified: boolean}>>([]);
   const [resiSearchQuery, setResiSearchQuery] = useState('');
+  
+  // SORT STATE
+  const [sortField, setSortField] = useState<string>('');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   const [showResiDropdown, setShowResiDropdown] = useState(false);
   const resiSearchRef = useRef<HTMLDivElement>(null);
 
@@ -880,8 +1267,9 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
              qty_keluar: qty,
              harga_total: Number(item.total_harga_produk || 0),
              harga_satuan: qty > 0 ? (Number(item.total_harga_produk || 0) / qty) : 0,
+             mata_uang: (item as any).mata_uang || (ecommerceDB.startsWith('EKSPOR') ? ecommerceDB.split(' - ')[1] || 'PHP' : 'IDR'),
              no_pesanan: item.order_id || '',
-             customer: item.customer || '-',
+             customer: item.customer || '',
              is_db_verified: verified,
              is_stock_valid: stockValid,
              status_message: statusMsg,
@@ -955,6 +1343,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
               qty_keluar: 1,
               harga_total: 0,
               harga_satuan: 0,
+              mata_uang: ecommerce.startsWith('EKSPOR') ? (ecommerce.split(' - ')[1] || 'PHP') : 'IDR',
               customer: s1.customer || '',
               no_pesanan: s1.no_pesanan || '',
               is_db_verified: s1.stage2_verified,
@@ -1000,6 +1389,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
             qty_keluar: 1,
             harga_total: 0,
             harga_satuan: 0,
+            mata_uang: ecommerce.startsWith('EKSPOR') ? (ecommerce.split(' - ')[1] || 'PHP') : 'IDR',
             customer: s1.customer || '',
             no_pesanan: s1.no_pesanan || '',
             is_db_verified: s1.stage2_verified,
@@ -1287,17 +1677,16 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
           }
         }
         
-        // === KONVERSI HARGA KE IDR (khusus EKSPOR / Shopee International) ===
-        // Jika ini adalah item Ekspor dan platform adalah shopee-intl, konversi harga ke IDR
+        // === SIMPAN MATA UANG UNTUK EKSPOR (TANPA KONVERSI) ===
+        // Jika ini adalah item Ekspor, simpan kode negara/mata uang tapi JANGAN konversi harga
         if (negaraForConversion && (platform === 'shopee-intl' || item.ecommerce.startsWith('EKSPOR'))) {
           // Gunakan negara dari detected_country jika ada, atau dari setting
           const countryForRate = (item as any).detected_country || negaraForConversion;
-          const originalPrice = item.total_price; // Harga dalam mata uang asing
-          const convertedPrice = convertToIDR(originalPrice, countryForRate);
           
-          console.log(`[Ekspor] Converting price: ${originalPrice} ${countryForRate} -> ${convertedPrice} IDR (rate: ${CURRENCY_RATES[countryForRate] || 1})`);
+          console.log(`[Ekspor] Keeping original price: ${item.total_price} (Currency: ${countryForRate})`);
           
-          item.total_price = convertedPrice;
+          // Simpan mata uang untuk ditampilkan di UI
+          (item as any).mata_uang = countryForRate;
         }
         
         item.sub_toko = uploadSubToko;
@@ -1457,8 +1846,9 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
       qty_keluar: 1,
       harga_total: 0,
       harga_satuan: 0,
+      mata_uang: (item.ecommerce || '').startsWith('EKSPOR') ? ((item.ecommerce || '').split(' - ')[1] || 'PHP') : 'IDR',
       no_pesanan: item.order_id || '',
-      customer: item.customer || '-',
+      customer: item.customer || '',
       is_db_verified: true,
       is_stock_valid: false,
       status_message: 'Butuh Input',
@@ -1510,17 +1900,19 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
   };
 
   // Handler untuk hapus row - juga hapus dari database dengan konfirmasi
-  const handleDeleteRow = async (rowId: string) => {
+  const handleDeleteRow = async (rowId: string, skipConfirm: boolean = false) => {
     // Cari row untuk mendapatkan info resi
     const rowToDelete = rows.find(r => r.id === rowId);
     const resiInfo = rowToDelete?.resi || 'item ini';
     
-    // Konfirmasi sebelum hapus
-    const confirmed = window.confirm(
-      `Hapus resi "${resiInfo}"?\n\nItem akan dihapus permanen dan tidak akan muncul lagi di Pending DB (kecuali di-scan ulang).`
-    );
-    
-    if (!confirmed) return;
+    // Konfirmasi sebelum hapus (skip jika dari bulk delete)
+    if (!skipConfirm) {
+      const confirmed = window.confirm(
+        `Hapus resi "${resiInfo}"?\n\nItem akan dihapus permanen dan tidak akan muncul lagi di Pending DB (kecuali di-scan ulang).`
+      );
+      
+      if (!confirmed) return;
+    }
     
     // Hapus dari state lokal dulu untuk responsivitas
     setRows(prev => prev.filter(r => r.id !== rowId));
@@ -1540,16 +1932,18 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
       deleteResult = { success: true, message: 'Item dihapus dari daftar' };
     }
     
-    // Tampilkan notifikasi
-    if (deleteResult.success) {
-      // Notifikasi sukses
-      alert(`✅ Resi "${resiInfo}" berhasil dihapus`);
-    } else {
-      console.warn('Gagal hapus dari database:', deleteResult.message);
-      alert(`❌ Gagal menghapus: ${deleteResult.message}`);
-      // Reload data jika gagal
-      await loadSavedDataFromDB();
+    // Tampilkan notifikasi hanya jika bukan bulk delete
+    if (!skipConfirm) {
+      if (deleteResult.success) {
+        // Notifikasi sukses - tidak perlu alert untuk bulk
+      } else {
+        console.warn('Gagal hapus dari database:', deleteResult.message);
+        // Reload data jika gagal
+        await loadSavedDataFromDB();
+      }
     }
+    
+    return deleteResult;
   };
 
   const handlePartNumberBlur = async (id: string, sku: string) => {
@@ -1596,43 +1990,105 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
     });
     if (validRows.length === 0) { alert("Tidak ada item siap proses (Pastikan Status Hijau atau centang Override untuk Double)."); return; }
     if (!confirm(`Proses ${validRows.length} item ke Barang Keluar?`)) return;
-    setLoading(true);
     
-    // Prepare items dengan nama_pesanan = nama_barang_base (atau csv jika base kosong)
-    const itemsToProcess = validRows.map(r => ({
-      ...r,
-      nama_pesanan: r.nama_barang_base || r.nama_barang_csv
+    // PROCESSING MODAL: Initialize
+    const initialItems: ProcessingItem[] = validRows.map(r => ({
+      id: r.id,
+      resi: r.resi,
+      part_number: r.part_number,
+      nama_barang: r.nama_barang_csv || r.nama_barang_base || '-',
+      qty: r.qty_keluar,
+      customer: r.customer || '',
+      status: 'pending' as const
     }));
     
-    const result = await processBarangKeluarBatch(itemsToProcess, selectedStore);
+    setProcessingItems(initialItems);
+    setProcessingProgress(0);
+    setProcessingCurrentItem('');
+    setProcessingComplete(false);
+    setProcessingSuccessCount(0);
+    setProcessingErrorCount(0);
+    setShowProcessingModal(true);
+    setLoading(true);
     
-    if (result.success || result.processed > 0) {
-      // Insert aliases untuk setiap item yang berhasil diproses
-      for (const row of validRows) {
-        if (row.part_number && row.nama_barang_csv) {
-          await insertProductAlias(row.part_number, row.nama_barang_csv);
+    let successCount = 0;
+    let errorCount = 0;
+    
+    // Process one by one untuk visual feedback
+    for (let i = 0; i < validRows.length; i++) {
+      const row = validRows[i];
+      const progress = Math.round(((i + 1) / validRows.length) * 100);
+      
+      // Update current item being processed
+      setProcessingCurrentItem(`${row.part_number} - ${row.nama_barang_csv || row.nama_barang_base}`);
+      setProcessingProgress(progress);
+      
+      // Update item status to processing
+      setProcessingItems(prev => prev.map(item => 
+        item.id === row.id ? { ...item, status: 'processing' } : item
+      ));
+      
+      try {
+        // Prepare single item untuk proses
+        const itemToProcess = [{
+          ...row,
+          nama_pesanan: row.nama_barang_base || row.nama_barang_csv
+        }];
+        
+        const result = await processBarangKeluarBatch(itemToProcess, selectedStore);
+        
+        if (result.success || result.processed > 0) {
+          // Insert alias
+          if (row.part_number && row.nama_barang_csv) {
+            await insertProductAlias(row.part_number, row.nama_barang_csv);
+          }
+          
+          // Delete from resi_items
+          await deleteProcessedResiItems(selectedStore, [{ resi: row.resi, part_number: row.part_number }]);
+          
+          // Update item status to success
+          setProcessingItems(prev => prev.map(item => 
+            item.id === row.id ? { ...item, status: 'success' } : item
+          ));
+          successCount++;
+          setProcessingSuccessCount(successCount);
+        } else {
+          // Update item status to error
+          setProcessingItems(prev => prev.map(item => 
+            item.id === row.id ? { ...item, status: 'error', errorMessage: result.errors.join(', ') } : item
+          ));
+          errorCount++;
+          setProcessingErrorCount(errorCount);
         }
+      } catch (err: any) {
+        setProcessingItems(prev => prev.map(item => 
+          item.id === row.id ? { ...item, status: 'error', errorMessage: err.message } : item
+        ));
+        errorCount++;
+        setProcessingErrorCount(errorCount);
       }
       
-      // Delete processed items from resi_items
-      const itemsToDelete = validRows.map(r => ({
-        resi: r.resi,
-        part_number: r.part_number
-      }));
-      await deleteProcessedResiItems(selectedStore, itemsToDelete);
-      
-      // Delete processed items from scan_resi (Stage 1)
-      // Mengumpulkan semua resi yang unik untuk dihapus dari scan_resi
-      const resiListToDelete = [...new Set(validRows.map(r => r.resi).filter(Boolean))];
-      await deleteProcessedScanResi(selectedStore, resiListToDelete);
-      
-      alert(`Sukses: ${result.processed} item diproses.`);
-      setRows(prev => prev.filter(r => !validRows.find(v => v.id === r.id)));
-      if (onRefresh) onRefresh();
-    } else { 
-      alert(`Error: ${result.errors.join('\n')}`); 
+      // Small delay untuk visual effect
+      await new Promise(resolve => setTimeout(resolve, 100));
     }
+    
+    // Delete dari scan_resi setelah semua item selesai
+    const successfulResis = [...new Set(validRows.filter(r => 
+      initialItems.find(i => i.id === r.id)?.status !== 'error'
+    ).map(r => r.resi).filter(Boolean))];
+    if (successfulResis.length > 0) {
+      await deleteProcessedScanResi(selectedStore, successfulResis);
+    }
+    
+    setProcessingComplete(true);
+    setProcessingCurrentItem('');
     setLoading(false);
+    
+    // Refresh data
+    setRows(prev => prev.filter(r => !validRows.find(v => v.id === r.id && 
+      processingItems.find(p => p.id === v.id)?.status !== 'error'
+    )));
+    if (onRefresh) onRefresh();
   };
 
   const displayedRows = rows.filter(row => {
@@ -1671,6 +2127,30 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
     }
     
     return true;
+  }).sort((a, b) => {
+    // Apply sorting jika ada sortField
+    if (!sortField) return 0;
+    
+    let valA: any = a[sortField as keyof Stage3Row];
+    let valB: any = b[sortField as keyof Stage3Row];
+    
+    // Handle null/undefined
+    if (valA == null) valA = '';
+    if (valB == null) valB = '';
+    
+    // Compare based on type
+    if (typeof valA === 'number' && typeof valB === 'number') {
+      return sortDirection === 'asc' ? valA - valB : valB - valA;
+    }
+    
+    // String comparison
+    const strA = String(valA).toLowerCase();
+    const strB = String(valB).toLowerCase();
+    if (sortDirection === 'asc') {
+      return strA.localeCompare(strB);
+    } else {
+      return strB.localeCompare(strA);
+    }
   });
 
   // GROUP BY RESI - mengelompokkan item berdasarkan resi yang sama
@@ -1741,23 +2221,222 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
     
     if (!confirm(`Proses ${selectedRows.length} item dari ${selectedResis.size} resi ke Barang Keluar?`)) return;
     
-    setLoading(true);
-    const itemsToProcess = selectedRows.map(r => ({
-      ...r,
-      nama_pesanan: r.nama_barang_base || r.nama_barang_csv
+    // PROCESSING MODAL: Initialize
+    const initialItems: ProcessingItem[] = selectedRows.map(r => ({
+      id: r.id,
+      resi: r.resi,
+      part_number: r.part_number,
+      nama_barang: r.nama_barang_csv || r.nama_barang_base || '-',
+      qty: r.qty_keluar,
+      customer: r.customer || '',
+      status: 'pending' as const
     }));
     
-    const result = await processBarangKeluarBatch(itemsToProcess, selectedStore);
-    setLoading(false);
+    setProcessingItems(initialItems);
+    setProcessingProgress(0);
+    setProcessingCurrentItem('');
+    setProcessingComplete(false);
+    setProcessingSuccessCount(0);
+    setProcessingErrorCount(0);
+    setShowProcessingModal(true);
+    setLoading(true);
     
-    if (result.success) {
-      alert(`✅ ${result.processed} item berhasil diproses ke Barang Keluar!`);
-      setSelectedResis(new Set()); // Clear selection
-      await loadSavedDataFromDB();
-      onRefresh?.();
-    } else {
-      alert(`Error: ${result.errors.join('\n')}`);
+    let successCount = 0;
+    let errorCount = 0;
+    const processedIds: string[] = [];
+    
+    // Process one by one untuk visual feedback
+    for (let i = 0; i < selectedRows.length; i++) {
+      const row = selectedRows[i];
+      const progress = Math.round(((i + 1) / selectedRows.length) * 100);
+      
+      // Update current item being processed
+      setProcessingCurrentItem(`${row.part_number} - ${row.nama_barang_csv || row.nama_barang_base}`);
+      setProcessingProgress(progress);
+      
+      // Update item status to processing
+      setProcessingItems(prev => prev.map(item => 
+        item.id === row.id ? { ...item, status: 'processing' } : item
+      ));
+      
+      try {
+        // Prepare single item untuk proses
+        const itemToProcess = [{
+          ...row,
+          nama_pesanan: row.nama_barang_base || row.nama_barang_csv
+        }];
+        
+        const result = await processBarangKeluarBatch(itemToProcess, selectedStore);
+        
+        if (result.success || result.processed > 0) {
+          // Insert alias
+          if (row.part_number && row.nama_barang_csv) {
+            await insertProductAlias(row.part_number, row.nama_barang_csv);
+          }
+          
+          // Delete from resi_items
+          await deleteProcessedResiItems(selectedStore, [{ resi: row.resi, part_number: row.part_number }]);
+          
+          // Update item status to success
+          setProcessingItems(prev => prev.map(item => 
+            item.id === row.id ? { ...item, status: 'success' } : item
+          ));
+          successCount++;
+          processedIds.push(row.id);
+          setProcessingSuccessCount(successCount);
+        } else {
+          // Update item status to error
+          setProcessingItems(prev => prev.map(item => 
+            item.id === row.id ? { ...item, status: 'error', errorMessage: result.errors.join(', ') } : item
+          ));
+          errorCount++;
+          setProcessingErrorCount(errorCount);
+        }
+      } catch (err: any) {
+        setProcessingItems(prev => prev.map(item => 
+          item.id === row.id ? { ...item, status: 'error', errorMessage: err.message } : item
+        ));
+        errorCount++;
+        setProcessingErrorCount(errorCount);
+      }
+      
+      // Small delay untuk visual effect
+      await new Promise(resolve => setTimeout(resolve, 100));
     }
+    
+    setProcessingComplete(true);
+    setProcessingCurrentItem('');
+    setLoading(false);
+    setSelectedResis(new Set()); // Clear selection
+    
+    // Refresh data
+    await loadSavedDataFromDB();
+    onRefresh?.();
+  };
+
+  // Handle delete all selected resis - Open modal
+  const handleDeleteSelectedAll = () => {
+    if (selectedResis.size === 0) {
+      alert("Pilih minimal 1 resi untuk dihapus!");
+      return;
+    }
+    
+    // Prepare items for delete modal
+    const itemsToDelete: DeleteItem[] = rows.filter(r => selectedResis.has(r.resi)).map(r => ({
+      id: r.id,
+      resi: r.resi,
+      part_number: r.part_number,
+      nama_barang: r.nama_barang_csv || r.nama_barang_base || '-',
+      customer: r.customer || '',
+      ecommerce: r.ecommerce,
+      sub_toko: r.sub_toko
+    }));
+    
+    setDeleteItems(itemsToDelete);
+    setIsDeleting(false);
+    setDeleteProgress(0);
+    setDeleteComplete(false);
+    setDeletedCount(0);
+    setDeleteErrorCount(0);
+    setShowDeleteModal(true);
+  };
+
+  // Execute delete after confirmation
+  const executeDelete = async () => {
+    setIsDeleting(true);
+    setDeleteProgress(0);
+    setDeletedCount(0);
+    setDeleteErrorCount(0);
+    
+    const itemsToDelete = rows.filter(r => selectedResis.has(r.resi));
+    let deleted = 0;
+    let errors = 0;
+    
+    // Collect unique resis for Stage 1 deletion
+    const uniqueResis = [...new Set(itemsToDelete.map(r => r.resi).filter(Boolean))];
+    
+    // Delete items one by one
+    for (let i = 0; i < itemsToDelete.length; i++) {
+      const row = itemsToDelete[i];
+      const progress = Math.round(((i + 1) / itemsToDelete.length) * 100);
+      setDeleteProgress(progress);
+      
+      try {
+        await handleDeleteRow(row.id, true); // true = skip confirmation
+        deleted++;
+        setDeletedCount(deleted);
+      } catch (err) {
+        errors++;
+        setDeleteErrorCount(errors);
+      }
+      
+      // Small delay for visual effect
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    
+    // Also delete from Stage 1 (scan_resi)
+    if (uniqueResis.length > 0) {
+      await deleteProcessedScanResi(selectedStore, uniqueResis);
+    }
+    
+    setDeleteComplete(true);
+    setSelectedResis(new Set());
+    
+    // Refresh data
+    await loadSavedDataFromDB();
+    onRefresh?.();
+  };
+
+  // Handle sort by column
+  const handleSort = (field: string) => {
+    if (sortField === field) {
+      setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortDirection('asc');
+    }
+  };
+
+  // Format number with thousand separator (47320 -> 47.320)
+  const formatNumber = (num: number): string => {
+    return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  };
+
+  // Get row background color based on ecommerce and sub_toko
+  const getRowBgColor = (row: Stage3Row, isSelected: boolean): string => {
+    if (isSelected) return 'bg-blue-900/20';
+    if (!row.is_db_verified) return 'bg-red-900/10';
+    if (row.status_message === 'Stok Total Kurang') return 'bg-pink-900/20';
+    if (!row.is_stock_valid) return 'bg-yellow-900/10';
+    
+    // Warna berdasarkan E-Commerce
+    const ecomm = row.ecommerce?.toUpperCase() || '';
+    const toko = row.sub_toko?.toUpperCase() || '';
+    
+    if (ecomm.includes('SHOPEE')) {
+      if (toko === 'MJM') return 'bg-orange-900/15';
+      if (toko === 'BJW') return 'bg-orange-800/20';
+      if (toko === 'LARIS') return 'bg-orange-700/15';
+      return 'bg-orange-900/10';
+    }
+    if (ecomm.includes('TIKTOK')) {
+      if (toko === 'MJM') return 'bg-cyan-900/15';
+      if (toko === 'BJW') return 'bg-cyan-800/20';
+      if (toko === 'LARIS') return 'bg-cyan-700/15';
+      return 'bg-cyan-900/10';
+    }
+    if (ecomm.includes('EKSPOR')) {
+      if (toko === 'MJM') return 'bg-purple-900/15';
+      if (toko === 'BJW') return 'bg-purple-800/20';
+      return 'bg-purple-900/10';
+    }
+    if (ecomm.includes('RESELLER')) {
+      return 'bg-green-900/10';
+    }
+    if (ecomm.includes('KILAT')) {
+      return 'bg-red-900/10';
+    }
+    return '';
   };
 
   return (
@@ -2128,13 +2807,22 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
               Batalkan
             </button>
           </div>
-          <button 
-            onClick={handleProcessSelected}
-            disabled={loading}
-            className="bg-green-600 hover:bg-green-500 text-white px-4 py-1.5 rounded font-bold text-sm flex items-center gap-2 disabled:opacity-50"
-          >
-            <CheckCircle size={16}/> Proses {selectedResis.size} Resi
-          </button>
+          <div className="flex items-center gap-2">
+            <button 
+              onClick={handleDeleteSelectedAll}
+              disabled={loading}
+              className="bg-red-600 hover:bg-red-500 text-white px-4 py-1.5 rounded font-bold text-sm flex items-center gap-2 disabled:opacity-50"
+            >
+              <Trash2 size={16}/> Hapus Semua
+            </button>
+            <button 
+              onClick={handleProcessSelected}
+              disabled={loading}
+              className="bg-green-600 hover:bg-green-500 text-white px-4 py-1.5 rounded font-bold text-sm flex items-center gap-2 disabled:opacity-50"
+            >
+              <CheckCircle size={16}/> Proses {selectedResis.size} Resi
+            </button>
+          </div>
         </div>
       )}
 
@@ -2152,21 +2840,47 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                   title="Pilih Semua"
                 />
               </th>
-              <th className="border border-gray-600 px-1 py-1 text-center w-[55px] md:w-[5%] bg-gray-700">Status</th>
-              <th className="border border-gray-600 px-1 py-1 text-center w-[75px] md:w-[6%] bg-gray-700">Tanggal</th>
-              <th className="border border-gray-600 px-1 py-1 text-left w-[80px] md:w-[7%] bg-gray-700">Resi</th>
-              <th className="border border-gray-600 px-1 py-1 text-center w-[55px] md:w-[5%] bg-gray-700">E-Comm</th>
-              <th className="border border-gray-600 px-1 py-1 text-center w-[45px] md:w-[4%] bg-gray-700">Toko</th>
-              <th className="border border-gray-600 px-1 py-1 text-left w-[70px] md:w-[6%] bg-gray-600">Customer</th>
-              <th className="border border-gray-600 px-1 py-1 text-left border-b-2 border-b-yellow-600/50 w-[90px] md:w-[8%] bg-gray-600">Part No.</th>
+              <th className="border border-gray-600 px-1 py-1 text-center w-[55px] md:w-[5%] bg-gray-700 cursor-pointer hover:bg-gray-600" onClick={() => handleSort('status_message')}>
+                <div className="flex items-center justify-center gap-0.5">Status {sortField === 'status_message' && (sortDirection === 'asc' ? '↑' : '↓')}</div>
+              </th>
+              <th className="border border-gray-600 px-1 py-1 text-center w-[75px] md:w-[6%] bg-gray-700 cursor-pointer hover:bg-gray-600" onClick={() => handleSort('tanggal')}>
+                <div className="flex items-center justify-center gap-0.5">Tanggal {sortField === 'tanggal' && (sortDirection === 'asc' ? '↑' : '↓')}</div>
+              </th>
+              <th className="border border-gray-600 px-1 py-1 text-left w-[80px] md:w-[7%] bg-gray-700 cursor-pointer hover:bg-gray-600" onClick={() => handleSort('resi')}>
+                <div className="flex items-center gap-0.5">Resi {sortField === 'resi' && (sortDirection === 'asc' ? '↑' : '↓')}</div>
+              </th>
+              <th className="border border-gray-600 px-1 py-1 text-center w-[55px] md:w-[5%] bg-gray-700 cursor-pointer hover:bg-gray-600" onClick={() => handleSort('ecommerce')}>
+                <div className="flex items-center justify-center gap-0.5">E-Comm {sortField === 'ecommerce' && (sortDirection === 'asc' ? '↑' : '↓')}</div>
+              </th>
+              <th className="border border-gray-600 px-1 py-1 text-center w-[45px] md:w-[4%] bg-gray-700 cursor-pointer hover:bg-gray-600" onClick={() => handleSort('sub_toko')}>
+                <div className="flex items-center justify-center gap-0.5">Toko {sortField === 'sub_toko' && (sortDirection === 'asc' ? '↑' : '↓')}</div>
+              </th>
+              <th className="border border-gray-600 px-1 py-1 text-left w-[70px] md:w-[6%] bg-gray-600 cursor-pointer hover:bg-gray-500" onClick={() => handleSort('customer')}>
+                <div className="flex items-center gap-0.5">Customer {sortField === 'customer' && (sortDirection === 'asc' ? '↑' : '↓')}</div>
+              </th>
+              <th className="border border-gray-600 px-1 py-1 text-left border-b-2 border-b-yellow-600/50 w-[90px] md:w-[8%] bg-gray-600 cursor-pointer hover:bg-gray-500" onClick={() => handleSort('part_number')}>
+                <div className="flex items-center gap-0.5">Part No. {sortField === 'part_number' && (sortDirection === 'asc' ? '↑' : '↓')}</div>
+              </th>
               <th className="border border-gray-600 px-1 py-1 text-left w-[140px] md:w-[12%] bg-gray-700">Nama (CSV)</th>
               <th className="border border-gray-600 px-1 py-1 text-left w-[100px] md:w-[9%] bg-gray-700">Nama (Base)</th>
-              <th className="border border-gray-600 px-1 py-1 text-left w-[55px] md:w-[5%] bg-gray-700">Brand</th>
-              <th className="border border-gray-600 px-1 py-1 text-left w-[70px] md:w-[6%] bg-gray-700">Aplikasi</th>
-              <th className="border border-gray-600 px-1 py-1 text-center w-[40px] md:w-[3%] bg-gray-700">Stok</th>
-              <th className="border border-gray-600 px-1 py-1 text-center border-b-2 border-b-yellow-600/50 w-[40px] md:w-[3%] bg-gray-600">Qty</th>
-              <th className="border border-gray-600 px-1 py-1 text-right border-b-2 border-b-yellow-600/50 w-[70px] md:w-[5%] bg-gray-600">Total</th>
-              <th className="border border-gray-600 px-1 py-1 text-right w-[60px] md:w-[4%] bg-gray-700">Satuan</th>
+              <th className="border border-gray-600 px-1 py-1 text-left w-[55px] md:w-[5%] bg-gray-700 cursor-pointer hover:bg-gray-600" onClick={() => handleSort('application')}>
+                <div className="flex items-center gap-0.5">Brand {sortField === 'application' && (sortDirection === 'asc' ? '↑' : '↓')}</div>
+              </th>
+              <th className="border border-gray-600 px-1 py-1 text-left w-[70px] md:w-[6%] bg-gray-700 cursor-pointer hover:bg-gray-600" onClick={() => handleSort('brand')}>
+                <div className="flex items-center gap-0.5">Aplikasi {sortField === 'brand' && (sortDirection === 'asc' ? '↑' : '↓')}</div>
+              </th>
+              <th className="border border-gray-600 px-1 py-1 text-center w-[40px] md:w-[3%] bg-gray-700 cursor-pointer hover:bg-gray-600" onClick={() => handleSort('stock_saat_ini')}>
+                <div className="flex items-center justify-center gap-0.5">Stok {sortField === 'stock_saat_ini' && (sortDirection === 'asc' ? '↑' : '↓')}</div>
+              </th>
+              <th className="border border-gray-600 px-1 py-1 text-center border-b-2 border-b-yellow-600/50 w-[40px] md:w-[3%] bg-gray-600 cursor-pointer hover:bg-gray-500" onClick={() => handleSort('qty_keluar')}>
+                <div className="flex items-center justify-center gap-0.5">Qty {sortField === 'qty_keluar' && (sortDirection === 'asc' ? '↑' : '↓')}</div>
+              </th>
+              <th className="border border-gray-600 px-1 py-1 text-right border-b-2 border-b-yellow-600/50 w-[70px] md:w-[5%] bg-gray-600 cursor-pointer hover:bg-gray-500" onClick={() => handleSort('harga_total')}>
+                <div className="flex items-center justify-end gap-0.5">Total {sortField === 'harga_total' && (sortDirection === 'asc' ? '↑' : '↓')}</div>
+              </th>
+              <th className="border border-gray-600 px-1 py-1 text-right w-[60px] md:w-[4%] bg-gray-700 cursor-pointer hover:bg-gray-600" onClick={() => handleSort('harga_satuan')}>
+                <div className="flex items-center justify-end gap-0.5">Satuan {sortField === 'harga_satuan' && (sortDirection === 'asc' ? '↑' : '↓')}</div>
+              </th>
               <th className="border border-gray-600 px-1 py-1 text-left w-[60px] md:w-[4%] bg-gray-700">No. Pesanan</th>
               <th className="border border-gray-600 px-1 py-1 text-center w-[35px] md:w-[2%] bg-gray-700">#</th>
             </tr>
@@ -2187,12 +2901,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                   const idx = displayedRows.indexOf(row);
                   
                   return (
-                    <tr key={row.id} className={`group hover:bg-gray-800 transition-colors ${
-                      isSelected ? 'bg-blue-900/20' :
-                      !row.is_db_verified ? 'bg-red-900/10' : 
-                      row.status_message === 'Stok Total Kurang' ? 'bg-pink-900/20' :
-                      !row.is_stock_valid ? 'bg-yellow-900/10' : ''
-                    } ${isFirstOfGroup && resiItems.length > 1 ? 'border-t-2 border-t-gray-500' : ''}`}>
+                    <tr key={row.id} className={`group hover:bg-gray-700/50 transition-colors ${getRowBgColor(row, isSelected)} ${isFirstOfGroup && resiItems.length > 1 ? 'border-t-2 border-t-gray-500' : ''}`}>
                       
                       {/* CHECKBOX - hanya tampil di baris pertama grup */}
                       {isFirstOfGroup ? (
@@ -2349,29 +3058,43 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                     />
                   </td>
 
-                  {/* TOTAL HARGA (INPUT) */}
-                  <td className="border border-gray-600 p-0">
+                  {/* TOTAL HARGA (DISPLAY + INPUT) */}
+                  <td className="border border-gray-600 p-0 relative group/harga">
+                    <div className="w-full h-full px-1 text-right font-mono text-yellow-400 font-bold group-focus-within/harga:hidden flex items-center justify-end gap-1">
+                      <span>{row.harga_total ? formatNumber(row.harga_total) : ''}</span>
+                      {row.mata_uang && row.mata_uang !== 'IDR' && row.harga_total > 0 && (
+                        <span className="text-[9px] px-1 py-0.5 bg-purple-600/50 text-purple-200 rounded font-normal">{row.mata_uang}</span>
+                      )}
+                    </div>
                     <input 
                         id={`input-${idx}-harga_total`} 
                         type="number" 
-                        value={row.harga_total} 
+                        value={row.harga_total || ''} 
                         onChange={(e) => updateRow(row.id, 'harga_total', parseInt(e.target.value) || 0)} 
                         onBlur={() => handleSaveRow(row)} 
                         onKeyDown={(e) => handleKeyDown(e, idx, 'harga_total')} 
-                        className="w-full h-full bg-transparent text-right px-1 focus:bg-blue-900/50 outline-none font-mono text-gray-300"
+                        className="absolute inset-0 w-full h-full bg-transparent text-right px-1 focus:bg-blue-900/50 outline-none font-mono text-yellow-400 font-bold opacity-0 focus:opacity-100"
+                        placeholder=""
                     />
                   </td>
 
-                  {/* HARGA SATUAN (INPUT) */}
-                  <td className="border border-gray-600 p-0">
+                  {/* HARGA SATUAN (DISPLAY + INPUT) */}
+                  <td className="border border-gray-600 p-0 relative group/satuan">
+                    <div className="w-full h-full px-1 text-right font-mono text-yellow-300 text-[11px] group-focus-within/satuan:hidden flex items-center justify-end gap-1">
+                      <span>{row.harga_satuan ? formatNumber(row.harga_satuan) : ''}</span>
+                      {row.mata_uang && row.mata_uang !== 'IDR' && row.harga_satuan > 0 && (
+                        <span className="text-[8px] px-0.5 py-0.5 bg-purple-600/30 text-purple-300 rounded font-normal">{row.mata_uang}</span>
+                      )}
+                    </div>
                     <input 
                         id={`input-${idx}-harga_satuan`} 
                         type="number" 
-                        value={row.harga_satuan} 
+                        value={row.harga_satuan || ''} 
                         onChange={(e) => updateRow(row.id, 'harga_satuan', parseInt(e.target.value) || 0)} 
                         onBlur={() => handleSaveRow(row)} 
                         onKeyDown={(e) => handleKeyDown(e, idx, 'harga_satuan')} 
-                        className="w-full h-full bg-transparent text-right px-1 focus:bg-blue-900/50 outline-none font-mono text-gray-500 text-[11px]"
+                        className="absolute inset-0 w-full h-full bg-transparent text-right px-1 focus:bg-blue-900/50 outline-none font-mono text-yellow-300 text-[11px] opacity-0 focus:opacity-100"
+                        placeholder=""
                     />
                   </td>
 
@@ -2403,6 +3126,31 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
         summary={uploadSummary}
         isProcessing={isProcessingUpload}
         processLogs={processLogs}
+      />
+
+      {/* Processing Modal - Loading progress untuk proses barang keluar */}
+      <ProcessingModal
+        isOpen={showProcessingModal}
+        onClose={() => setShowProcessingModal(false)}
+        items={processingItems}
+        progress={processingProgress}
+        currentItem={processingCurrentItem}
+        isComplete={processingComplete}
+        successCount={processingSuccessCount}
+        errorCount={processingErrorCount}
+      />
+
+      {/* Delete Confirmation Modal */}
+      <DeleteConfirmModal
+        isOpen={showDeleteModal}
+        onClose={() => setShowDeleteModal(false)}
+        onConfirm={executeDelete}
+        items={deleteItems}
+        isDeleting={isDeleting}
+        deleteProgress={deleteProgress}
+        deleteComplete={deleteComplete}
+        deletedCount={deletedCount}
+        errorCount={deleteErrorCount}
       />
     </div>
   );
