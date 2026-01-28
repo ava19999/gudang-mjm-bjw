@@ -17,9 +17,9 @@ import {
 
 // Toast Component Sederhana
 const Toast = ({ msg, type, onClose }: any) => (
-  <div className={`fixed top-4 left-1/2 -translate-x-1/2 z-50 px-6 py-3 rounded-full shadow-xl flex items-center text-white text-sm font-bold animate-in fade-in slide-in-from-top-2 ${type === 'success' ? 'bg-green-600' : 'bg-red-600'}`}>
+  <div className={`fixed top-4 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-full shadow-xl flex items-center text-white text-[10px] font-bold animate-in fade-in slide-in-from-top-2 ${type === 'success' ? 'bg-green-600' : 'bg-red-600'}`}>
     {msg}
-    <button onClick={onClose} className="ml-3 opacity-70 hover:opacity-100"><X size={14}/></button>
+    <button onClick={onClose} className="ml-2 opacity-70 hover:opacity-100"><X size={12}/></button>
   </div>
 );
 
@@ -118,14 +118,14 @@ const AutocompleteDropdown: React.FC<AutocompleteDropdownProps> = ({ value, onCh
 
   return (
     <div className="relative">
-      <div className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">
+      <div className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400">
         {icon}
       </div>
       <input
         ref={inputRef}
         type="text"
         placeholder={placeholder}
-        className="w-full pl-10 pr-4 py-3 bg-gray-800 border border-gray-700 rounded-xl text-sm focus:ring-2 focus:ring-purple-500 outline-none text-white placeholder-gray-500"
+        className="w-full pl-7 pr-2 py-1.5 bg-gray-800 border border-gray-700 rounded-lg text-[10px] focus:ring-1 focus:ring-purple-500 outline-none text-white placeholder-gray-500"
         value={value}
         onChange={(e) => {
           onChange(e.target.value);
@@ -138,12 +138,12 @@ const AutocompleteDropdown: React.FC<AutocompleteDropdownProps> = ({ value, onCh
       {isOpen && options.length > 0 && (
         <ul
           ref={listRef}
-          className="absolute z-50 w-full mt-1 max-h-60 overflow-auto bg-gray-800 border border-gray-600 rounded-xl shadow-xl"
+          className="absolute z-50 w-full mt-1 max-h-48 overflow-auto bg-gray-800 border border-gray-600 rounded-lg shadow-xl"
         >
           {options.map((option, index) => (
             <li
               key={option}
-              className={`px-4 py-2 text-sm cursor-pointer transition-colors ${
+              className={`px-2 py-1 text-[10px] cursor-pointer transition-colors ${
                 index === highlightedIndex
                   ? 'bg-purple-600 text-white'
                   : 'text-gray-200 hover:bg-gray-700'
@@ -186,18 +186,18 @@ const ReturModal: React.FC<ReturModalProps> = ({ isOpen, item, onClose, onConfir
 
   return (
     <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <div className="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-md shadow-2xl">
-        <div className="p-4 border-b border-gray-700 flex justify-between items-center">
-          <h3 className="font-bold text-white flex items-center gap-2">
-            <RotateCcw className="text-red-400" size={20}/> Proses Retur
+      <div className="bg-gray-900 border border-gray-700 rounded-xl w-full max-w-sm shadow-2xl">
+        <div className="p-2 border-b border-gray-700 flex justify-between items-center">
+          <h3 className="font-bold text-white text-xs flex items-center gap-1.5">
+            <RotateCcw className="text-red-400" size={14}/> Proses Retur
           </h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-white"><X size={20}/></button>
+          <button onClick={onClose} className="text-gray-400 hover:text-white"><X size={14}/></button>
         </div>
 
-        <div className="p-4 space-y-4">
+        <div className="p-3 space-y-2">
           {/* Info Barang */}
-          <div className="bg-gray-800 p-3 rounded-lg border border-gray-700">
-            <p className="text-base font-bold text-purple-400 font-mono">{item.part_number}</p>
+          <div className="bg-gray-800 p-2 rounded border border-gray-700">
+            <p className="text-xs font-bold text-purple-400 font-mono">{item.part_number}</p>
             <p className="text-sm font-semibold text-white mt-1">{item.name}</p>
             {(item.brand || item.application) && (
               <p className="text-xs text-gray-400 mt-0.5">
@@ -784,12 +784,12 @@ export const OrderManagement: React.FC = () => {
       {toast && <Toast msg={toast.msg} type={toast.type} onClose={() => setToast(null)} />}
 
       {/* HEADER - Fixed */}
-      <div className="p-4 border-b border-gray-700 flex justify-between items-center bg-gray-800 rounded-t-2xl flex-shrink-0">
-        <h2 className="text-xl font-bold flex items-center gap-2">
-          <ClipboardList className="text-purple-400" /> Manajemen Pesanan ({selectedStore?.toUpperCase()})
+      <div className="p-2 border-b border-gray-700 flex justify-between items-center bg-gray-800 rounded-t-2xl flex-shrink-0">
+        <h2 className="text-sm font-bold flex items-center gap-1.5">
+          <ClipboardList className="text-purple-400" size={16}/> Manajemen Pesanan ({selectedStore?.toUpperCase()})
         </h2>
-        <button onClick={loadData} className="p-2 bg-gray-700 rounded-full hover:bg-gray-600 transition-colors">
-          <RefreshCw size={18} className={loading ? 'animate-spin' : ''}/>
+        <button onClick={loadData} className="p-1.5 bg-gray-700 rounded-full hover:bg-gray-600 transition-colors">
+          <RefreshCw size={14} className={loading ? 'animate-spin' : ''}/>
         </button>
       </div>
 
@@ -803,9 +803,9 @@ export const OrderManagement: React.FC = () => {
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
-            className={`flex-1 py-4 text-sm font-bold flex items-center justify-center gap-2 border-b-2 transition-all hover:bg-gray-800 min-w-[120px] ${activeTab === tab.id ? `border-purple-500 text-purple-400 bg-gray-800` : 'border-transparent text-gray-500'}`}
+            className={`flex-1 py-2 text-[10px] font-bold flex items-center justify-center gap-1 border-b-2 transition-all hover:bg-gray-800 min-w-[100px] ${activeTab === tab.id ? `border-purple-500 text-purple-400 bg-gray-800` : 'border-transparent text-gray-500'}`}
           >
-            <tab.icon size={18} className={activeTab === tab.id ? tab.color : ''} />
+            <tab.icon size={14} className={activeTab === tab.id ? tab.color : ''} />
             {tab.label}
           </button>
         ))}
@@ -814,15 +814,15 @@ export const OrderManagement: React.FC = () => {
       {/* SCROLLABLE CONTENT AREA - hanya bagian ini yang scroll */}
       <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden bg-gray-900 rounded-b-2xl">
         {/* SEARCH FILTERS - Sticky saat scroll */}
-        <div className="sticky top-0 z-30 p-4 bg-gray-900 border-b border-gray-700 shadow-lg backdrop-blur-sm">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
+        <div className="sticky top-0 z-30 p-2 bg-gray-900 border-b border-gray-700 shadow-lg backdrop-blur-sm">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-1.5">
             {/* Customer Search with Keyboard-Navigable Dropdown */}
             <AutocompleteDropdown
               value={customerFilter}
               onChange={setCustomerFilter}
               options={filteredCustomerOptions}
               placeholder="Cari Customer..."
-              icon={<User size={16} />}
+              icon={<User size={12} />}
             />
             
             {/* Part Number Search with Keyboard-Navigable Dropdown */}
@@ -831,14 +831,14 @@ export const OrderManagement: React.FC = () => {
               onChange={setPartNumberFilter}
               options={filteredPartNumberOptions}
               placeholder="Cari Part Number..."
-              icon={<Hash size={16} />}
+              icon={<Hash size={12} />}
             />
             
             {/* Ecommerce Dropdown */}
             <div className="relative">
-              <ShoppingBag className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
+              <ShoppingBag className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400" size={12} />
               <select 
-                className="w-full pl-10 pr-4 py-3 bg-gray-800 border border-gray-700 rounded-xl text-sm focus:ring-2 focus:ring-purple-500 outline-none text-white appearance-none cursor-pointer"
+                className="w-full pl-7 pr-2 py-1.5 bg-gray-800 border border-gray-700 rounded-lg text-[10px] focus:ring-1 focus:ring-purple-500 outline-none text-white appearance-none cursor-pointer"
                 value={ecommerceFilter}
                 onChange={(e) => setEcommerceFilter(e.target.value)}
               >
@@ -851,11 +851,11 @@ export const OrderManagement: React.FC = () => {
             
             {/* General Search (backward compatibility) */}
             <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
+              <Search className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400" size={12} />
               <input 
                 type="text" 
                 placeholder="Cari lainnya (Resi, Barang)..." 
-                className="w-full pl-10 pr-4 py-3 bg-gray-800 border border-gray-700 rounded-xl text-sm focus:ring-2 focus:ring-purple-500 outline-none text-white placeholder-gray-500"
+                className="w-full pl-7 pr-2 py-1.5 bg-gray-800 border border-gray-700 rounded-lg text-[10px] focus:ring-1 focus:ring-purple-500 outline-none text-white placeholder-gray-500"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
@@ -864,19 +864,19 @@ export const OrderManagement: React.FC = () => {
           
           {/* Bulk Action Bar for OFFLINE Tab */}
           {activeTab === 'OFFLINE' && filteredGroupedOffline.length > 0 && (
-            <div className="bg-gray-800 border border-gray-600 rounded-xl p-3 flex items-center justify-between mt-3">
-              <div className="flex items-center gap-3">
-                <label className="flex items-center gap-2 cursor-pointer">
+            <div className="bg-gray-800 border border-gray-600 rounded-lg p-1.5 flex items-center justify-between mt-2">
+              <div className="flex items-center gap-2">
+                <label className="flex items-center gap-1.5 cursor-pointer">
                   <input
                     type="checkbox"
                     checked={selectedGroups.size === filteredGroupedOffline.length && filteredGroupedOffline.length > 0}
                     onChange={toggleSelectAll}
-                    className="w-5 h-5 rounded border-gray-600 bg-gray-700 text-blue-500 focus:ring-blue-500 cursor-pointer"
+                    className="w-4 h-4 rounded border-gray-600 bg-gray-700 text-blue-500 focus:ring-blue-500 cursor-pointer"
                   />
-                  <span className="text-sm font-bold text-gray-300">Pilih Semua</span>
+                  <span className="text-[10px] font-bold text-gray-300">Pilih Semua</span>
                 </label>
                 {selectedGroups.size > 0 && (
-                  <span className="text-sm text-purple-400 font-bold">
+                  <span className="text-[10px] text-purple-400 font-bold">
                     ({selectedGroups.size} pesanan dipilih)
                   </span>
                 )}
@@ -884,9 +884,9 @@ export const OrderManagement: React.FC = () => {
               {selectedGroups.size > 0 && (
                 <button 
                   onClick={handleBulkAccSelected}
-                  className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-500 shadow-lg shadow-blue-900/30 text-sm font-bold flex items-center gap-2 transition-colors"
+                  className="bg-blue-600 text-white px-3 py-1 rounded-lg hover:bg-blue-500 shadow-lg shadow-blue-900/30 text-[10px] font-bold flex items-center gap-1 transition-colors"
                 >
-                  <Check size={18}/> ACC {selectedGroups.size} PESANAN
+                  <Check size={12}/> ACC {selectedGroups.size} PESANAN
                 </button>
               )}
             </div>
@@ -906,50 +906,50 @@ export const OrderManagement: React.FC = () => {
               const isSelected = selectedGroups.has(groupKey);
 
               return (
-                <div key={groupKey} className={`bg-gray-800 border rounded-xl overflow-hidden hover:border-gray-500 transition-all shadow-lg ${isSelected ? 'border-blue-500 ring-1 ring-blue-500/30' : 'border-gray-600'}`}>
+                <div key={groupKey} className={`bg-gray-800 border rounded-lg overflow-hidden hover:border-gray-500 transition-all shadow-lg ${isSelected ? 'border-blue-500 ring-1 ring-blue-500/30' : 'border-gray-600'}`}>
                   {/* GROUP HEADER */}
-                  <div className="p-3 flex flex-col md:flex-row justify-between gap-2 bg-gray-800">
-                    <div className="flex items-start gap-3">
+                  <div className="p-2 flex flex-col md:flex-row justify-between gap-1.5 bg-gray-800">
+                    <div className="flex items-start gap-2">
                       {/* Checkbox for bulk selection */}
                       <input
                         type="checkbox"
                         checked={isSelected}
                         onChange={(e) => { e.stopPropagation(); toggleGroupSelection(groupKey); }}
                         onClick={(e) => e.stopPropagation()}
-                        className="w-6 h-6 mt-1 rounded border-gray-600 bg-gray-700 text-blue-500 focus:ring-blue-500 cursor-pointer flex-shrink-0"
+                        className="w-4 h-4 mt-0.5 rounded border-gray-600 bg-gray-700 text-blue-500 focus:ring-blue-500 cursor-pointer flex-shrink-0"
                       />
                       <div className="flex-1 cursor-pointer select-none" onClick={() => toggleExpand(groupKey)}>
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className={`text-sm font-bold px-3 py-1 rounded border ${group.tempo === 'CASH' ? 'bg-green-900/30 border-green-800 text-green-400' : 'bg-orange-900/30 border-orange-800 text-orange-400'}`}>
+                        <div className="flex items-center gap-1.5 mb-0.5">
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${group.tempo === 'CASH' ? 'bg-green-900/30 border-green-800 text-green-400' : 'bg-orange-900/30 border-orange-800 text-orange-400'}`}>
                             {group.tempo}
                           </span>
-                          <span className="text-sm font-mono bg-gray-700 px-2 py-0.5 rounded text-gray-300">
+                          <span className="text-[10px] font-mono bg-gray-700 px-1.5 py-0.5 rounded text-gray-300">
                             {new Date(group.date).toLocaleString('id-ID', {timeZone: 'Asia/Jakarta'})}
                           </span>
-                          <span className="text-sm bg-blue-900/30 text-blue-300 px-2 py-0.5 rounded border border-blue-800 flex items-center gap-1">
-                            <Layers size={14} /> {group.items.length} Item
+                          <span className="text-[10px] bg-blue-900/30 text-blue-300 px-1.5 py-0.5 rounded border border-blue-800 flex items-center gap-0.5">
+                            <Layers size={10} /> {group.items.length} Item
                           </span>
                         </div>
-                        <div className="flex items-center gap-2">
-                          {isExpanded ? <ChevronUp size={28} className="text-purple-400"/> : <ChevronDown size={28} className="text-gray-400"/>}
-                          <h3 className="font-extrabold text-3xl text-white">
+                        <div className="flex items-center gap-1.5">
+                          {isExpanded ? <ChevronUp size={16} className="text-purple-400"/> : <ChevronDown size={16} className="text-gray-400"/>}
+                          <h3 className="font-extrabold text-base text-white">
                             {group.customer}
                           </h3>
                         </div>
                       </div>
                     </div>
 
-                    <div className="flex flex-col items-end gap-1 border-t md:border-t-0 border-gray-700 pt-2 md:pt-0">
+                    <div className="flex flex-col items-end gap-0.5 border-t md:border-t-0 border-gray-700 pt-1 md:pt-0">
                       <div>
-                        <span className="text-gray-400 text-sm mr-2">Total Tagihan:</span>
-                        <span className="text-2xl font-bold text-green-400">{formatRupiah(group.totalAmount)}</span>
+                        <span className="text-gray-400 text-[10px] mr-1">Total Tagihan:</span>
+                        <span className="text-sm font-bold text-green-400">{formatRupiah(group.totalAmount)}</span>
                       </div>
-                      <div className="flex gap-2 w-full md:w-auto">
-                        <button onClick={() => handleProcessGroup(group.items, 'Tolak')} className="flex-1 md:flex-none bg-red-900/20 text-red-400 px-4 py-2 rounded-lg hover:bg-red-900/40 border border-red-900/50 text-sm font-bold flex items-center justify-center gap-2 transition-colors">
-                          <X size={16}/> TOLAK SEMUA
+                      <div className="flex gap-1 w-full md:w-auto">
+                        <button onClick={() => handleProcessGroup(group.items, 'Tolak')} className="flex-1 md:flex-none bg-red-900/20 text-red-400 px-2 py-1 rounded hover:bg-red-900/40 border border-red-900/50 text-[10px] font-bold flex items-center justify-center gap-1 transition-colors">
+                          <X size={12}/> TOLAK SEMUA
                         </button>
-                        <button onClick={() => handleProcessGroup(group.items, 'Proses')} className="flex-1 md:flex-none bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-500 shadow-lg shadow-blue-900/30 text-sm font-bold flex items-center justify-center gap-2 transition-colors">
-                          <Check size={16}/> ACC SEMUA
+                        <button onClick={() => handleProcessGroup(group.items, 'Proses')} className="flex-1 md:flex-none bg-blue-600 text-white px-2 py-1 rounded hover:bg-blue-500 shadow-lg shadow-blue-900/30 text-[10px] font-bold flex items-center justify-center gap-1 transition-colors">
+                          <Check size={12}/> ACC SEMUA
                         </button>
                       </div>
                     </div>
@@ -957,19 +957,19 @@ export const OrderManagement: React.FC = () => {
 
                   {/* ITEM LIST (EDITABLE) */}
                   {isExpanded && (
-                    <div className="bg-gray-900/80 border-t border-gray-700 p-2 space-y-2 animate-in slide-in-from-top-2 duration-200">
+                    <div className="bg-gray-900/80 border-t border-gray-700 p-1 space-y-1 animate-in slide-in-from-top-2 duration-200">
                       {group.items.map((item, idx) => {
                         const isEditing = editingId === item.id;
 
                         return (
-                        <div key={`${item.id}-${idx}`} className={`flex flex-col md:flex-row justify-between items-center p-3 rounded-lg border ml-4 mr-2 ${isEditing ? 'bg-gray-800 border-blue-500/50 ring-1 ring-blue-500/30' : 'bg-gray-800 border-gray-700 hover:border-gray-600'}`}>
+                        <div key={`${item.id}-${idx}`} className={`flex flex-col md:flex-row justify-between items-center p-2 rounded border ml-2 mr-1 ${isEditing ? 'bg-gray-800 border-blue-500/50 ring-1 ring-blue-500/30' : 'bg-gray-800 border-gray-700 hover:border-gray-600'}`}>
                           
                           {/* BAGIAN KIRI: INFO / INPUT */}
-                          <div className="w-full md:w-auto flex-1 mr-4">
+                          <div className="w-full md:w-auto flex-1 mr-2">
                             {!isEditing ? (
                                 <>
-                                  <p className="text-3xl font-bold text-white font-mono tracking-wider">{item.part_number || '-'}</p>
-                                  <p className="text-xl font-semibold text-gray-200 mt-0.5">{item.nama_barang}</p>
+                                  <p className="text-sm font-bold text-white font-mono tracking-wider">{item.part_number || '-'}</p>
+                                  <p className="text-xs font-semibold text-gray-200 mt-0.5">{item.nama_barang}</p>
                                 </>
                             ) : (
                                 <div className="space-y-2 w-full">
@@ -1053,12 +1053,12 @@ export const OrderManagement: React.FC = () => {
                           </div>
 
                           {/* BAGIAN KANAN: QTY, HARGA, ACTIONS */}
-                          <div className="flex items-center gap-4 w-full md:w-auto mt-2 md:mt-0 justify-between md:justify-end">
+                          <div className="flex items-center gap-2 w-full md:w-auto mt-1 md:mt-0 justify-between md:justify-end">
                             <div className="text-right">
                               {!isEditing ? (
                                   <>
-                                    <p className="text-sm font-bold text-white">{item.quantity} x {formatRupiah(item.harga_satuan)}</p>
-                                    <p className="text-xs text-green-400 font-mono">{formatRupiah(item.harga_total)}</p>
+                                    <p className="text-[10px] font-bold text-white">{item.quantity} x {formatRupiah(item.harga_satuan)}</p>
+                                    <p className="text-[10px] text-green-400 font-mono">{formatRupiah(item.harga_total)}</p>
                                   </>
                               ) : (
                                   <div className="flex gap-2 items-end">
@@ -1132,59 +1132,59 @@ export const OrderManagement: React.FC = () => {
               const ecommerceColors = getEcommerceColor(group.ecommerce);
 
               return (
-                <div key={groupKey} className={`${ecommerceColors.bg} border ${ecommerceColors.border} rounded-xl overflow-hidden hover:border-gray-500 transition-all shadow-lg`}>
+                <div key={groupKey} className={`${ecommerceColors.bg} border ${ecommerceColors.border} rounded-lg overflow-hidden hover:border-gray-500 transition-all shadow-lg`}>
                   {/* GROUP HEADER */}
-                  <div className={`p-3 flex flex-col md:flex-row justify-between gap-2 ${ecommerceColors.bg}`}>
+                  <div className={`p-2 flex flex-col md:flex-row justify-between gap-1.5 ${ecommerceColors.bg}`}>
                     <div className="flex-1 cursor-pointer select-none" onClick={() => toggleExpand(groupKey)}>
-                      <div className="flex items-center gap-2 mb-1 flex-wrap">
-                        <span className={`text-sm font-bold px-3 py-1 rounded border ${ecommerceColors.bg} ${ecommerceColors.border} ${ecommerceColors.text}`}>
+                      <div className="flex items-center gap-1.5 mb-0.5 flex-wrap">
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${ecommerceColors.bg} ${ecommerceColors.border} ${ecommerceColors.text}`}>
                           {group.ecommerce}
                         </span>
-                        <span className="text-sm font-mono bg-gray-700/50 px-2 py-0.5 rounded text-gray-300">
+                        <span className="text-[10px] font-mono bg-gray-700/50 px-1.5 py-0.5 rounded text-gray-300">
                           {new Date(group.date).toLocaleString('id-ID', {timeZone: 'Asia/Jakarta'})}
                         </span>
-                        <span className="text-sm bg-blue-900/30 text-blue-300 px-2 py-0.5 rounded border border-blue-800 flex items-center gap-1">
-                          <Layers size={14} /> {group.items.length} Item
+                        <span className="text-[10px] bg-blue-900/30 text-blue-300 px-1.5 py-0.5 rounded border border-blue-800 flex items-center gap-0.5">
+                          <Layers size={10} /> {group.items.length} Item
                         </span>
                         {group.resi !== '-' && (
-                          <span className="text-sm bg-purple-900/30 text-purple-300 px-2 py-0.5 rounded border border-purple-800 font-mono">
+                          <span className="text-[10px] bg-purple-900/30 text-purple-300 px-1.5 py-0.5 rounded border border-purple-800 font-mono">
                             Resi: {group.resi}
                           </span>
                         )}
                       </div>
-                      <div className="flex items-center gap-2">
-                        {isExpanded ? <ChevronUp size={28} className="text-purple-400"/> : <ChevronDown size={28} className="text-gray-400"/>}
-                        <h3 className="font-extrabold text-3xl text-white flex items-center gap-2">
-                          <User size={28} className="text-gray-400"/> {group.customer}
+                      <div className="flex items-center gap-1.5">
+                        {isExpanded ? <ChevronUp size={16} className="text-purple-400"/> : <ChevronDown size={16} className="text-gray-400"/>}
+                        <h3 className="font-extrabold text-base text-white flex items-center gap-1">
+                          <User size={14} className="text-gray-400"/> {group.customer}
                         </h3>
                         {/* Hide tempo for online marketplaces (Shopee, TikTok, etc) */}
                         {group.ecommerce === 'OFFLINE' && (
-                          <span className="text-base text-gray-500">• {group.tempo}</span>
+                          <span className="text-[10px] text-gray-500">• {group.tempo}</span>
                         )}
                       </div>
                     </div>
 
-                    <div className="flex flex-col items-end gap-1 border-t md:border-t-0 border-gray-700 pt-2 md:pt-0">
+                    <div className="flex flex-col items-end gap-0.5 border-t md:border-t-0 border-gray-700 pt-1 md:pt-0">
                       <div className="text-right">
-                        <span className="text-gray-400 text-sm mr-2">Total:</span>
-                        <span className="text-2xl font-bold text-green-400">{group.totalQty} Pcs</span>
+                        <span className="text-gray-400 text-[10px] mr-1">Total:</span>
+                        <span className="text-sm font-bold text-green-400">{group.totalQty} Pcs</span>
                       </div>
-                      <span className="text-xl font-bold font-mono text-yellow-400">{formatRupiah(group.totalAmount)}</span>
+                      <span className="text-xs font-bold font-mono text-yellow-400">{formatRupiah(group.totalAmount)}</span>
                       {/* Bulk Action Buttons */}
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-1">
                         <button 
                           onClick={(e) => { e.stopPropagation(); handleReturAllGroupItems(group.items); }} 
-                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-orange-900/30 text-orange-400 hover:bg-orange-900/50 transition-colors border border-orange-800 text-sm font-bold"
+                          className="flex items-center gap-1 px-2 py-1 rounded bg-orange-900/30 text-orange-400 hover:bg-orange-900/50 transition-colors border border-orange-800 text-[10px] font-bold"
                           title="Retur Semua Item"
                         >
-                          <RotateCcw size={16}/> Retur Semua
+                          <RotateCcw size={12}/> Retur Semua
                         </button>
                         <button 
                           onClick={(e) => { e.stopPropagation(); handleDeleteAllGroupItems(group.items); }} 
-                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-900/30 text-red-400 hover:bg-red-900/50 transition-colors border border-red-800 text-sm font-bold"
+                          className="flex items-center gap-1 px-2 py-1 rounded bg-red-900/30 text-red-400 hover:bg-red-900/50 transition-colors border border-red-800 text-[10px] font-bold"
                           title="Hapus Semua Item"
                         >
-                          <Trash2 size={16}/> Hapus Semua
+                          <Trash2 size={12}/> Hapus Semua
                         </button>
                       </div>
                     </div>
@@ -1192,41 +1192,41 @@ export const OrderManagement: React.FC = () => {
 
                   {/* ITEM LIST */}
                   {isExpanded && (
-                    <div className="bg-gray-900/80 border-t border-gray-700 p-1 space-y-1 animate-in slide-in-from-top-2 duration-200">
+                    <div className="bg-gray-900/80 border-t border-gray-700 p-1 space-y-0.5 animate-in slide-in-from-top-2 duration-200">
                       {group.items.map((item, idx) => (
-                        <div key={`${item.id}-${idx}`} className={`flex justify-between items-center p-3 rounded-lg border ${ecommerceColors.bg} ${ecommerceColors.border} hover:border-gray-500 ml-2 mr-1`}>
+                        <div key={`${item.id}-${idx}`} className={`flex justify-between items-center p-2 rounded border ${ecommerceColors.bg} ${ecommerceColors.border} hover:border-gray-500 ml-1 mr-0.5`}>
                           <div className="flex-1">
                             {/* Part Number - Large and Prominent */}
-                            <p className="text-3xl font-bold text-white font-mono tracking-wider">{item.part_number || '-'}</p>
+                            <p className="text-sm font-bold text-white font-mono tracking-wider">{item.part_number || '-'}</p>
                             {/* Item Name */}
-                            <p className="text-xl font-semibold text-gray-200 mt-0.5">{item.name}</p>
+                            <p className="text-xs font-semibold text-gray-200 mt-0.5">{item.name}</p>
                             {/* Brand & Application */}
                             {(item.brand || item.application) && (
-                              <p className="text-lg text-gray-400 mt-0.5">
+                              <p className="text-[10px] text-gray-400 mt-0.5">
                                 {item.brand && <span className="text-blue-300 font-medium">{item.brand}</span>}
-                                {item.brand && item.application && <span className="mx-2">•</span>}
+                                {item.brand && item.application && <span className="mx-1">•</span>}
                                 {item.application && <span className="text-green-300">{item.application}</span>}
                               </p>
                             )}
                           </div>
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-1">
                             <div className="text-right">
-                              <p className="text-lg font-bold text-white">{item.qty_keluar} x {formatRupiah(item.harga_total / item.qty_keluar || 0)}</p>
-                              <p className="text-base text-green-400 font-mono">{formatRupiah(item.harga_total)}</p>
+                              <p className="text-[10px] font-bold text-white">{item.qty_keluar} x {formatRupiah(item.harga_total / item.qty_keluar || 0)}</p>
+                              <p className="text-[10px] text-green-400 font-mono">{formatRupiah(item.harga_total)}</p>
                             </div>
                             <button 
                               onClick={() => openReturModal(item)} 
-                              className="p-2 rounded bg-orange-900/30 text-orange-400 hover:bg-orange-900/50 transition-colors border border-orange-800" 
+                              className="p-1 rounded bg-orange-900/30 text-orange-400 hover:bg-orange-900/50 transition-colors border border-orange-800" 
                               title="Retur"
                             >
-                              <RotateCcw size={20}/>
+                              <RotateCcw size={14}/>
                             </button>
                             <button 
                               onClick={() => handleDeleteSoldItem(item)} 
-                              className="p-2 rounded bg-red-900/30 text-red-400 hover:bg-red-900/50 transition-colors border border-red-800" 
+                              className="p-1 rounded bg-red-900/30 text-red-400 hover:bg-red-900/50 transition-colors border border-red-800" 
                               title="Hapus"
                             >
-                              <Trash2 size={20}/>
+                              <Trash2 size={14}/>
                             </button>
                           </div>
                         </div>
@@ -1239,23 +1239,23 @@ export const OrderManagement: React.FC = () => {
 
             {/* PAGINATION */}
             {soldTotalPages > 1 && (
-              <div className="flex justify-center items-center gap-4 pt-4 border-t border-gray-700">
+              <div className="flex justify-center items-center gap-2 pt-2 border-t border-gray-700">
                 <button 
                   onClick={() => setSoldPage(p => Math.max(1, p - 1))} 
                   disabled={soldPage === 1}
-                  className="p-2 bg-gray-700 rounded-lg disabled:opacity-30 hover:bg-gray-600"
+                  className="p-1 bg-gray-700 rounded disabled:opacity-30 hover:bg-gray-600"
                 >
-                  <ChevronLeft size={18}/>
+                  <ChevronLeft size={14}/>
                 </button>
-                <span className="text-sm text-gray-400">
+                <span className="text-[10px] text-gray-400">
                   Halaman {soldPage} dari {soldTotalPages} ({groupedSoldData.length} grup)
                 </span>
                 <button 
                   onClick={() => setSoldPage(p => Math.min(soldTotalPages, p + 1))} 
                   disabled={soldPage === soldTotalPages}
-                  className="p-2 bg-gray-700 rounded-lg disabled:opacity-30 hover:bg-gray-600"
+                  className="p-1 bg-gray-700 rounded disabled:opacity-30 hover:bg-gray-600"
                 >
-                  <ChevronRight size={18}/>
+                  <ChevronRight size={14}/>
                 </button>
               </div>
             )}
@@ -1264,7 +1264,7 @@ export const OrderManagement: React.FC = () => {
 
         {/* --- 4. TAB RETUR (Enhanced with types) --- */}
         {activeTab === 'RETUR' && (
-          <div className="space-y-3">
+          <div className="space-y-2">
             {filterList(returData).length === 0 && <EmptyState msg="Tidak ada data retur." />}
             {filterList(returData).map((item, idx) => {
               const tipeRetur = (item as any).tipe_retur || 'BALIK_STOK';
@@ -1273,14 +1273,14 @@ export const OrderManagement: React.FC = () => {
               const isSudahDitukar = item.status === 'Sudah Ditukar';
               
               return (
-                <div key={idx} className={`border p-4 rounded-xl flex flex-col md:flex-row justify-between gap-4 ${
+                <div key={idx} className={`border p-2 rounded-lg flex flex-col md:flex-row justify-between gap-2 ${
                   isRusak ? 'bg-red-900/10 border-red-900/30' : 
                   isTukarSupplier ? 'bg-orange-900/10 border-orange-900/30' : 
                   'bg-green-900/10 border-green-900/30'
                 }`}>
                   <div className="flex-1">
-                    <div className="flex items-center gap-2 mb-2 flex-wrap">
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
+                    <div className="flex items-center gap-1.5 mb-1 flex-wrap">
+                      <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded border ${
                         isRusak ? 'bg-red-900/50 text-red-300 border-red-800' :
                         isTukarSupplier ? 'bg-orange-900/50 text-orange-300 border-orange-800' :
                         'bg-green-900/50 text-green-300 border-green-800'
@@ -1288,10 +1288,10 @@ export const OrderManagement: React.FC = () => {
                         {isRusak ? 'RUSAK' : isTukarSupplier ? 'TUKAR SUPPLIER' : 'BALIK STOK'}
                       </span>
                       {item.ecommerce && (
-                        <span className="text-[10px] bg-gray-700 px-1.5 rounded text-gray-400">{item.ecommerce}</span>
+                        <span className="text-[8px] bg-gray-700 px-1 rounded text-gray-400">{item.ecommerce}</span>
                       )}
                       {item.status && (
-                        <span className={`text-[10px] px-2 py-0.5 rounded ${
+                        <span className={`text-[8px] px-1.5 py-0.5 rounded ${
                           item.status === 'Selesai' ? 'bg-green-900/30 text-green-400' :
                           isSudahDitukar ? 'bg-blue-900/30 text-blue-400' :
                           'bg-yellow-900/30 text-yellow-400'
@@ -1302,32 +1302,32 @@ export const OrderManagement: React.FC = () => {
                     </div>
                     
                     {/* Tanggal Pemesanan & Tanggal Retur */}
-                    <div className="flex flex-wrap gap-4 mb-2 text-[10px]">
+                    <div className="flex flex-wrap gap-2 mb-1 text-[8px]">
                       {item.tanggal_pemesanan && (
-                        <div className="flex items-center gap-1">
+                        <div className="flex items-center gap-0.5">
                           <span className="text-gray-500">📦 Pesan:</span>
                           <span className="text-gray-400 font-mono">{new Date(item.tanggal_pemesanan).toLocaleDateString('id-ID', {timeZone: 'Asia/Jakarta', day: '2-digit', month: '2-digit', year: '2-digit'})}</span>
                         </div>
                       )}
-                      <div className="flex items-center gap-1">
+                      <div className="flex items-center gap-0.5">
                         <span className="text-gray-500">🔄 Retur:</span>
                         <span className="text-gray-400 font-mono">{new Date(item.tanggal_retur).toLocaleDateString('id-ID', {timeZone: 'Asia/Jakarta', day: '2-digit', month: '2-digit', year: '2-digit'})}</span>
                       </div>
                     </div>
                     
-                    <h4 className="font-bold text-white">{item.nama_barang}</h4>
-                    <p className="text-[10px] text-gray-500 font-mono">Part: {item.part_number}</p>
-                    <p className="text-sm text-gray-400 mt-1">{item.customer} {item.resi !== '-' ? `(Resi: ${item.resi})` : ''}</p>
-                    {item.keterangan && <p className="text-xs text-gray-500 mt-1 italic">"{item.keterangan}"</p>}
+                    <h4 className="font-bold text-white text-xs">{item.nama_barang}</h4>
+                    <p className="text-[8px] text-gray-500 font-mono">Part: {item.part_number}</p>
+                    <p className="text-[10px] text-gray-400 mt-0.5">{item.customer} {item.resi !== '-' ? `(Resi: ${item.resi})` : ''}</p>
+                    {item.keterangan && <p className="text-[8px] text-gray-500 mt-0.5 italic">"{item.keterangan}"</p>}
                   </div>
                   
-                  <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-2">
                     <div className="text-right">
-                      <p className={`text-xl font-bold ${isRusak ? 'text-red-400' : isTukarSupplier ? 'text-orange-400' : 'text-green-400'}`}>
+                      <p className={`text-sm font-bold ${isRusak ? 'text-red-400' : isTukarSupplier ? 'text-orange-400' : 'text-green-400'}`}>
                         {item.quantity}
                       </p>
-                      <p className="text-xs text-gray-500">Pcs</p>
-                      <p className="text-sm font-mono text-gray-400 mt-1">{formatRupiah(item.harga_total)}</p>
+                      <p className="text-[8px] text-gray-500">Pcs</p>
+                      <p className="text-[10px] font-mono text-gray-400 mt-0.5">{formatRupiah(item.harga_total)}</p>
                     </div>
                     
                     {/* Tombol untuk tukar supplier - hanya untuk status Pending */}
@@ -1345,9 +1345,9 @@ export const OrderManagement: React.FC = () => {
                             showToast(result.msg, 'error');
                           }
                         }}
-                        className="px-3 py-2 rounded-lg bg-blue-600 text-white text-xs font-bold hover:bg-blue-500 flex items-center gap-1"
+                        className="px-2 py-1 rounded bg-blue-600 text-white text-[10px] font-bold hover:bg-blue-500 flex items-center gap-0.5"
                       >
-                        <Package size={14}/> Sudah Ditukar
+                        <Package size={12}/> Sudah Ditukar
                       </button>
                     )}
                   </div>
@@ -1372,8 +1372,8 @@ export const OrderManagement: React.FC = () => {
 };
 
 const EmptyState = ({ msg }: { msg: string }) => (
-  <div className="flex flex-col items-center justify-center h-64 text-gray-500">
-    <Box size={48} className="mb-4 opacity-20" />
-    <p>{msg}</p>
+  <div className="flex flex-col items-center justify-center h-40 text-gray-500">
+    <Box size={32} className="mb-2 opacity-20" />
+    <p className="text-xs">{msg}</p>
   </div>
 );
