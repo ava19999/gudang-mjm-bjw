@@ -94,32 +94,29 @@ export const checkExistingInBarangKeluar = async (
     // Normalize: uppercase dan trim
     const normalized = resiOrOrders.map(r => r.trim().toUpperCase());
     
-    // Query semua resi dari barang_keluar
-    const { data, error } = await supabase
-      .from(table)
-      .select('resi')
-      .limit(5000);
-    
-    if (error) {
-      console.error('checkExistingInBarangKeluar error:', error);
-      return new Set();
-    }
-    
-    // Buat set dari resi yang ada di barang_keluar (UPPERCASE)
-    const existingSet = new Set<string>(
-      (data || [])
-        .map((d: any) => (d.resi || '').trim().toUpperCase())
-        .filter((r: string) => r !== '' && r !== '-')
-    );
-    
-    // Return resi yang ada di kedua set (intersection)
+    // Query langsung resi yang dicari menggunakan ilike untuk case-insensitive
     const foundSet = new Set<string>();
-    for (const resi of normalized) {
-      if (existingSet.has(resi)) {
-        foundSet.add(resi);
+    
+    // Batch query untuk menghindari query terlalu besar
+    const batchSize = 50;
+    for (let i = 0; i < normalized.length; i += batchSize) {
+      const batch = normalized.slice(i, i + batchSize);
+      
+      // Gunakan OR query untuk setiap resi dalam batch
+      for (const resi of batch) {
+        const { data, error } = await supabase
+          .from(table)
+          .select('resi')
+          .ilike('resi', resi)
+          .limit(1);
+        
+        if (!error && data && data.length > 0) {
+          foundSet.add(resi);
+        }
       }
     }
     
+    console.log('checkExistingInBarangKeluar - Found in barang_keluar:', Array.from(foundSet));
     return foundSet;
   } catch (err) {
     console.error('checkExistingInBarangKeluar exception:', err);
@@ -430,6 +427,12 @@ export const verifyResiStage2 = async (
   const table = getTableName(store);
   const { resi, verified_by } = data;
 
+  // CEK BARANG KELUAR: Pastikan resi belum ada di barang_keluar (sudah terjual/keluar)
+  const existingInBarangKeluar = await checkExistingInBarangKeluar([resi], store);
+  if (existingInBarangKeluar.has(resi.trim().toUpperCase())) {
+    return { success: false, message: 'Resi sudah ada di Barang Keluar (sudah terjual)! Tidak bisa di-scan lagi.' };
+  }
+
   const { data: rows } = await supabase
     .from(table)
     .select('id')
@@ -464,12 +467,22 @@ export const verifyResiStage2Bulk = async (
   resiList: string[],
   verified_by: string,
   store: string | null
-): Promise<{ success: boolean; message: string; count?: number; alreadyVerified?: string[] }> => {
+): Promise<{ success: boolean; message: string; count?: number; alreadyVerified?: string[]; alreadySold?: string[] }> => {
   const table = getTableName(store);
   let successCount = 0;
   const alreadyVerified: string[] = [];
+  const alreadySold: string[] = [];
 
+  // CEK BARANG KELUAR: Filter resi yang sudah ada di barang_keluar (sudah terjual)
+  const existingInBarangKeluar = await checkExistingInBarangKeluar(resiList, store);
+  
   for (const resi of resiList) {
+    // Skip jika resi sudah ada di barang_keluar (sudah terjual)
+    if (existingInBarangKeluar.has(resi.trim().toUpperCase())) {
+      alreadySold.push(resi);
+      continue;
+    }
+
     const { data: rows } = await supabase
       .from(table)
       .select('id')
@@ -505,17 +518,24 @@ export const verifyResiStage2Bulk = async (
   }
 
   if (successCount === 0) {
-    const msg = alreadyVerified.length > 0 
-      ? `Tidak ada resi baru. ${alreadyVerified.length} resi sudah diverifikasi sebelumnya.`
-      : 'Tidak ada resi yang berhasil diverifikasi.';
-    return { success: false, message: msg, alreadyVerified };
+    let msg = 'Tidak ada resi yang berhasil diverifikasi.';
+    if (alreadySold.length > 0) {
+      msg = `${alreadySold.length} resi sudah ada di Barang Keluar (sudah terjual).`;
+    } else if (alreadyVerified.length > 0) {
+      msg = `Tidak ada resi baru. ${alreadyVerified.length} resi sudah diverifikasi sebelumnya.`;
+    }
+    return { success: false, message: msg, alreadyVerified, alreadySold };
   }
   
-  const msg = alreadyVerified.length > 0
-    ? `${successCount} resi berhasil diverifikasi! (${alreadyVerified.length} sudah ada sebelumnya)`
-    : `${successCount} resi berhasil diverifikasi!`;
+  let msg = `${successCount} resi berhasil diverifikasi!`;
+  if (alreadyVerified.length > 0 || alreadySold.length > 0) {
+    const parts = [];
+    if (alreadyVerified.length > 0) parts.push(`${alreadyVerified.length} sudah diverifikasi`);
+    if (alreadySold.length > 0) parts.push(`${alreadySold.length} sudah terjual`);
+    msg += ` (${parts.join(', ')})`;
+  }
   
-  return { success: true, message: msg, count: successCount, alreadyVerified };
+  return { success: true, message: msg, count: successCount, alreadyVerified, alreadySold };
 };
 
 // ============================================================================

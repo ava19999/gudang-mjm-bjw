@@ -12,7 +12,7 @@ import { OfflineOrderRow, SoldItemRow, ReturRow } from '../types';
 import { 
   ClipboardList, CheckCircle, RotateCcw, Search, RefreshCw, Box, Check, X, 
   ChevronDown, ChevronUp, Layers, User, Pencil, Save, XCircle, Trash2, ChevronLeft, ChevronRight,
-  PackageX, RotateCw, ArrowLeftRight, Package, Hash, ShoppingBag
+  PackageX, RotateCw, ArrowLeftRight, Package, Hash, ShoppingBag, Copy
 } from 'lucide-react';
 
 // Toast Component Sederhana
@@ -281,6 +281,7 @@ export const OrderManagement: React.FC = () => {
   const { selectedStore } = useStore();
   const [activeTab, setActiveTab] = useState<'OFFLINE' | 'TERJUAL' | 'RETUR'>('OFFLINE');
   const [loading, setLoading] = useState(false);
+  const [loadingProgress, setLoadingProgress] = useState(0);
   const [searchTerm, setSearchTerm] = useState('');
   const [customerFilter, setCustomerFilter] = useState('');
   const [partNumberFilter, setPartNumberFilter] = useState('');
@@ -365,14 +366,36 @@ export const OrderManagement: React.FC = () => {
 
   const loadData = async () => {
     setLoading(true);
+    setLoadingProgress(0);
+    
+    // Start progress animation
+    const progressInterval = setInterval(() => {
+      setLoadingProgress(prev => {
+        if (prev >= 90) return prev; // Stop at 90% until data loads
+        return prev + Math.random() * 15;
+      });
+    }, 200);
+    
     try {
       if (activeTab === 'OFFLINE') setOfflineData(await fetchOfflineOrders(selectedStore));
       if (activeTab === 'TERJUAL') setSoldData(await fetchSoldItems(selectedStore));
       if (activeTab === 'RETUR') setReturData(await fetchReturItems(selectedStore));
+      
+      // Complete the progress
+      clearInterval(progressInterval);
+      setLoadingProgress(100);
+      
+      // Reset after animation completes
+      setTimeout(() => {
+        setLoading(false);
+        setLoadingProgress(0);
+      }, 300);
     } catch (e) {
       console.error("Gagal load data:", e);
+      clearInterval(progressInterval);
+      setLoading(false);
+      setLoadingProgress(0);
     }
-    setLoading(false);
   };
 
   useEffect(() => { loadData(); }, [selectedStore, activeTab]);
@@ -788,9 +811,23 @@ export const OrderManagement: React.FC = () => {
         <h2 className="text-xl font-bold flex items-center gap-2">
           <ClipboardList className="text-purple-400" /> Manajemen Pesanan ({selectedStore?.toUpperCase()})
         </h2>
-        <button onClick={loadData} className="p-2 bg-gray-700 rounded-full hover:bg-gray-600 transition-colors">
-          <RefreshCw size={18} className={loading ? 'animate-spin' : ''}/>
-        </button>
+        <div className="flex items-center gap-3">
+          {/* Loading Bar */}
+          {loading && (
+            <div className="flex items-center gap-2">
+              <div className="w-32 h-2 bg-gray-700 rounded-full overflow-hidden">
+                <div 
+                  className="h-full bg-gradient-to-r from-purple-500 via-blue-500 to-purple-500 rounded-full transition-all duration-200 ease-out" 
+                  style={{ width: `${Math.min(loadingProgress, 100)}%` }}
+                />
+              </div>
+              <span className="text-xs text-purple-400 font-mono font-bold w-10">{Math.round(Math.min(loadingProgress, 100))}%</span>
+            </div>
+          )}
+          <button onClick={loadData} disabled={loading} className={`p-2 bg-gray-700 rounded-full hover:bg-gray-600 transition-colors ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}>
+            <RefreshCw size={18} className={loading ? 'animate-spin text-purple-400' : ''}/>
+          </button>
+        </div>
       </div>
 
       {/* TABS MENU - Fixed */}
@@ -931,8 +968,8 @@ export const OrderManagement: React.FC = () => {
                           </span>
                         </div>
                         <div className="flex items-center gap-2">
-                          {isExpanded ? <ChevronUp size={28} className="text-purple-400"/> : <ChevronDown size={28} className="text-gray-400"/>}
-                          <h3 className="font-extrabold text-3xl text-white">
+                          {isExpanded ? <ChevronUp size={20} className="text-purple-400"/> : <ChevronDown size={20} className="text-gray-400"/>}
+                          <h3 className="font-extrabold text-xl text-white">
                             {group.customer}
                           </h3>
                         </div>
@@ -941,8 +978,8 @@ export const OrderManagement: React.FC = () => {
 
                     <div className="flex flex-col items-end gap-1 border-t md:border-t-0 border-gray-700 pt-2 md:pt-0">
                       <div>
-                        <span className="text-gray-400 text-sm mr-2">Total Tagihan:</span>
-                        <span className="text-2xl font-bold text-green-400">{formatRupiah(group.totalAmount)}</span>
+                        <span className="text-gray-400 text-xs mr-2">Total Tagihan:</span>
+                        <span className="text-lg font-bold text-green-400">{formatRupiah(group.totalAmount)}</span>
                       </div>
                       <div className="flex gap-2 w-full md:w-auto">
                         <button onClick={() => handleProcessGroup(group.items, 'Tolak')} className="flex-1 md:flex-none bg-red-900/20 text-red-400 px-4 py-2 rounded-lg hover:bg-red-900/40 border border-red-900/50 text-sm font-bold flex items-center justify-center gap-2 transition-colors">
@@ -968,8 +1005,8 @@ export const OrderManagement: React.FC = () => {
                           <div className="w-full md:w-auto flex-1 mr-4">
                             {!isEditing ? (
                                 <>
-                                  <p className="text-3xl font-bold text-white font-mono tracking-wider">{item.part_number || '-'}</p>
-                                  <p className="text-xl font-semibold text-gray-200 mt-0.5">{item.nama_barang}</p>
+                                  <p className="text-lg font-bold text-white font-mono tracking-wider">{item.part_number || '-'}</p>
+                                  <p className="text-sm font-semibold text-gray-200 mt-0.5">{item.nama_barang}</p>
                                 </>
                             ) : (
                                 <div className="space-y-2 w-full">
@@ -1147,15 +1184,24 @@ export const OrderManagement: React.FC = () => {
                           <Layers size={14} /> {group.items.length} Item
                         </span>
                         {group.resi !== '-' && (
-                          <span className="text-sm bg-purple-900/30 text-purple-300 px-2 py-0.5 rounded border border-purple-800 font-mono">
+                          <button 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              navigator.clipboard.writeText(group.resi);
+                              showToast(`Resi "${group.resi}" disalin!`);
+                            }}
+                            className="text-sm bg-purple-900/30 text-purple-300 px-2 py-0.5 rounded border border-purple-800 font-mono hover:bg-purple-800/50 transition-colors flex items-center gap-1.5 cursor-pointer"
+                            title="Klik untuk copy resi"
+                          >
                             Resi: {group.resi}
-                          </span>
+                            <Copy size={12} className="opacity-70"/>
+                          </button>
                         )}
                       </div>
                       <div className="flex items-center gap-2">
-                        {isExpanded ? <ChevronUp size={28} className="text-purple-400"/> : <ChevronDown size={28} className="text-gray-400"/>}
-                        <h3 className="font-extrabold text-3xl text-white flex items-center gap-2">
-                          <User size={28} className="text-gray-400"/> {group.customer}
+                        {isExpanded ? <ChevronUp size={20} className="text-purple-400"/> : <ChevronDown size={20} className="text-gray-400"/>}
+                        <h3 className="font-extrabold text-xl text-white flex items-center gap-2">
+                          <User size={20} className="text-gray-400"/> {group.customer}
                         </h3>
                         {/* Hide tempo for online marketplaces (Shopee, TikTok, etc) */}
                         {group.ecommerce === 'OFFLINE' && (
@@ -1166,10 +1212,10 @@ export const OrderManagement: React.FC = () => {
 
                     <div className="flex flex-col items-end gap-1 border-t md:border-t-0 border-gray-700 pt-2 md:pt-0">
                       <div className="text-right">
-                        <span className="text-gray-400 text-sm mr-2">Total:</span>
-                        <span className="text-2xl font-bold text-green-400">{group.totalQty} Pcs</span>
+                        <span className="text-gray-400 text-xs mr-2">Total:</span>
+                        <span className="text-lg font-bold text-green-400">{group.totalQty} Pcs</span>
                       </div>
-                      <span className="text-xl font-bold font-mono text-yellow-400">{formatRupiah(group.totalAmount)}</span>
+                      <span className="text-base font-bold font-mono text-yellow-400">{formatRupiah(group.totalAmount)}</span>
                       {/* Bulk Action Buttons */}
                       <div className="flex items-center gap-2">
                         <button 
@@ -1197,12 +1243,12 @@ export const OrderManagement: React.FC = () => {
                         <div key={`${item.id}-${idx}`} className={`flex justify-between items-center p-3 rounded-lg border ${ecommerceColors.bg} ${ecommerceColors.border} hover:border-gray-500 ml-2 mr-1`}>
                           <div className="flex-1">
                             {/* Part Number - Large and Prominent */}
-                            <p className="text-3xl font-bold text-white font-mono tracking-wider">{item.part_number || '-'}</p>
+                            <p className="text-lg font-bold text-white font-mono tracking-wider">{item.part_number || '-'}</p>
                             {/* Item Name */}
-                            <p className="text-xl font-semibold text-gray-200 mt-0.5">{item.name}</p>
+                            <p className="text-sm font-semibold text-gray-200 mt-0.5">{item.name}</p>
                             {/* Brand & Application */}
                             {(item.brand || item.application) && (
-                              <p className="text-lg text-gray-400 mt-0.5">
+                              <p className="text-xs text-gray-400 mt-0.5">
                                 {item.brand && <span className="text-blue-300 font-medium">{item.brand}</span>}
                                 {item.brand && item.application && <span className="mx-2">•</span>}
                                 {item.application && <span className="text-green-300">{item.application}</span>}
@@ -1211,22 +1257,22 @@ export const OrderManagement: React.FC = () => {
                           </div>
                           <div className="flex items-center gap-2">
                             <div className="text-right">
-                              <p className="text-lg font-bold text-white">{item.qty_keluar} x {formatRupiah(item.harga_total / item.qty_keluar || 0)}</p>
-                              <p className="text-base text-green-400 font-mono">{formatRupiah(item.harga_total)}</p>
+                              <p className="text-sm font-bold text-white">{item.qty_keluar} x {formatRupiah(item.harga_total / item.qty_keluar || 0)}</p>
+                              <p className="text-xs text-green-400 font-mono">{formatRupiah(item.harga_total)}</p>
                             </div>
                             <button 
                               onClick={() => openReturModal(item)} 
-                              className="p-2 rounded bg-orange-900/30 text-orange-400 hover:bg-orange-900/50 transition-colors border border-orange-800" 
+                              className="p-1.5 rounded bg-orange-900/30 text-orange-400 hover:bg-orange-900/50 transition-colors border border-orange-800" 
                               title="Retur"
                             >
-                              <RotateCcw size={20}/>
+                              <RotateCcw size={16}/>
                             </button>
                             <button 
                               onClick={() => handleDeleteSoldItem(item)} 
-                              className="p-2 rounded bg-red-900/30 text-red-400 hover:bg-red-900/50 transition-colors border border-red-800" 
+                              className="p-1.5 rounded bg-red-900/30 text-red-400 hover:bg-red-900/50 transition-colors border border-red-800" 
                               title="Hapus"
                             >
-                              <Trash2 size={20}/>
+                              <Trash2 size={16}/>
                             </button>
                           </div>
                         </div>
