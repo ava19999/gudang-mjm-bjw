@@ -1,6 +1,6 @@
 // FILE: components/common/FloatingQuickAccess.tsx
-import React, { useState, useRef, useEffect } from 'react';
-import { Search, Plus, X, Package, ArrowRight, Loader2, Sparkles, Edit3, MapPin, Tag, Hash, Layers, Image as ImageIcon } from 'lucide-react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { Search, Plus, X, Package, ArrowRight, Loader2, Sparkles, Edit3, MapPin, Tag, Hash, Layers, Image as ImageIcon, Calculator, RefreshCw, ArrowRightLeft } from 'lucide-react';
 import { fetchSearchSuggestions, fetchInventoryByPartNumber } from '../../services/supabaseService';
 import { useStore } from '../../context/StoreContext';
 import { InventoryItem } from '../../types';
@@ -9,6 +9,14 @@ interface FloatingQuickAccessProps {
   onAddNew: () => void;
   onViewItem?: (item: InventoryItem) => void;
   isAdmin?: boolean;
+}
+
+interface ExchangeRates {
+  PHP: number;
+  MYR: number;
+  SGD: number;
+  HKD: number;
+  lastUpdated: string;
 }
 
 export const FloatingQuickAccess: React.FC<FloatingQuickAccessProps> = ({
@@ -23,10 +31,22 @@ export const FloatingQuickAccess: React.FC<FloatingQuickAccessProps> = ({
   const [loading, setLoading] = useState(false);
   const [loadingItem, setLoadingItem] = useState(false);
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
-  const [activeTab, setActiveTab] = useState<'search' | 'add'>('search');
+  const [activeTab, setActiveTab] = useState<'search' | 'add' | 'calc' | 'currency'>('search');
   
   // Preview item state
   const [previewItem, setPreviewItem] = useState<InventoryItem | null>(null);
+  
+  // Calculator state
+  const [calcDisplay, setCalcDisplay] = useState('0');
+  const [calcPrevValue, setCalcPrevValue] = useState<number | null>(null);
+  const [calcOperator, setCalcOperator] = useState<string | null>(null);
+  const [calcWaitingForOperand, setCalcWaitingForOperand] = useState(false);
+  
+  // Currency converter state
+  const [currencyAmount, setCurrencyAmount] = useState('');
+  const [currencyFrom, setCurrencyFrom] = useState<'PHP' | 'MYR' | 'SGD' | 'HKD'>('PHP');
+  const [exchangeRates, setExchangeRates] = useState<ExchangeRates | null>(null);
+  const [loadingRates, setLoadingRates] = useState(false);
   
   // Draggable state
   const [position, setPosition] = useState({ x: 0, y: 0 });
@@ -248,6 +268,160 @@ export const FloatingQuickAccess: React.FC<FloatingQuickAccessProps> = ({
     return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(price);
   };
 
+  // ========== CALCULATOR FUNCTIONS ==========
+  const calcClear = () => {
+    setCalcDisplay('0');
+    setCalcPrevValue(null);
+    setCalcOperator(null);
+    setCalcWaitingForOperand(false);
+  };
+
+  const calcInputDigit = (digit: string) => {
+    if (calcWaitingForOperand) {
+      setCalcDisplay(digit);
+      setCalcWaitingForOperand(false);
+    } else {
+      setCalcDisplay(calcDisplay === '0' ? digit : calcDisplay + digit);
+    }
+  };
+
+  const calcInputDecimal = () => {
+    if (calcWaitingForOperand) {
+      setCalcDisplay('0.');
+      setCalcWaitingForOperand(false);
+      return;
+    }
+    if (!calcDisplay.includes('.')) {
+      setCalcDisplay(calcDisplay + '.');
+    }
+  };
+
+  const calcPerformOperation = (nextOperator: string) => {
+    const inputValue = parseFloat(calcDisplay);
+
+    if (calcPrevValue === null) {
+      setCalcPrevValue(inputValue);
+    } else if (calcOperator) {
+      const result = calculate(calcPrevValue, inputValue, calcOperator);
+      setCalcDisplay(String(result));
+      setCalcPrevValue(result);
+    }
+
+    setCalcWaitingForOperand(true);
+    setCalcOperator(nextOperator);
+  };
+
+  const calculate = (a: number, b: number, op: string): number => {
+    switch (op) {
+      case '+': return a + b;
+      case '-': return a - b;
+      case '×': return a * b;
+      case '÷': return b !== 0 ? a / b : 0;
+      default: return b;
+    }
+  };
+
+  const calcEquals = () => {
+    if (!calcOperator || calcPrevValue === null) return;
+    
+    const inputValue = parseFloat(calcDisplay);
+    const result = calculate(calcPrevValue, inputValue, calcOperator);
+    
+    setCalcDisplay(String(result));
+    setCalcPrevValue(null);
+    setCalcOperator(null);
+    setCalcWaitingForOperand(true);
+  };
+
+  const calcPercent = () => {
+    const value = parseFloat(calcDisplay);
+    setCalcDisplay(String(value / 100));
+  };
+
+  const calcToggleSign = () => {
+    const value = parseFloat(calcDisplay);
+    setCalcDisplay(String(-value));
+  };
+
+  // ========== CURRENCY CONVERTER FUNCTIONS ==========
+  const fetchExchangeRates = useCallback(async () => {
+    setLoadingRates(true);
+    try {
+      // Using exchangerate-api.com free tier (no API key needed for base USD)
+      const response = await fetch('https://api.exchangerate-api.com/v4/latest/IDR');
+      const data = await response.json();
+      
+      // Calculate rates TO IDR (inverse of rates FROM IDR)
+      setExchangeRates({
+        PHP: 1 / data.rates.PHP,
+        MYR: 1 / data.rates.MYR,
+        SGD: 1 / data.rates.SGD,
+        HKD: 1 / data.rates.HKD,
+        lastUpdated: new Date().toLocaleString('id-ID')
+      });
+      
+      // Save to localStorage
+      localStorage.setItem('exchangeRates', JSON.stringify({
+        PHP: 1 / data.rates.PHP,
+        MYR: 1 / data.rates.MYR,
+        SGD: 1 / data.rates.SGD,
+        HKD: 1 / data.rates.HKD,
+        lastUpdated: new Date().toLocaleString('id-ID')
+      }));
+    } catch (err) {
+      console.error('Error fetching exchange rates:', err);
+      // Fallback rates (approximate)
+      const fallback: ExchangeRates = {
+        PHP: 285,    // 1 PHP ≈ 285 IDR
+        MYR: 3600,   // 1 MYR ≈ 3600 IDR
+        SGD: 12000,  // 1 SGD ≈ 12000 IDR
+        HKD: 2050,   // 1 HKD ≈ 2050 IDR
+        lastUpdated: 'Offline (Fallback)'
+      };
+      setExchangeRates(fallback);
+    } finally {
+      setLoadingRates(false);
+    }
+  }, []);
+
+  // Load exchange rates on mount or when currency tab is selected
+  useEffect(() => {
+    if (activeTab === 'currency' && !exchangeRates) {
+      // Try loading from localStorage first
+      const saved = localStorage.getItem('exchangeRates');
+      if (saved) {
+        try {
+          setExchangeRates(JSON.parse(saved));
+        } catch (e) {
+          fetchExchangeRates();
+        }
+      } else {
+        fetchExchangeRates();
+      }
+    }
+  }, [activeTab, exchangeRates, fetchExchangeRates]);
+
+  const convertToIDR = (amount: number, from: 'PHP' | 'MYR' | 'SGD' | 'HKD'): number => {
+    if (!exchangeRates) return 0;
+    return amount * exchangeRates[from];
+  };
+
+  const currencyLabels: Record<string, { code: string; flag: string; name: string }> = {
+    PHP: { code: 'PHP', flag: '🇵🇭', name: 'Philippine Peso' },
+    MYR: { code: 'MYR', flag: '🇲🇾', name: 'Malaysian Ringgit' },
+    SGD: { code: 'SGD', flag: '🇸🇬', name: 'Singapore Dollar' },
+    HKD: { code: 'HKD', flag: '🇭🇰', name: 'Hong Kong Dollar' }
+  };
+
+  const formatIDR = (value: number) => {
+    return new Intl.NumberFormat('id-ID', { 
+      style: 'currency', 
+      currency: 'IDR', 
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0
+    }).format(value);
+  };
+
   return (
     <div 
       ref={wrapperRef} 
@@ -359,31 +533,53 @@ export const FloatingQuickAccess: React.FC<FloatingQuickAccessProps> = ({
           ) : (
             <>
               {/* Header Tabs */}
-              <div className="flex border-b border-gray-700">
+              <div className="flex border-b border-gray-700 overflow-x-auto">
                 <button
                   onClick={() => setActiveTab('search')}
-                  className={`flex-1 px-4 py-3 text-sm font-medium flex items-center justify-center gap-2 transition-colors ${
+                  className={`flex-1 min-w-0 px-2 py-2.5 text-xs font-medium flex items-center justify-center gap-1 transition-colors ${
                     activeTab === 'search'
                       ? 'bg-gray-700 text-blue-400 border-b-2 border-blue-400'
                       : 'text-gray-400 hover:text-gray-200 hover:bg-gray-750'
                   }`}
                 >
-                  <Search size={16} />
-                  Cari Barang
+                  <Search size={14} />
+                  <span className="hidden sm:inline">Cari</span>
                 </button>
                 {isAdmin && (
                   <button
                     onClick={() => setActiveTab('add')}
-                    className={`flex-1 px-4 py-3 text-sm font-medium flex items-center justify-center gap-2 transition-colors ${
+                    className={`flex-1 min-w-0 px-2 py-2.5 text-xs font-medium flex items-center justify-center gap-1 transition-colors ${
                       activeTab === 'add'
                         ? 'bg-gray-700 text-green-400 border-b-2 border-green-400'
                         : 'text-gray-400 hover:text-gray-200 hover:bg-gray-750'
                     }`}
                   >
-                    <Plus size={16} />
-                    Tambah Baru
+                    <Plus size={14} />
+                    <span className="hidden sm:inline">Tambah</span>
                   </button>
                 )}
+                <button
+                  onClick={() => setActiveTab('calc')}
+                  className={`flex-1 min-w-0 px-2 py-2.5 text-xs font-medium flex items-center justify-center gap-1 transition-colors ${
+                    activeTab === 'calc'
+                      ? 'bg-gray-700 text-orange-400 border-b-2 border-orange-400'
+                      : 'text-gray-400 hover:text-gray-200 hover:bg-gray-750'
+                  }`}
+                >
+                  <Calculator size={14} />
+                  <span className="hidden sm:inline">Kalkulat</span>
+                </button>
+                <button
+                  onClick={() => setActiveTab('currency')}
+                  className={`flex-1 min-w-0 px-2 py-2.5 text-xs font-medium flex items-center justify-center gap-1 transition-colors ${
+                    activeTab === 'currency'
+                      ? 'bg-gray-700 text-cyan-400 border-b-2 border-cyan-400'
+                      : 'text-gray-400 hover:text-gray-200 hover:bg-gray-750'
+                  }`}
+                >
+                  <ArrowRightLeft size={14} />
+                  <span className="hidden sm:inline">Kurs</span>
+                </button>
               </div>
 
               {/* Content */}
@@ -479,6 +675,186 @@ export const FloatingQuickAccess: React.FC<FloatingQuickAccessProps> = ({
                       <Plus size={18} />
                       Buka Form Tambah
                     </button>
+                  </div>
+                )}
+
+                {/* Calculator Tab */}
+                {activeTab === 'calc' && (
+                  <div>
+                    {/* Calculator Display */}
+                    <div className="bg-gray-900 rounded-xl p-4 mb-3">
+                      <div className="text-right">
+                        <div className="text-gray-500 text-xs h-4">
+                          {calcPrevValue !== null && calcOperator && `${calcPrevValue} ${calcOperator}`}
+                        </div>
+                        <div className="text-white text-3xl font-mono truncate">
+                          {parseFloat(calcDisplay).toLocaleString('id-ID', { maximumFractionDigits: 10 })}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Calculator Buttons */}
+                    <div className="grid grid-cols-4 gap-2">
+                      {/* Row 1 */}
+                      <button onClick={calcClear} className="bg-gray-600 hover:bg-gray-500 text-white py-3 rounded-xl text-sm font-medium transition-colors">
+                        C
+                      </button>
+                      <button onClick={calcToggleSign} className="bg-gray-600 hover:bg-gray-500 text-white py-3 rounded-xl text-sm font-medium transition-colors">
+                        ±
+                      </button>
+                      <button onClick={calcPercent} className="bg-gray-600 hover:bg-gray-500 text-white py-3 rounded-xl text-sm font-medium transition-colors">
+                        %
+                      </button>
+                      <button onClick={() => calcPerformOperation('÷')} className={`py-3 rounded-xl text-sm font-medium transition-colors ${calcOperator === '÷' ? 'bg-orange-400 text-white' : 'bg-orange-500 hover:bg-orange-400 text-white'}`}>
+                        ÷
+                      </button>
+
+                      {/* Row 2 */}
+                      <button onClick={() => calcInputDigit('7')} className="bg-gray-700 hover:bg-gray-600 text-white py-3 rounded-xl text-sm font-medium transition-colors">
+                        7
+                      </button>
+                      <button onClick={() => calcInputDigit('8')} className="bg-gray-700 hover:bg-gray-600 text-white py-3 rounded-xl text-sm font-medium transition-colors">
+                        8
+                      </button>
+                      <button onClick={() => calcInputDigit('9')} className="bg-gray-700 hover:bg-gray-600 text-white py-3 rounded-xl text-sm font-medium transition-colors">
+                        9
+                      </button>
+                      <button onClick={() => calcPerformOperation('×')} className={`py-3 rounded-xl text-sm font-medium transition-colors ${calcOperator === '×' ? 'bg-orange-400 text-white' : 'bg-orange-500 hover:bg-orange-400 text-white'}`}>
+                        ×
+                      </button>
+
+                      {/* Row 3 */}
+                      <button onClick={() => calcInputDigit('4')} className="bg-gray-700 hover:bg-gray-600 text-white py-3 rounded-xl text-sm font-medium transition-colors">
+                        4
+                      </button>
+                      <button onClick={() => calcInputDigit('5')} className="bg-gray-700 hover:bg-gray-600 text-white py-3 rounded-xl text-sm font-medium transition-colors">
+                        5
+                      </button>
+                      <button onClick={() => calcInputDigit('6')} className="bg-gray-700 hover:bg-gray-600 text-white py-3 rounded-xl text-sm font-medium transition-colors">
+                        6
+                      </button>
+                      <button onClick={() => calcPerformOperation('-')} className={`py-3 rounded-xl text-sm font-medium transition-colors ${calcOperator === '-' ? 'bg-orange-400 text-white' : 'bg-orange-500 hover:bg-orange-400 text-white'}`}>
+                        −
+                      </button>
+
+                      {/* Row 4 */}
+                      <button onClick={() => calcInputDigit('1')} className="bg-gray-700 hover:bg-gray-600 text-white py-3 rounded-xl text-sm font-medium transition-colors">
+                        1
+                      </button>
+                      <button onClick={() => calcInputDigit('2')} className="bg-gray-700 hover:bg-gray-600 text-white py-3 rounded-xl text-sm font-medium transition-colors">
+                        2
+                      </button>
+                      <button onClick={() => calcInputDigit('3')} className="bg-gray-700 hover:bg-gray-600 text-white py-3 rounded-xl text-sm font-medium transition-colors">
+                        3
+                      </button>
+                      <button onClick={() => calcPerformOperation('+')} className={`py-3 rounded-xl text-sm font-medium transition-colors ${calcOperator === '+' ? 'bg-orange-400 text-white' : 'bg-orange-500 hover:bg-orange-400 text-white'}`}>
+                        +
+                      </button>
+
+                      {/* Row 5 */}
+                      <button onClick={() => calcInputDigit('0')} className="bg-gray-700 hover:bg-gray-600 text-white py-3 rounded-xl text-sm font-medium transition-colors col-span-2">
+                        0
+                      </button>
+                      <button onClick={calcInputDecimal} className="bg-gray-700 hover:bg-gray-600 text-white py-3 rounded-xl text-sm font-medium transition-colors">
+                        ,
+                      </button>
+                      <button onClick={calcEquals} className="bg-blue-500 hover:bg-blue-400 text-white py-3 rounded-xl text-sm font-bold transition-colors">
+                        =
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Currency Converter Tab */}
+                {activeTab === 'currency' && (
+                  <div>
+                    {/* Header with refresh */}
+                    <div className="flex items-center justify-between mb-3">
+                      <h4 className="text-white text-sm font-medium">Konversi ke IDR</h4>
+                      <button
+                        onClick={fetchExchangeRates}
+                        disabled={loadingRates}
+                        className="text-gray-400 hover:text-white p-1 transition-colors disabled:opacity-50"
+                        title="Refresh Kurs"
+                      >
+                        <RefreshCw size={16} className={loadingRates ? 'animate-spin' : ''} />
+                      </button>
+                    </div>
+
+                    {/* Amount Input */}
+                    <div className="relative mb-3">
+                      <input
+                        type="number"
+                        value={currencyAmount}
+                        onChange={(e) => setCurrencyAmount(e.target.value)}
+                        placeholder="Masukkan jumlah..."
+                        className="w-full px-4 py-3 bg-gray-700 border border-gray-600 rounded-xl text-white placeholder-gray-400 focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500 outline-none text-lg font-mono"
+                      />
+                    </div>
+
+                    {/* Currency Selector */}
+                    <div className="grid grid-cols-4 gap-2 mb-4">
+                      {(['PHP', 'MYR', 'SGD', 'HKD'] as const).map((curr) => (
+                        <button
+                          key={curr}
+                          onClick={() => setCurrencyFrom(curr)}
+                          className={`py-2 rounded-xl text-xs font-medium transition-colors flex flex-col items-center gap-0.5 ${
+                            currencyFrom === curr
+                              ? 'bg-cyan-500 text-white'
+                              : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                          }`}
+                        >
+                          <span className="text-lg">{currencyLabels[curr].flag}</span>
+                          <span>{curr}</span>
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Result */}
+                    {currencyAmount && exchangeRates && (
+                      <div className="bg-gray-900 rounded-xl p-4">
+                        <div className="text-center">
+                          <div className="text-gray-400 text-xs mb-1">
+                            {currencyLabels[currencyFrom].flag} {parseFloat(currencyAmount || '0').toLocaleString()} {currencyFrom}
+                          </div>
+                          <div className="text-2xl font-bold text-green-400">
+                            {formatIDR(convertToIDR(parseFloat(currencyAmount || '0'), currencyFrom))}
+                          </div>
+                          <div className="text-gray-500 text-[10px] mt-2">
+                            1 {currencyFrom} = {formatIDR(exchangeRates[currencyFrom])}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* All Rates */}
+                    {exchangeRates && (
+                      <div className="mt-3 bg-gray-750 rounded-xl p-3">
+                        <div className="text-gray-400 text-[10px] mb-2 flex items-center justify-between">
+                          <span>Kurs Saat Ini</span>
+                          <span className="text-gray-500">{exchangeRates.lastUpdated}</span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          {(['PHP', 'MYR', 'SGD', 'HKD'] as const).map((curr) => (
+                            <div key={curr} className="flex items-center gap-2 text-xs">
+                              <span>{currencyLabels[curr].flag}</span>
+                              <span className="text-gray-400">{curr}</span>
+                              <span className="text-white font-mono ml-auto">
+                                {exchangeRates[curr].toLocaleString('id-ID', { maximumFractionDigits: 0 })}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Loading state */}
+                    {loadingRates && !exchangeRates && (
+                      <div className="text-center py-8">
+                        <Loader2 className="animate-spin text-cyan-400 mx-auto mb-2" size={24} />
+                        <p className="text-gray-400 text-xs">Memuat kurs terbaru...</p>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
