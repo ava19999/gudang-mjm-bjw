@@ -668,6 +668,9 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
   const [savingStatus, setSavingStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
   const [partOptions, setPartOptions] = useState<string[]>([]);
   
+  // SELECTED RESI FOR PROCESS
+  const [selectedResis, setSelectedResis] = useState<Set<string>>(new Set());
+  
   // FILTER STATES (VIEW)
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [filterEcommerce, setFilterEcommerce] = useState<string>('');
@@ -1670,8 +1673,95 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
     return true;
   });
 
+  // GROUP BY RESI - mengelompokkan item berdasarkan resi yang sama
+  const groupedByResi = displayedRows.reduce((acc, row) => {
+    const resiKey = row.resi || 'NO_RESI';
+    if (!acc[resiKey]) {
+      acc[resiKey] = [];
+    }
+    acc[resiKey].push(row);
+    return acc;
+  }, {} as Record<string, Stage3Row[]>);
+
+  // Hitung status per grup resi
+  const getGroupStatus = (items: Stage3Row[]) => {
+    const allReady = items.every(r => r.status_message === 'Ready' || (r.status_message === 'Double' && r.force_override_double));
+    const hasStokKurang = items.some(r => r.status_message === 'Stok Kurang' || r.status_message === 'Stok Total Kurang');
+    const hasBelumScan = items.some(r => r.status_message === 'Belum Scan S1');
+    const hasPendingS2 = items.some(r => r.status_message === 'Pending S2');
+    if (allReady) return { status: 'Ready', color: 'bg-green-600' };
+    if (hasBelumScan) return { status: 'Belum Scan S1', color: 'bg-red-800' };
+    if (hasPendingS2) return { status: 'Pending S2', color: 'bg-yellow-600' };
+    if (hasStokKurang) return { status: 'Stok Kurang', color: 'bg-red-600' };
+    return { status: 'Butuh Input', color: 'bg-blue-600' };
+  };
+
+  // Toggle select resi group
+  const toggleSelectResi = (resi: string) => {
+    setSelectedResis(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(resi)) {
+        newSet.delete(resi);
+      } else {
+        newSet.add(resi);
+      }
+      return newSet;
+    });
+  };
+
+  // Select all visible resis
+  const toggleSelectAll = () => {
+    const allResis = Object.keys(groupedByResi);
+    if (selectedResis.size === allResis.length) {
+      setSelectedResis(new Set());
+    } else {
+      setSelectedResis(new Set(allResis));
+    }
+  };
+
+  // Process only selected resis
+  const handleProcessSelected = async () => {
+    if (selectedResis.size === 0) {
+      alert("Pilih minimal 1 resi untuk diproses!");
+      return;
+    }
+    
+    // Filter rows yang resinya dipilih dan statusnya ready
+    const selectedRows = rows.filter(r => {
+      if (!selectedResis.has(r.resi)) return false;
+      const normalValid = r.is_db_verified && r.is_stock_valid && r.part_number;
+      const doubleOverridden = r.status_message === 'Double' && r.force_override_double && r.is_stock_valid && r.part_number;
+      return normalValid || doubleOverridden;
+    });
+    
+    if (selectedRows.length === 0) {
+      alert("Tidak ada item siap proses dari resi yang dipilih. Pastikan status hijau (Ready).");
+      return;
+    }
+    
+    if (!confirm(`Proses ${selectedRows.length} item dari ${selectedResis.size} resi ke Barang Keluar?`)) return;
+    
+    setLoading(true);
+    const itemsToProcess = selectedRows.map(r => ({
+      ...r,
+      nama_pesanan: r.nama_barang_base || r.nama_barang_csv
+    }));
+    
+    const result = await processBarangKeluarBatch(itemsToProcess, selectedStore);
+    setLoading(false);
+    
+    if (result.success) {
+      alert(`✅ ${result.processed} item berhasil diproses ke Barang Keluar!`);
+      setSelectedResis(new Set()); // Clear selection
+      await loadSavedDataFromDB();
+      onRefresh?.();
+    } else {
+      alert(`Error: ${result.errors.join('\n')}`);
+    }
+  };
+
   return (
-    <div className="bg-gray-900 text-white min-h-screen p-2 pb-20 md:pb-2 text-sm font-sans flex flex-col">
+    <div className="bg-gray-900 text-white h-screen p-2 pb-20 md:pb-2 text-sm font-sans flex flex-col overflow-hidden">
       <datalist id="part-options">
         {partOptions.map((p, idx) => (<option key={idx} value={p} />))}
       </datalist>
@@ -2024,41 +2114,102 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
         </div>
       </div>
 
+      {/* BULK SELECT BAR - FIXED di atas table, tampil jika ada yang dipilih */}
+      {selectedResis.size > 0 && (
+        <div className="bg-blue-900/95 backdrop-blur-sm border border-blue-600 rounded-lg p-2 mb-2 flex items-center justify-between shadow-lg flex-shrink-0">
+          <div className="flex items-center gap-3">
+            <span className="text-blue-200 font-bold text-sm">
+              {selectedResis.size} resi dipilih ({rows.filter(r => selectedResis.has(r.resi)).length} item)
+            </span>
+            <button 
+              onClick={() => setSelectedResis(new Set())}
+              className="text-xs text-blue-300 hover:text-white underline"
+            >
+              Batalkan
+            </button>
+          </div>
+          <button 
+            onClick={handleProcessSelected}
+            disabled={loading}
+            className="bg-green-600 hover:bg-green-500 text-white px-4 py-1.5 rounded font-bold text-sm flex items-center gap-2 disabled:opacity-50"
+          >
+            <CheckCircle size={16}/> Proses {selectedResis.size} Resi
+          </button>
+        </div>
+      )}
+
       {/* EXCEL-LIKE TABLE */}
-      <div className="flex-1 overflow-x-auto overflow-y-auto border border-gray-600 bg-gray-800 shadow-inner custom-scrollbar">
+      <div className="flex-1 min-h-0 overflow-x-auto overflow-y-auto border border-gray-600 bg-gray-800 shadow-inner custom-scrollbar">
         <table className="border-collapse text-[10px] md:text-xs min-w-[1000px] md:w-full md:table-fixed">
           <thead className="sticky top-0 z-20 shadow-md">
             <tr className="bg-gray-700 text-gray-200 font-semibold">
+              <th className="border border-gray-600 px-1 py-1 text-center w-[40px] md:w-[3%] bg-gray-700">
+                <input 
+                  type="checkbox" 
+                  checked={Object.keys(groupedByResi).length > 0 && selectedResis.size === Object.keys(groupedByResi).length}
+                  onChange={toggleSelectAll}
+                  className="w-4 h-4 accent-green-500 cursor-pointer"
+                  title="Pilih Semua"
+                />
+              </th>
               <th className="border border-gray-600 px-1 py-1 text-center w-[55px] md:w-[5%] bg-gray-700">Status</th>
               <th className="border border-gray-600 px-1 py-1 text-center w-[75px] md:w-[6%] bg-gray-700">Tanggal</th>
               <th className="border border-gray-600 px-1 py-1 text-left w-[80px] md:w-[7%] bg-gray-700">Resi</th>
               <th className="border border-gray-600 px-1 py-1 text-center w-[55px] md:w-[5%] bg-gray-700">E-Comm</th>
               <th className="border border-gray-600 px-1 py-1 text-center w-[45px] md:w-[4%] bg-gray-700">Toko</th>
-              <th className="border border-gray-600 px-1 py-1 text-left w-[70px] md:w-[7%] bg-gray-600">Customer</th>
+              <th className="border border-gray-600 px-1 py-1 text-left w-[70px] md:w-[6%] bg-gray-600">Customer</th>
               <th className="border border-gray-600 px-1 py-1 text-left border-b-2 border-b-yellow-600/50 w-[90px] md:w-[8%] bg-gray-600">Part No.</th>
-              <th className="border border-gray-600 px-1 py-1 text-left w-[110px] md:w-[11%] bg-gray-700">Nama (CSV)</th>
-              <th className="border border-gray-600 px-1 py-1 text-left w-[110px] md:w-[11%] bg-gray-700">Nama (Base)</th>
+              <th className="border border-gray-600 px-1 py-1 text-left w-[140px] md:w-[12%] bg-gray-700">Nama (CSV)</th>
+              <th className="border border-gray-600 px-1 py-1 text-left w-[100px] md:w-[9%] bg-gray-700">Nama (Base)</th>
               <th className="border border-gray-600 px-1 py-1 text-left w-[55px] md:w-[5%] bg-gray-700">Brand</th>
-              <th className="border border-gray-600 px-1 py-1 text-left w-[70px] md:w-[7%] bg-gray-700">Aplikasi</th>
+              <th className="border border-gray-600 px-1 py-1 text-left w-[70px] md:w-[6%] bg-gray-700">Aplikasi</th>
               <th className="border border-gray-600 px-1 py-1 text-center w-[40px] md:w-[3%] bg-gray-700">Stok</th>
               <th className="border border-gray-600 px-1 py-1 text-center border-b-2 border-b-yellow-600/50 w-[40px] md:w-[3%] bg-gray-600">Qty</th>
-              <th className="border border-gray-600 px-1 py-1 text-right border-b-2 border-b-yellow-600/50 w-[70px] md:w-[6%] bg-gray-600">Total</th>
-              <th className="border border-gray-600 px-1 py-1 text-right w-[60px] md:w-[5%] bg-gray-700">Satuan</th>
-              <th className="border border-gray-600 px-1 py-1 text-left w-[60px] md:w-[5%] bg-gray-700">No. Pesanan</th>
+              <th className="border border-gray-600 px-1 py-1 text-right border-b-2 border-b-yellow-600/50 w-[70px] md:w-[5%] bg-gray-600">Total</th>
+              <th className="border border-gray-600 px-1 py-1 text-right w-[60px] md:w-[4%] bg-gray-700">Satuan</th>
+              <th className="border border-gray-600 px-1 py-1 text-left w-[60px] md:w-[4%] bg-gray-700">No. Pesanan</th>
               <th className="border border-gray-600 px-1 py-1 text-center w-[35px] md:w-[2%] bg-gray-700">#</th>
             </tr>
           </thead>
           <tbody className="bg-gray-900 text-gray-300">
-            {displayedRows.length === 0 ? (
-              <tr><td colSpan={17} className="text-center py-10 text-gray-500 italic">Data Kosong. Silakan Import atau Load Pending.</td></tr>
+            {Object.keys(groupedByResi).length === 0 ? (
+              <tr><td colSpan={18} className="text-center py-10 text-gray-500 italic">Data Kosong. Silakan Import atau Load Pending.</td></tr>
             ) : (
-              displayedRows.map((row, idx) => (
-                <tr key={row.id} className={`group hover:bg-gray-800 transition-colors ${
-                  !row.is_db_verified ? 'bg-red-900/10' : 
-                  row.status_message === 'Stok Total Kurang' ? 'bg-pink-900/20' :
-                  !row.is_stock_valid ? 'bg-yellow-900/10' : ''
-                }`}>
+              Object.entries(groupedByResi).map(([resiKey, resiItems]) => {
+                const groupStatus = getGroupStatus(resiItems);
+                const isSelected = selectedResis.has(resiKey);
+                const firstItem = resiItems[0];
+                const totalQty = resiItems.reduce((sum, r) => sum + r.qty_keluar, 0);
+                const totalHarga = resiItems.reduce((sum, r) => sum + r.harga_total, 0);
+                
+                return resiItems.map((row, itemIdx) => {
+                  const isFirstOfGroup = itemIdx === 0;
+                  const idx = displayedRows.indexOf(row);
                   
+                  return (
+                    <tr key={row.id} className={`group hover:bg-gray-800 transition-colors ${
+                      isSelected ? 'bg-blue-900/20' :
+                      !row.is_db_verified ? 'bg-red-900/10' : 
+                      row.status_message === 'Stok Total Kurang' ? 'bg-pink-900/20' :
+                      !row.is_stock_valid ? 'bg-yellow-900/10' : ''
+                    } ${isFirstOfGroup && resiItems.length > 1 ? 'border-t-2 border-t-gray-500' : ''}`}>
+                      
+                      {/* CHECKBOX - hanya tampil di baris pertama grup */}
+                      {isFirstOfGroup ? (
+                        <td rowSpan={resiItems.length} className={`border border-gray-600 p-0 text-center align-middle ${isSelected ? 'bg-blue-900/30' : 'bg-gray-800'}`}>
+                          <div className="flex flex-col items-center gap-1 py-1">
+                            <input 
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() => toggleSelectResi(resiKey)}
+                              className="w-5 h-5 accent-green-500 cursor-pointer"
+                            />
+                            {resiItems.length > 1 && (
+                              <span className="text-[9px] text-gray-400">{resiItems.length} item</span>
+                            )}
+                          </div>
+                        </td>
+                      ) : null}
                   {/* STATUS */}
                   <td className="border border-gray-600 p-0 text-center align-middle">
                      <div className="flex flex-col items-center gap-0.5 py-0.5">
@@ -2163,7 +2314,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
 
                   {/* NAMA BARANG DARI CSV/EXCEL */}
                   <td className="border border-gray-600 px-1.5 py-1 text-[11px] leading-tight align-middle text-blue-300 bg-blue-900/10">
-                    <div className="line-clamp-2 hover:line-clamp-none max-h-[3.5em] overflow-hidden" title={row.nama_barang_csv}>
+                    <div className="whitespace-normal break-words" title={row.nama_barang_csv}>
                         {row.nama_barang_csv ? row.nama_barang_csv : <span className="italic text-gray-500">-</span>}
                     </div>
                   </td>
@@ -2175,10 +2326,10 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                     </div>
                   </td>
 
-                  {/* BRAND */}
-                  <td className="border border-gray-600 px-1 py-1 text-[11px] truncate text-gray-400">{row.brand}</td>
-                  {/* APPLICATION / MOBIL */}
+                  {/* BRAND - tampilkan dari application karena data tertukar di DB */}
                   <td className="border border-gray-600 px-1 py-1 text-[11px] truncate text-gray-400">{row.application}</td>
+                  {/* APPLICATION / MOBIL - tampilkan dari brand karena data tertukar di DB */}
+                  <td className="border border-gray-600 px-1 py-1 text-[11px] truncate text-gray-400">{row.brand}</td>
 
                   {/* STOK INFO */}
                   <td className={`border border-gray-600 px-1 text-center font-bold ${row.stock_saat_ini < row.qty_keluar ? 'text-red-500 bg-red-900/20' : 'text-green-500'}`}>
@@ -2235,7 +2386,9 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                     </div>
                   </td>
                 </tr>
-              ))
+                  );
+                })
+              })
             )}
           </tbody>
         </table>
