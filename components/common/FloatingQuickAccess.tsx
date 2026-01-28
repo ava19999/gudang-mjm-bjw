@@ -157,17 +157,7 @@ export const FloatingQuickAccess: React.FC<FloatingQuickAccessProps> = ({
     };
   }, [isDragging, dragOffset]);
 
-  // Close when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
-        setIsExpanded(false);
-        setPreviewItem(null);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+  // Removed: Close when clicking outside - user requested to keep panel open
 
   // Focus input when expanded
   useEffect(() => {
