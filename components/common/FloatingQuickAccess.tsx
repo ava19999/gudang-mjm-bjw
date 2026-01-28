@@ -58,6 +58,19 @@ export const FloatingQuickAccess: React.FC<FloatingQuickAccessProps> = ({
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
+  // Calculate panel position based on button position
+  const getPanelPosition = () => {
+    // position.x is the distance from the RIGHT edge
+    // position.y is the distance from the BOTTOM edge
+    const isNearTop = position.y > window.innerHeight - 250; // Button is near top when bottom distance is large
+    const isNearRight = position.x < window.innerWidth / 2; // Button is on the right side
+    
+    return {
+      isNearTop,
+      isNearRight
+    };
+  };
+
   // Load saved position
   useEffect(() => {
     const saved = localStorage.getItem('floatingBtnPosition');
@@ -422,6 +435,8 @@ export const FloatingQuickAccess: React.FC<FloatingQuickAccessProps> = ({
     }).format(value);
   };
 
+  const panelPos = getPanelPosition();
+
   return (
     <div 
       ref={wrapperRef} 
@@ -433,7 +448,17 @@ export const FloatingQuickAccess: React.FC<FloatingQuickAccessProps> = ({
     >
       {/* Expanded Panel */}
       {isExpanded && (
-        <div className="absolute bottom-16 right-0 w-80 sm:w-96 bg-gray-800 border border-gray-700 rounded-2xl shadow-2xl overflow-hidden animate-in slide-in-from-bottom-4 duration-200">
+        <div 
+          className={`absolute w-80 sm:w-96 bg-gray-800 border border-gray-700 rounded-2xl shadow-2xl overflow-hidden animate-in duration-200 ${
+            panelPos.isNearTop 
+              ? 'top-16 slide-in-from-top-4' 
+              : 'bottom-16 slide-in-from-bottom-4'
+          } ${
+            panelPos.isNearRight 
+              ? 'right-0' 
+              : 'left-0'
+          }`}
+        >
           {/* Preview Item View */}
           {previewItem ? (
             <div className="p-4">
