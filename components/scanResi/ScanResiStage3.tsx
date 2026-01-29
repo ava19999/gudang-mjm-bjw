@@ -1868,11 +1868,13 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
     const splitCount = parseInt(input);
     if (isNaN(splitCount) || splitCount < 2) return;
     const newPriceTotal = row.harga_total / splitCount;
+    
     const updatedParent: Stage3Row = {
       ...row,
       harga_total: newPriceTotal,
       harga_satuan: row.qty_keluar > 0 ? (newPriceTotal / row.qty_keluar) : 0,
-      nama_barang_csv: `${row.nama_barang_csv} (Pecahan 1)`
+      // Nama CSV tetap sama, tidak perlu label pecahan
+      nama_barang_csv: row.nama_barang_csv
     };
     const newChildren: Stage3Row[] = [];
     for (let i = 2; i <= splitCount; i++) {
@@ -1880,7 +1882,8 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
         ...updatedParent,
         id: Math.random().toString(36).substr(2, 9), 
         part_number: '', 
-        nama_barang_csv: `${row.nama_barang_csv} (Pecahan ${i})`,
+        // Nama CSV tetap sama, tidak perlu label pecahan
+        nama_barang_csv: row.nama_barang_csv,
         nama_barang_base: '',
         stock_saat_ini: 0,
         status_message: 'Isi Part Number',
