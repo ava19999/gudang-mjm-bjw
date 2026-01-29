@@ -15,9 +15,7 @@ import {
   getBulkPartNumberInfo,
   insertProductAlias,
   deleteProcessedResiItems,
-  deleteProcessedScanResi,
   deleteResiItemById,
-  deleteScanResiById,
   checkResiOrOrderStatus,
   checkExistingInBarangKeluar,
   getStage1ResiList,
@@ -26,13 +24,10 @@ import {
 import { 
   parseShopeeCSV, 
   parseTikTokCSV, 
-  parseShopeeIntlCSV,
-  detectCSVPlatform,
-  convertToIDR,
-  CURRENCY_RATES
+  detectCSVPlatform 
 } from '../../services/csvParserService';
 import { 
-  Upload, Save, Trash2, Plus, DownloadCloud, RefreshCw, Filter, CheckCircle, Loader2, Settings, Search, X, AlertTriangle, Package
+  Upload, Save, Trash2, Plus, DownloadCloud, RefreshCw, Filter, CheckCircle, Loader2, Settings, Search
 } from 'lucide-react';
 import { EcommercePlatform, SubToko, NegaraEkspor } from '../../types';
 
@@ -51,7 +46,6 @@ interface Stage3Row {
   qty_keluar: number;
   harga_total: number;
   harga_satuan: number;
-  mata_uang: string;          // Mata uang (IDR, PHP, MYR, SGD, HKD) - untuk Ekspor
   no_pesanan: string;
   customer: string;
   is_db_verified: boolean;
@@ -60,22 +54,13 @@ interface Stage3Row {
   force_override_double: boolean;  // FITUR 1: Flag untuk force override status Double
 }
 
-// Interface untuk item yang di-skip saat upload CSV
-interface SkippedItem {
-  resi: string;
-  order_id?: string;
-  customer?: string;
-  product_name?: string;
-  reason: string;
-}
-
 // --- KOMPONEN DROPDOWN E-COMMERCE (SEARCHABLE) ---
 const EcommerceDropdown = ({ value, onChange }: { value: string, onChange: (v: string) => void }) => {
   const [show, setShow] = useState(false);
   const [input, setInput] = useState(value);
   const ref = useRef<HTMLDivElement>(null);
 
-  const ecommerceOptions = ['SHOPEE', 'TIKTOK', 'TIKTOK INSTAN', 'KILAT', 'RESELLER', 'EKSPOR'];
+  const ecommerceOptions = ['SHOPEE', 'TIKTOK', 'KILAT', 'RESELLER', 'EKSPOR'];
 
   useEffect(() => { setInput(value); }, [value]);
 
@@ -134,7 +119,6 @@ const EcommerceFilterDropdown = ({ value, onChange }: { value: string, onChange:
   const ecommerceOptions = [
     'SHOPEE', 
     'TIKTOK', 
-    'TIKTOK INSTAN',
     'KILAT', 
     'RESELLER', 
     'EKSPOR',
@@ -247,812 +231,12 @@ const SubTokoResellerDropdown = ({ value, onChange, suggestions }: { value: stri
   );
 };
 
-// --- KOMPONEN MODAL PROCESSING BARANG KELUAR ---
-interface ProcessingItem {
-  id: string;
-  resi: string;
-  part_number: string;
-  nama_barang: string;
-  qty: number;
-  customer: string;
-  status: 'pending' | 'processing' | 'success' | 'error';
-  errorMessage?: string;
-}
-
-const ProcessingModal = ({ 
-  isOpen, 
-  items,
-  progress,
-  currentItem,
-  isComplete,
-  successCount,
-  errorCount,
-  onClose
-}: { 
-  isOpen: boolean;
-  items: ProcessingItem[];
-  progress: number;
-  currentItem: string;
-  isComplete: boolean;
-  successCount: number;
-  errorCount: number;
-  onClose: () => void;
-}) => {
-  const logContainerRef = useRef<HTMLDivElement>(null);
-  
-  // Auto-scroll ke item yang sedang diproses
-  useEffect(() => {
-    if (logContainerRef.current && !isComplete) {
-      logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
-    }
-  }, [items, isComplete]);
-  
-  if (!isOpen) return null;
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-      <div className="bg-gray-800 rounded-xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col border border-gray-600">
-        {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-gray-700">
-          <div className="flex items-center gap-3">
-            {!isComplete ? (
-              <Loader2 className="w-6 h-6 text-blue-500 animate-spin" />
-            ) : errorCount > 0 ? (
-              <AlertTriangle className="w-6 h-6 text-yellow-500" />
-            ) : (
-              <CheckCircle className="w-6 h-6 text-green-500" />
-            )}
-            <h2 className="text-lg font-bold text-white">
-              {!isComplete ? 'Memproses Barang Keluar...' : 'Proses Selesai'}
-            </h2>
-          </div>
-        </div>
-
-        {/* Progress Bar */}
-        <div className="px-4 py-3 border-b border-gray-700 bg-gray-750">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-sm text-gray-300">Progress</span>
-            <span className="text-sm font-bold text-blue-400">{Math.round(progress)}%</span>
-          </div>
-          <div className="w-full h-3 bg-gray-700 rounded-full overflow-hidden">
-            <div 
-              className={`h-full rounded-full transition-all duration-300 ease-out ${
-                isComplete 
-                  ? errorCount > 0 ? 'bg-gradient-to-r from-yellow-500 to-yellow-400' : 'bg-gradient-to-r from-green-500 to-green-400'
-                  : 'bg-gradient-to-r from-blue-600 via-purple-500 to-blue-600'
-              }`}
-              style={{ width: `${progress}%` }}
-            />
-          </div>
-          {!isComplete && currentItem && (
-            <div className="mt-2 text-xs text-gray-400 truncate">
-              Sedang memproses: <span className="text-blue-300 font-mono">{currentItem}</span>
-            </div>
-          )}
-        </div>
-
-        {/* Summary Stats */}
-        <div className="px-4 py-2 border-b border-gray-700 bg-gray-750/50">
-          <div className="grid grid-cols-3 gap-3 text-center">
-            <div className="bg-gray-700/50 rounded-lg p-2">
-              <div className="text-xl font-bold text-white">{items.length}</div>
-              <div className="text-[10px] text-gray-400">Total Item</div>
-            </div>
-            <div className="bg-green-900/30 rounded-lg p-2">
-              <div className="text-xl font-bold text-green-400">{successCount}</div>
-              <div className="text-[10px] text-gray-400">Sukses</div>
-            </div>
-            <div className="bg-red-900/30 rounded-lg p-2">
-              <div className="text-xl font-bold text-red-400">{errorCount}</div>
-              <div className="text-[10px] text-gray-400">Gagal</div>
-            </div>
-          </div>
-        </div>
-
-        {/* Processing Log */}
-        <div ref={logContainerRef} className="flex-1 overflow-auto p-3 space-y-1 min-h-[200px] max-h-[300px]">
-          {items.map((item, idx) => (
-            <div 
-              key={`${item.resi}-${item.part_number}-${idx}`}
-              className={`flex items-center gap-2 p-2 rounded text-xs ${
-                item.status === 'processing' ? 'bg-blue-900/30 border border-blue-600' :
-                item.status === 'success' ? 'bg-green-900/20' :
-                item.status === 'error' ? 'bg-red-900/20' :
-                'bg-gray-700/30'
-              }`}
-            >
-              {/* Status Icon */}
-              <div className="flex-shrink-0 w-5">
-                {item.status === 'processing' && <Loader2 size={14} className="text-blue-400 animate-spin" />}
-                {item.status === 'success' && <CheckCircle size={14} className="text-green-400" />}
-                {item.status === 'error' && <X size={14} className="text-red-400" />}
-                {item.status === 'pending' && <div className="w-2 h-2 rounded-full bg-gray-500 mx-1" />}
-              </div>
-              
-              {/* Item Info */}
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="font-mono text-yellow-400 text-[11px]">{item.part_number}</span>
-                  <span className="text-gray-400">×{item.qty}</span>
-                </div>
-                <div className="text-gray-300 truncate">{item.nama_barang}</div>
-                <div className="flex items-center gap-2 text-[10px] text-gray-500">
-                  <span>{item.customer}</span>
-                  <span className="text-blue-400 font-mono">{item.resi}</span>
-                </div>
-                {item.errorMessage && (
-                  <div className={`text-[10px] mt-0.5 ${item.status === 'error' ? 'text-red-400' : 'text-gray-400'}`}>
-                    {item.errorMessage}
-                  </div>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {/* Footer */}
-        <div className="p-4 border-t border-gray-700">
-          <button
-            onClick={onClose}
-            disabled={!isComplete}
-            className={`w-full py-2.5 rounded-lg font-bold text-sm transition-all ${
-              isComplete 
-                ? 'bg-blue-600 hover:bg-blue-500 text-white' 
-                : 'bg-gray-700 text-gray-500 cursor-not-allowed'
-            }`}
-          >
-            {isComplete ? 'Tutup' : 'Menunggu proses selesai...'}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-// --- DELETE CONFIRMATION MODAL ---
-interface DeleteItem {
-  id: string;
-  resi: string;
-  part_number: string;
-  nama_barang: string;
-  customer: string;
-  ecommerce: string;
-  sub_toko: string;
-}
-
-const DeleteConfirmModal = ({
-  isOpen,
-  onClose,
-  onConfirm,
-  items,
-  isDeleting,
-  deleteProgress,
-  deleteComplete,
-  deletedCount,
-  errorCount
-}: {
-  isOpen: boolean;
-  onClose: () => void;
-  onConfirm: () => void;
-  items: DeleteItem[];
-  isDeleting: boolean;
-  deleteProgress: number;
-  deleteComplete: boolean;
-  deletedCount: number;
-  errorCount: number;
-}) => {
-  if (!isOpen) return null;
-
-  // Group items by resi
-  const groupedByResi = items.reduce((acc, item) => {
-    if (!acc[item.resi]) {
-      acc[item.resi] = [];
-    }
-    acc[item.resi].push(item);
-    return acc;
-  }, {} as Record<string, DeleteItem[]>);
-
-  const resiCount = Object.keys(groupedByResi).length;
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-      <div className="bg-gray-800 rounded-xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col border border-red-600/50">
-        {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-gray-700 bg-red-900/20">
-          <div className="flex items-center gap-3">
-            {isDeleting && !deleteComplete ? (
-              <Loader2 className="w-6 h-6 text-red-500 animate-spin" />
-            ) : deleteComplete ? (
-              <CheckCircle className="w-6 h-6 text-green-500" />
-            ) : (
-              <AlertTriangle className="w-6 h-6 text-red-500" />
-            )}
-            <h2 className="text-lg font-bold text-white">
-              {deleteComplete ? 'Penghapusan Selesai' : isDeleting ? 'Menghapus Data...' : 'Konfirmasi Hapus Data'}
-            </h2>
-          </div>
-          {!isDeleting && (
-            <button onClick={onClose} className="text-gray-400 hover:text-white p-1 rounded hover:bg-gray-700">
-              <X size={20} />
-            </button>
-          )}
-        </div>
-
-        {/* Progress Bar - only show when deleting */}
-        {isDeleting && (
-          <div className="px-4 py-3 border-b border-gray-700 bg-gray-750">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-sm text-gray-300">Progress Hapus</span>
-              <span className="text-sm font-bold text-red-400">{Math.round(deleteProgress)}%</span>
-            </div>
-            <div className="w-full h-3 bg-gray-700 rounded-full overflow-hidden">
-              <div 
-                className={`h-full rounded-full transition-all duration-300 ease-out ${
-                  deleteComplete 
-                    ? 'bg-gradient-to-r from-green-500 to-green-400'
-                    : 'bg-gradient-to-r from-red-600 via-red-500 to-red-600'
-                }`}
-                style={{ width: `${deleteProgress}%` }}
-              />
-            </div>
-          </div>
-        )}
-
-        {/* Warning Message */}
-        {!isDeleting && !deleteComplete && (
-          <div className="px-4 py-3 border-b border-gray-700 bg-yellow-900/20">
-            <div className="flex items-start gap-2 text-yellow-300 text-sm">
-              <AlertTriangle size={18} className="flex-shrink-0 mt-0.5" />
-              <div>
-                <p className="font-bold">Peringatan! Data akan dihapus PERMANEN:</p>
-                <ul className="mt-1 text-xs text-yellow-200/80 list-disc list-inside">
-                  <li>Item dari tabel Stage 3 (resi_items)</li>
-                  <li>Resi dari Stage 1 (scan_resi) - harus scan ulang jika ingin memproses lagi</li>
-                </ul>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Summary Stats */}
-        <div className="px-4 py-2 border-b border-gray-700 bg-gray-750/50">
-          <div className="grid grid-cols-3 gap-3 text-center">
-            <div className="bg-gray-700/50 rounded-lg p-2">
-              <div className="text-xl font-bold text-white">{resiCount}</div>
-              <div className="text-[10px] text-gray-400">Total Resi</div>
-            </div>
-            <div className="bg-gray-700/50 rounded-lg p-2">
-              <div className="text-xl font-bold text-white">{items.length}</div>
-              <div className="text-[10px] text-gray-400">Total Item</div>
-            </div>
-            {isDeleting && (
-              <div className="bg-red-900/30 rounded-lg p-2">
-                <div className="text-xl font-bold text-red-400">{deletedCount}</div>
-                <div className="text-[10px] text-gray-400">Terhapus</div>
-              </div>
-            )}
-            {!isDeleting && (
-              <div className="bg-red-900/30 rounded-lg p-2">
-                <div className="text-xl font-bold text-red-400">
-                  <Trash2 size={20} className="mx-auto" />
-                </div>
-                <div className="text-[10px] text-gray-400">Akan Dihapus</div>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* List of items to delete */}
-        <div className="flex-1 overflow-auto p-3 space-y-2 min-h-[200px] max-h-[300px]">
-          {Object.entries(groupedByResi).map(([resi, resiItems]) => (
-            <div key={resi} className="bg-gray-700/30 rounded-lg p-2 border border-gray-600">
-              {/* Resi Header */}
-              <div className="flex items-center justify-between mb-2 pb-2 border-b border-gray-600">
-                <div className="flex items-center gap-2">
-                  <Package size={14} className="text-blue-400" />
-                  <span className="font-mono text-blue-300 text-sm">{resi}</span>
-                </div>
-                <div className="flex items-center gap-2 text-[10px]">
-                  <span className="px-1.5 py-0.5 bg-gray-600 rounded">{resiItems[0]?.ecommerce}</span>
-                  <span className="px-1.5 py-0.5 bg-gray-600 rounded">{resiItems[0]?.sub_toko}</span>
-                  <span className="px-1.5 py-0.5 bg-red-600/50 rounded text-red-200">{resiItems.length} item</span>
-                </div>
-              </div>
-              
-              {/* Items in this resi */}
-              <div className="space-y-1">
-                {resiItems.map((item, idx) => (
-                  <div key={idx} className="flex items-center gap-2 text-xs text-gray-300 bg-gray-800/50 rounded px-2 py-1">
-                    <span className="font-mono text-yellow-400 w-24 truncate">{item.part_number || '-'}</span>
-                    <span className="flex-1 truncate">{item.nama_barang || '-'}</span>
-                    <span className="text-gray-500 truncate max-w-[80px]">{item.customer}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {/* Footer */}
-        <div className="p-4 border-t border-gray-700 flex gap-3">
-          {!isDeleting && !deleteComplete ? (
-            <>
-              <button
-                onClick={onClose}
-                className="flex-1 py-2.5 rounded-lg font-bold text-sm bg-gray-700 hover:bg-gray-600 text-white transition-all"
-              >
-                Batal
-              </button>
-              <button
-                onClick={onConfirm}
-                className="flex-1 py-2.5 rounded-lg font-bold text-sm bg-red-600 hover:bg-red-500 text-white transition-all flex items-center justify-center gap-2"
-              >
-                <Trash2 size={16} /> Hapus {resiCount} Resi
-              </button>
-            </>
-          ) : deleteComplete ? (
-            <button
-              onClick={onClose}
-              className="w-full py-2.5 rounded-lg font-bold text-sm bg-blue-600 hover:bg-blue-500 text-white transition-all"
-            >
-              Tutup
-            </button>
-          ) : (
-            <button
-              disabled
-              className="w-full py-2.5 rounded-lg font-bold text-sm bg-gray-700 text-gray-500 cursor-not-allowed"
-            >
-              Menunggu proses selesai...
-            </button>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-};
-
-// --- KOMPONEN MODAL SKIPPED ITEMS ---
-// Interface untuk item yang di-update
-interface UpdatedItem {
-  resi: string;
-  order_id?: string;
-  customer?: string;
-  product_name?: string;
-  ecommerce?: string;
-}
-
-// Interface untuk log proses
-interface ProcessLog {
-  type: 'info' | 'success' | 'skip' | 'error';
-  resi: string;
-  message: string;
-}
-
-const UploadResultModal = ({ 
-  isOpen, 
-  onClose, 
-  skippedItems,
-  updatedItems,
-  summary,
-  isProcessing,
-  processLogs
-}: { 
-  isOpen: boolean; 
-  onClose: () => void; 
-  skippedItems: SkippedItem[];
-  updatedItems: UpdatedItem[];
-  summary: {imported: number, updated: number, skipped: number};
-  isProcessing: boolean;
-  processLogs: ProcessLog[];
-}) => {
-  const [activeTab, setActiveTab] = useState<'updated' | 'skipped'>('updated');
-  const logContainerRef = useRef<HTMLDivElement>(null);
-  
-  // Auto-scroll log ke bawah
-  useEffect(() => {
-    if (logContainerRef.current && isProcessing) {
-      logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
-    }
-  }, [processLogs, isProcessing]);
-  
-  if (!isOpen) return null;
-
-  // Group skipped by reason
-  const groupedByReason = skippedItems.reduce((acc, item) => {
-    if (!acc[item.reason]) acc[item.reason] = [];
-    acc[item.reason].push(item);
-    return acc;
-  }, {} as Record<string, SkippedItem[]>);
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-      <div className="bg-gray-800 rounded-lg shadow-xl w-full max-w-4xl max-h-[85vh] flex flex-col">
-        {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-gray-700">
-          <div className="flex items-center gap-2">
-            {isProcessing ? (
-              <Loader2 className="w-5 h-5 text-blue-500 animate-spin" />
-            ) : (
-              <CheckCircle className="w-5 h-5 text-green-500" />
-            )}
-            <h2 className="text-lg font-semibold text-white">
-              {isProcessing ? 'Sedang Memproses Data CSV...' : 'Hasil Upload CSV'}
-            </h2>
-          </div>
-          {!isProcessing && (
-            <button onClick={onClose} className="p-1 hover:bg-gray-700 rounded transition-colors">
-              <X className="w-5 h-5 text-gray-400" />
-            </button>
-          )}
-        </div>
-
-        {/* Processing Log View */}
-        {isProcessing && (
-          <div className="flex-1 flex flex-col p-4">
-            <div className="flex items-center gap-2 mb-3">
-              <Loader2 className="w-4 h-4 text-blue-400 animate-spin" />
-              <span className="text-sm text-gray-300">Memproses {processLogs.length} item...</span>
-            </div>
-            
-            {/* Log Container - seperti terminal */}
-            <div 
-              ref={logContainerRef}
-              className="flex-1 bg-gray-900 rounded-lg p-3 overflow-auto font-mono text-xs max-h-[400px] border border-gray-700"
-            >
-              {processLogs.map((log, idx) => (
-                <div key={idx} className={`py-1 flex items-start gap-2 ${
-                  log.type === 'success' ? 'text-green-400' :
-                  log.type === 'skip' ? 'text-yellow-400' :
-                  log.type === 'error' ? 'text-red-400' :
-                  'text-gray-400'
-                }`}>
-                  <span className="text-gray-600 select-none w-6 text-right shrink-0">{idx + 1}.</span>
-                  <span className={`shrink-0 ${
-                    log.type === 'success' ? 'text-green-500' :
-                    log.type === 'skip' ? 'text-yellow-500' :
-                    log.type === 'error' ? 'text-red-500' :
-                    'text-blue-500'
-                  }`}>
-                    {log.type === 'success' ? '✓' :
-                     log.type === 'skip' ? '⏭' :
-                     log.type === 'error' ? '✗' : '→'}
-                  </span>
-                  <span className="text-blue-300 font-semibold shrink-0">{log.resi}</span>
-                  <span className="text-gray-500">-</span>
-                  <span>{log.message}</span>
-                </div>
-              ))}
-              {processLogs.length === 0 && (
-                <div className="text-gray-500 text-center py-4">Menunggu proses...</div>
-              )}
-            </div>
-            
-            {/* Progress bar */}
-            <div className="mt-3">
-              <div className="w-full bg-gray-700 rounded-full h-1.5">
-                <div className="bg-blue-500 h-1.5 rounded-full transition-all duration-300" 
-                     style={{width: `${Math.min(processLogs.length * 2, 100)}%`}}></div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Summary - only show when done */}
-        {!isProcessing && (
-          <>
-            <div className="p-4 border-b border-gray-700 bg-gray-750">
-              <div className="grid grid-cols-3 gap-4 text-center">
-                <div className="bg-green-900/30 rounded-lg p-3">
-                  <div className="text-2xl font-bold text-green-400">{summary.imported}</div>
-                  <div className="text-xs text-gray-400">Item Baru</div>
-                </div>
-                <div 
-                  className={`bg-blue-900/30 rounded-lg p-3 cursor-pointer transition-all ${activeTab === 'updated' ? 'ring-2 ring-blue-500' : 'hover:bg-blue-900/50'}`}
-                  onClick={() => setActiveTab('updated')}
-                >
-                  <div className="text-2xl font-bold text-blue-400">{summary.updated}</div>
-                  <div className="text-xs text-gray-400">Item Diperbarui</div>
-                </div>
-                <div 
-                  className={`bg-yellow-900/30 rounded-lg p-3 cursor-pointer transition-all ${activeTab === 'skipped' ? 'ring-2 ring-yellow-500' : 'hover:bg-yellow-900/50'}`}
-                  onClick={() => setActiveTab('skipped')}
-                >
-                  <div className="text-2xl font-bold text-yellow-400">{summary.skipped}</div>
-                  <div className="text-xs text-gray-400">Item Dilewati</div>
-                </div>
-              </div>
-            </div>
-
-            {/* Tab Navigation */}
-            <div className="flex border-b border-gray-700">
-              <button
-                className={`flex-1 py-3 text-sm font-medium transition-colors ${
-                  activeTab === 'updated' 
-                    ? 'text-blue-400 border-b-2 border-blue-400 bg-blue-900/20' 
-                    : 'text-gray-400 hover:text-gray-200 hover:bg-gray-700/50'
-                }`}
-                onClick={() => setActiveTab('updated')}
-              >
-                <CheckCircle className="w-4 h-4 inline mr-2" />
-                Diperbarui ({updatedItems.length})
-              </button>
-              <button
-                className={`flex-1 py-3 text-sm font-medium transition-colors ${
-                  activeTab === 'skipped' 
-                    ? 'text-yellow-400 border-b-2 border-yellow-400 bg-yellow-900/20' 
-                    : 'text-gray-400 hover:text-gray-200 hover:bg-gray-700/50'
-                }`}
-                onClick={() => setActiveTab('skipped')}
-              >
-                <AlertTriangle className="w-4 h-4 inline mr-2" />
-                Dilewati ({skippedItems.length})
-              </button>
-            </div>
-
-            {/* Tab Content */}
-            <div className="flex-1 overflow-auto p-4">
-              {/* Updated Tab */}
-              {activeTab === 'updated' && (
-                <div>
-                  {updatedItems.length === 0 ? (
-                    <div className="text-center text-gray-400 py-8">
-                      <p>Tidak ada item yang diperbarui</p>
-                    </div>
-                  ) : (
-                    <div className="bg-gray-700/50 rounded-lg p-3">
-                      <div className="max-h-60 overflow-auto">
-                        <table className="w-full text-xs">
-                          <thead className="sticky top-0 bg-gray-700">
-                            <tr className="text-gray-400">
-                              <th className="text-left py-2 px-2">No</th>
-                              <th className="text-left py-2 px-2">Resi / Order ID</th>
-                              <th className="text-left py-2 px-2">Customer</th>
-                              <th className="text-left py-2 px-2">Produk</th>
-                              <th className="text-left py-2 px-2">Platform</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {updatedItems.map((item, idx) => (
-                              <tr key={idx} className="border-t border-gray-600/50 hover:bg-blue-900/20">
-                                <td className="py-1.5 px-2 text-gray-500">{idx + 1}</td>
-                                <td className="py-1.5 px-2 font-mono text-blue-300">
-                                  {item.resi || item.order_id || '-'}
-                                </td>
-                                <td className="py-1.5 px-2 text-gray-300 truncate max-w-[120px]">
-                                  {item.customer || '-'}
-                                </td>
-                                <td className="py-1.5 px-2 text-gray-400 truncate max-w-[180px]">
-                                  {item.product_name || '-'}
-                                </td>
-                                <td className="py-1.5 px-2">
-                                  <span className="px-1.5 py-0.5 bg-blue-600/30 text-blue-300 text-xs rounded">
-                                    {item.ecommerce || '-'}
-                                  </span>
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Skipped Tab */}
-              {activeTab === 'skipped' && (
-                <div>
-                  {skippedItems.length === 0 ? (
-                    <div className="text-center text-gray-400 py-8">
-                      <CheckCircle className="w-12 h-12 mx-auto mb-2 text-green-500" />
-                      <p>Semua data berhasil diproses!</p>
-                    </div>
-                  ) : (
-                    <div className="space-y-4">
-                      {Object.entries(groupedByReason).map(([reason, reasonItems]) => (
-                        <div key={reason} className="bg-gray-700/50 rounded-lg p-3">
-                          <div className="flex items-center gap-2 mb-2">
-                            <AlertTriangle className="w-4 h-4 text-yellow-500" />
-                            <span className="px-2 py-0.5 bg-yellow-600/30 text-yellow-400 text-xs rounded-full">
-                              {reasonItems.length} item
-                            </span>
-                            <span className="text-sm font-medium text-yellow-400">{reason}</span>
-                          </div>
-                          <div className="max-h-40 overflow-auto">
-                            <table className="w-full text-xs">
-                              <thead className="sticky top-0 bg-gray-700">
-                                <tr className="text-gray-400">
-                                  <th className="text-left py-1 px-2">No</th>
-                                  <th className="text-left py-1 px-2">Resi / Order ID</th>
-                                  <th className="text-left py-1 px-2">Customer</th>
-                                  <th className="text-left py-1 px-2">Produk</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {reasonItems.map((item, idx) => (
-                                  <tr key={idx} className="border-t border-gray-600/50 hover:bg-yellow-900/20">
-                                    <td className="py-1 px-2 text-gray-500">{idx + 1}</td>
-                                    <td className="py-1 px-2 font-mono text-yellow-300">
-                                      {item.resi || item.order_id || '-'}
-                                    </td>
-                                    <td className="py-1 px-2 text-gray-400 truncate max-w-[120px]">
-                                      {item.customer || '-'}
-                                    </td>
-                                    <td className="py-1 px-2 text-gray-400 truncate max-w-[180px]">
-                                      {item.product_name || '-'}
-                                    </td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-
-            {/* Footer */}
-            <div className="p-4 border-t border-gray-700">
-              <button
-                onClick={onClose}
-                className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors"
-              >
-                Tutup
-              </button>
-            </div>
-          </>
-        )}
-      </div>
-    </div>
-  );
-};
-
-// Keep old modal for backward compatibility (will be replaced)
-const SkippedItemsModal = ({ 
-  isOpen, 
-  onClose, 
-  items,
-  summary
-}: { 
-  isOpen: boolean; 
-  onClose: () => void; 
-  items: SkippedItem[];
-  summary: {imported: number, updated: number, skipped: number};
-}) => {
-  if (!isOpen) return null;
-
-  // Group by reason
-  const groupedByReason = items.reduce((acc, item) => {
-    if (!acc[item.reason]) acc[item.reason] = [];
-    acc[item.reason].push(item);
-    return acc;
-  }, {} as Record<string, SkippedItem[]>);
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-      <div className="bg-gray-800 rounded-lg shadow-xl w-full max-w-3xl max-h-[80vh] flex flex-col">
-        {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-gray-700">
-          <div className="flex items-center gap-2">
-            <AlertTriangle className="w-5 h-5 text-yellow-500" />
-            <h2 className="text-lg font-semibold text-white">Hasil Upload CSV</h2>
-          </div>
-          <button onClick={onClose} className="p-1 hover:bg-gray-700 rounded transition-colors">
-            <X className="w-5 h-5 text-gray-400" />
-          </button>
-        </div>
-
-        {/* Summary */}
-        <div className="p-4 border-b border-gray-700 bg-gray-750">
-          <div className="grid grid-cols-3 gap-4 text-center">
-            <div className="bg-green-900/30 rounded-lg p-3">
-              <div className="text-2xl font-bold text-green-400">{summary.imported}</div>
-              <div className="text-xs text-gray-400">Item Baru</div>
-            </div>
-            <div className="bg-blue-900/30 rounded-lg p-3">
-              <div className="text-2xl font-bold text-blue-400">{summary.updated}</div>
-              <div className="text-xs text-gray-400">Item Updated</div>
-            </div>
-            <div className="bg-yellow-900/30 rounded-lg p-3">
-              <div className="text-2xl font-bold text-yellow-400">{summary.skipped}</div>
-              <div className="text-xs text-gray-400">Item Skipped</div>
-            </div>
-          </div>
-        </div>
-
-        {/* Skipped Items List */}
-        <div className="flex-1 overflow-auto p-4">
-          {items.length === 0 ? (
-            <div className="text-center text-gray-400 py-8">
-              <CheckCircle className="w-12 h-12 mx-auto mb-2 text-green-500" />
-              <p>Semua data berhasil diproses!</p>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {Object.entries(groupedByReason).map(([reason, reasonItems]) => (
-                <div key={reason} className="bg-gray-700/50 rounded-lg p-3">
-                  <div className="flex items-center gap-2 mb-2">
-                    <span className="px-2 py-0.5 bg-yellow-600/30 text-yellow-400 text-xs rounded-full">
-                      {reasonItems.length} item
-                    </span>
-                    <span className="text-sm font-medium text-yellow-400">{reason}</span>
-                  </div>
-                  <div className="max-h-40 overflow-auto">
-                    <table className="w-full text-xs">
-                      <thead className="sticky top-0 bg-gray-700">
-                        <tr className="text-gray-400">
-                          <th className="text-left py-1 px-2">Resi / Order ID</th>
-                          <th className="text-left py-1 px-2">Customer</th>
-                          <th className="text-left py-1 px-2">Produk</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {reasonItems.map((item, idx) => (
-                          <tr key={idx} className="border-t border-gray-600/50 hover:bg-gray-600/30">
-                            <td className="py-1 px-2 font-mono text-gray-300">
-                              {item.resi || item.order_id || '-'}
-                            </td>
-                            <td className="py-1 px-2 text-gray-400 truncate max-w-[150px]">
-                              {item.customer || '-'}
-                            </td>
-                            <td className="py-1 px-2 text-gray-400 truncate max-w-[200px]">
-                              {item.product_name || '-'}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Footer */}
-        <div className="p-4 border-t border-gray-700">
-          <button
-            onClick={onClose}
-            className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors"
-          >
-            Tutup
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
+export const ScanResiStage3 = ({ onRefresh, refreshTrigger }: { onRefresh?: () => void; refreshTrigger?: number }) => {
   const { selectedStore } = useStore();
   const [rows, setRows] = useState<Stage3Row[]>([]);
   const [loading, setLoading] = useState(false);
   const [savingStatus, setSavingStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
   const [partOptions, setPartOptions] = useState<string[]>([]);
-  
-  // SELECTED RESI FOR PROCESS
-  const [selectedResis, setSelectedResis] = useState<Set<string>>(new Set());
-  
-  // PROCESSING MODAL STATE
-  const [showProcessingModal, setShowProcessingModal] = useState(false);
-  const [processingItems, setProcessingItems] = useState<ProcessingItem[]>([]);
-  const [processingProgress, setProcessingProgress] = useState(0);
-  const [processingCurrentItem, setProcessingCurrentItem] = useState('');
-  const [processingComplete, setProcessingComplete] = useState(false);
-  const [processingSuccessCount, setProcessingSuccessCount] = useState(0);
-  const [processingErrorCount, setProcessingErrorCount] = useState(0);
-  
-  // DELETE MODAL STATE
-  const [showDeleteModal, setShowDeleteModal] = useState(false);
-  const [deleteItems, setDeleteItems] = useState<DeleteItem[]>([]);
-  const [isDeleting, setIsDeleting] = useState(false);
-  const [deleteProgress, setDeleteProgress] = useState(0);
-  const [deleteComplete, setDeleteComplete] = useState(false);
-  const [deletedCount, setDeletedCount] = useState(0);
-  const [deleteErrorCount, setDeleteErrorCount] = useState(0);
   
   // FILTER STATES (VIEW)
   const [filterStatus, setFilterStatus] = useState<string>('all');
@@ -1070,20 +254,8 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
   // RESI SEARCH STATE
   const [stage1ResiList, setStage1ResiList] = useState<Array<{resi: string, no_pesanan?: string, ecommerce: string, sub_toko: string, stage2_verified: boolean}>>([]);
   const [resiSearchQuery, setResiSearchQuery] = useState('');
-  
-  // SORT STATE
-  const [sortField, setSortField] = useState<string>('');
-  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   const [showResiDropdown, setShowResiDropdown] = useState(false);
   const resiSearchRef = useRef<HTMLDivElement>(null);
-
-  // SKIPPED ITEMS MODAL STATE
-  const [showSkippedModal, setShowSkippedModal] = useState(false);
-  const [skippedItems, setSkippedItems] = useState<SkippedItem[]>([]);
-  const [updatedItems, setUpdatedItems] = useState<UpdatedItem[]>([]);
-  const [uploadSummary, setUploadSummary] = useState<{imported: number, updated: number, skipped: number}>({imported: 0, updated: 0, skipped: 0});
-  const [isProcessingUpload, setIsProcessingUpload] = useState(false);
-  const [processLogs, setProcessLogs] = useState<ProcessLog[]>([]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -1099,18 +271,12 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
   const uniqueTokos = Array.from(new Set(rows.map(r => r.sub_toko))).filter(Boolean);
 
   useEffect(() => {
-    let mounted = true;
-    
     const loadParts = async () => {
       const parts = await getAvailableParts(selectedStore);
-      if (mounted) {
-        setPartOptions(parts);
-      }
+      setPartOptions(parts);
     };
     loadParts();
-    
-    return () => { mounted = false; };
-  }, [selectedStore]);
+  }, [selectedStore, refreshTrigger]);
 
   // Update uploadSubToko ketika selectedStore berubah
   useEffect(() => {
@@ -1119,18 +285,12 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
 
   // Load Stage 1 resi list untuk dropdown search
   useEffect(() => {
-    let mounted = true;
-    
     const loadStage1Resi = async () => {
       const resiList = await getStage1ResiList(selectedStore);
-      if (mounted) {
-        setStage1ResiList(resiList);
-      }
+      setStage1ResiList(resiList);
     };
     loadStage1Resi();
-    
-    return () => { mounted = false; };
-  }, [selectedStore]);
+  }, [selectedStore, refreshTrigger]);
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -1264,11 +424,6 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
            }
            seenKeys.add(dupeKey);
 
-           // Filter nama_produk: jika "-" atau "Item CSV", jadikan kosong
-           const namaCsv = item.nama_produk && item.nama_produk !== '-' && item.nama_produk !== 'Item CSV' 
-             ? item.nama_produk 
-             : '';
-           
            loadedRows.push({
              id: `db-${item.id}`,
              tanggal: item.created_at ? item.created_at.split('T')[0] : new Date().toISOString().split('T')[0],
@@ -1276,7 +431,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
              ecommerce: ecommerceDB,
              sub_toko: subToko,
              part_number: item.part_number || '',
-             nama_barang_csv: namaCsv, 
+             nama_barang_csv: item.nama_produk || 'Item CSV', 
              nama_barang_base: namaBase, 
              brand: brand,
              application: app,
@@ -1284,9 +439,8 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
              qty_keluar: qty,
              harga_total: Number(item.total_harga_produk || 0),
              harga_satuan: qty > 0 ? (Number(item.total_harga_produk || 0) / qty) : 0,
-             mata_uang: (item as any).mata_uang || (ecommerceDB.startsWith('EKSPOR') ? ecommerceDB.split(' - ')[1] || 'PHP' : 'IDR'),
              no_pesanan: item.order_id || '',
-             customer: item.customer || '',
+             customer: item.customer || '-',
              is_db_verified: verified,
              is_stock_valid: stockValid,
              status_message: statusMsg,
@@ -1325,17 +479,16 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
           }
         });
 
-        // Simpan loadedRows untuk digunakan nanti - UPPERCASE untuk case-insensitive matching
-        const csvResiSet = new Set(loadedRows.map(r => (r.resi || '').trim().toUpperCase()));
+        // Simpan loadedRows untuk digunakan nanti
+        const csvResiSet = new Set(loadedRows.map(r => r.resi));
         
         // === TAMBAHAN: Ambil resi dari Stage 1 yang belum ada di CSV ===
         const stage1Resi = await getAllPendingStage1Resi(selectedStore);
         
-        // Filter resi Stage 1 yang belum ada di CSV (case-insensitive)
+        // Filter resi Stage 1 yang belum ada di CSV
         const stage1OnlyRows: Stage3Row[] = [];
         for (const s1 of stage1Resi) {
-          const s1ResiUpper = (s1.resi || '').trim().toUpperCase();
-          if (!csvResiSet.has(s1ResiUpper)) {
+          if (!csvResiSet.has(s1.resi)) {
             // Tentukan ecommerce dengan negara
             let ecommerce = s1.ecommerce || '-';
             if (ecommerce === 'EKSPOR' && s1.negara_ekspor) {
@@ -1352,7 +505,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
               ecommerce: ecommerce,
               sub_toko: s1.sub_toko || (selectedStore === 'bjw' ? 'BJW' : 'MJM'),
               part_number: '',
-              nama_barang_csv: '',
+              nama_barang_csv: '-',
               nama_barang_base: '',
               brand: '',
               application: '',
@@ -1360,7 +513,6 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
               qty_keluar: 1,
               harga_total: 0,
               harga_satuan: 0,
-              mata_uang: ecommerce.startsWith('EKSPOR') ? (ecommerce.split(' - ')[1] || 'PHP') : 'IDR',
               customer: s1.customer || '',
               no_pesanan: s1.no_pesanan || '',
               is_db_verified: s1.stage2_verified,
@@ -1368,17 +520,27 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
               status_message: statusMsg,
               force_override_double: false
             });
-            csvResiSet.add(s1ResiUpper);
+            csvResiSet.add(s1.resi);
           }
         }
         
         // Gabungkan semua rows (dari CSV + Stage 1 only)
         const allRows = [...loadedRows, ...stage1OnlyRows];
         
-        // Gunakan resi (uppercase) sebagai key utama, bukan resi + part_number
-        // Jika ada multiple item dengan resi sama tapi part_number berbeda, 
-        // gunakan resi + part_number + nama_barang_csv sebagai key
-        setRows(allRows);
+        setRows(prev => {
+            const newMap = new Map();
+            allRows.forEach(r => newMap.set(r.resi + r.part_number, r));
+            const mergedRows = prev.map(existingRow => {
+                const key = existingRow.resi + existingRow.part_number;
+                if (newMap.has(key)) {
+                    const freshData = newMap.get(key);
+                    newMap.delete(key);
+                    return freshData;
+                }
+                return existingRow;
+            });
+            return [...mergedRows, ...Array.from(newMap.values()) as Stage3Row[]];
+        });
       } else {
         // Jika tidak ada CSV items, tetap load dari Stage 1
         const stage1Resi = await getAllPendingStage1Resi(selectedStore);
@@ -1398,7 +560,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
             ecommerce: ecommerce,
             sub_toko: s1.sub_toko || (selectedStore === 'bjw' ? 'BJW' : 'MJM'),
             part_number: '',
-            nama_barang_csv: '',
+            nama_barang_csv: '-',
             nama_barang_base: '',
             brand: '',
             application: '',
@@ -1406,7 +568,6 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
             qty_keluar: 1,
             harga_total: 0,
             harga_satuan: 0,
-            mata_uang: ecommerce.startsWith('EKSPOR') ? (ecommerce.split(' - ')[1] || 'PHP') : 'IDR',
             customer: s1.customer || '',
             no_pesanan: s1.no_pesanan || '',
             is_db_verified: s1.stage2_verified,
@@ -1479,22 +640,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
     if (!file) return;
     setLoading(true);
     
-    // Buka modal progress
-    setIsProcessingUpload(true);
-    setProcessLogs([]);
-    setShowSkippedModal(true);
-    setSkippedItems([]);
-    setUpdatedItems([]);
-    setUploadSummary({ imported: 0, updated: 0, skipped: 0 });
-    
-    // Helper untuk menambah log
-    const addLog = (type: 'info' | 'success' | 'skip' | 'error', resi: string, message: string) => {
-      setProcessLogs(prev => [...prev, { type, resi, message }]);
-    };
-    
     try {
-      addLog('info', 'SISTEM', 'Membaca file CSV/Excel...');
-      
       const data = await file.arrayBuffer();
       // Tambahkan opsi cellText: true dan cellDates: true untuk mempertahankan format asli
       const workbook = XLSX.read(data, { type: 'array', cellText: true, cellDates: true });
@@ -1505,21 +651,16 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
       const csvText = XLSX.utils.sheet_to_csv(worksheet, { rawNumbers: true });
 
       const platform = detectCSVPlatform(csvText);
-      addLog('info', 'SISTEM', `Format terdeteksi: ${platform === 'shopee' ? 'Shopee Indonesia' : platform === 'tiktok' ? 'TikTok' : platform === 'shopee-intl' ? 'Shopee International' : 'Unknown'}`);
-      
       let parsedItems: any[] = [];
       
-      // Parsing berdasarkan deteksi format file (Shopee/TikTok/Shopee International)
+      // Parsing berdasarkan deteksi format file (Shopee/TikTok)
       // Namun attribute ecommerce/toko akan kita override dengan pilihan user
       if (platform === 'shopee') parsedItems = parseShopeeCSV(csvText);
-      else if (platform === 'shopee-intl') parsedItems = parseShopeeIntlCSV(csvText);
       else if (platform === 'tiktok') parsedItems = parseTikTokCSV(csvText);
       else { 
         // Fallback coba parse Shopee standar jika tidak terdeteksi
         parsedItems = parseShopeeCSV(csvText);
         if(parsedItems.length === 0) {
-             setIsProcessingUpload(false);
-             setShowSkippedModal(false);
              alert('Format File tidak dikenali! Pastikan header kolom "No. Resi" atau "No. Pesanan" ada.'); 
              setLoading(false); 
              return; 
@@ -1527,103 +668,37 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
       }
 
       if (parsedItems.length === 0) {
-        addLog('error', 'SISTEM', 'Tidak ada data valid dalam file');
-        setIsProcessingUpload(false);
-        setShowSkippedModal(false);
         alert('Tidak ada data valid (Mungkin status Batal/Belum Bayar?).');
         setLoading(false);
         return;
       }
 
-      addLog('info', 'SISTEM', `Ditemukan ${parsedItems.length} item, memproses satu per satu...`);
-
-      // === STEP 0: FILTER STATUS BATAL/CANCEL/UNPAID ===
-      // Safety net: filter ulang item dengan status batal/cancel/unpaid
-      // KECUALI "Pembatalan Diajukan" - ini TIDAK di-skip karena masih bisa diproses
-      const allSkippedItems: SkippedItem[] = [];
-      
-      const afterStatusFilter = parsedItems.filter(item => {
-        const orderStatus = String(item.order_status || '').toLowerCase();
-        
-        // "Pembatalan Diajukan" / "Cancellation Requested" TIDAK di-skip
-        const isPembatalanDiajukan = orderStatus.includes('pembatalan diajukan') || 
-                                      orderStatus.includes('cancellation requested') ||
-                                      orderStatus.includes('pengajuan pembatalan');
-        
-        // Hanya skip jika BATAL TOTAL (sudah dibatalkan), bukan sekedar "diajukan"
-        const isCancelled = (orderStatus.includes('batal') || orderStatus.includes('cancel')) && !isPembatalanDiajukan;
-        const isUnpaid = orderStatus.includes('belum dibayar') || 
-                         orderStatus.includes('unpaid') || 
-                         orderStatus.includes('menunggu bayar') ||
-                         orderStatus.includes('menunggu pembayaran') ||
-                         orderStatus.includes('awaiting payment');
-        
-        if (isCancelled || isUnpaid) {
-          const resiDisplay = item.resi || item.order_id || '-';
-          addLog('skip', resiDisplay, `Dilewati - ${item.order_status}`);
-          allSkippedItems.push({
-            resi: item.resi,
-            order_id: item.order_id,
-            customer: item.customer,
-            product_name: item.product_name,
-            reason: `Status pesanan: ${item.order_status}`
-          });
-          return false;
-        }
-        return true;
-      });
-      
-      console.log(`[handleFileUpload] After status filter: ${afterStatusFilter.length} valid, ${allSkippedItems.length} skipped (cancelled/unpaid)`);
-      
-      if (afterStatusFilter.length === 0) {
-        addLog('info', 'SISTEM', 'Semua item dilewati karena status batal/belum bayar');
-        setSkippedItems(allSkippedItems);
-        setUploadSummary({ imported: 0, updated: 0, skipped: allSkippedItems.length });
-        setIsProcessingUpload(false);
-        setLoading(false);
-        return;
-      }
-
-      addLog('info', 'SISTEM', `Mengecek ${afterStatusFilter.length} item di database...`);
-
       // === STEP 1: CEK BARANG_KELUAR - Filter item yang sudah terjual ===
-      const allResiFromCSV = afterStatusFilter.map(i => i.resi).filter(Boolean);
-      const allOrderIdFromCSV = afterStatusFilter.map(i => i.order_id).filter(Boolean);
+      const allResiFromCSV = parsedItems.map(i => i.resi).filter(Boolean);
+      const allOrderIdFromCSV = parsedItems.map(i => i.order_id).filter(Boolean);
       const allToCheckBarangKeluar = [...new Set([...allResiFromCSV, ...allOrderIdFromCSV])];
       
       const existingInBarangKeluar = await checkExistingInBarangKeluar(allToCheckBarangKeluar, selectedStore);
       
       // Filter: buang item yang sudah ada di barang_keluar
-      const afterBarangKeluarFilter = afterStatusFilter.filter(item => {
+      const skippedByBarangKeluar: any[] = [];
+      const afterBarangKeluarFilter = parsedItems.filter(item => {
         const resiUpper = String(item.resi || '').trim().toUpperCase();
         const orderIdUpper = String(item.order_id || '').trim().toUpperCase();
         
         if (existingInBarangKeluar.has(resiUpper) || existingInBarangKeluar.has(orderIdUpper)) {
-          const resiDisplay = item.resi || item.order_id || '-';
-          addLog('skip', resiDisplay, 'Dilewati - Sudah ada di Barang Keluar');
-          allSkippedItems.push({
-            resi: item.resi,
-            order_id: item.order_id,
-            customer: item.customer,
-            product_name: item.product_name,
-            reason: 'Sudah ada di Barang Keluar (sudah terjual)'
-          });
+          skippedByBarangKeluar.push(item);
           return false;
         }
         return true;
       });
       
       if (afterBarangKeluarFilter.length === 0) {
-        // Semua item di-skip, tampilkan modal
-        addLog('info', 'SISTEM', 'Semua item dilewati karena sudah ada di Barang Keluar');
-        setSkippedItems(allSkippedItems);
-        setUploadSummary({ imported: 0, updated: 0, skipped: allSkippedItems.length });
-        setIsProcessingUpload(false);
+        const skippedResis = [...new Set(skippedByBarangKeluar.map(i => i.resi))].slice(0, 10).join(', ');
+        alert(`Semua ${parsedItems.length} resi sudah ada di Barang Keluar (sudah terjual)!\n\nResi: ${skippedResis}...`);
         setLoading(false);
         return;
       }
-
-      addLog('info', 'SISTEM', `Mengecek data Stage 1 untuk ${afterBarangKeluarFilter.length} item...`);
 
       // === STEP 2: Ambil info dari Stage 1 untuk ecommerce ===
       const resiList = afterBarangKeluarFilter.map(i => i.resi);
@@ -1648,18 +723,6 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
         const orderIdUpper = (item.order_id || '').trim().toUpperCase();
         let s1Data = s1MapByResi.get(resiUpper) || s1MapByOrder.get(orderIdUpper);
         
-        // Tentukan negara untuk konversi harga (khusus Ekspor)
-        let negaraForConversion = '';
-        
-        // SIMPAN ecommerce dari parser (bisa berisi label khusus seperti TIKTOK INSTAN)
-        const ecommerceFromParser = item.ecommerce || '';
-        
-        // Cek apakah ecommerce dari parser memiliki label khusus (INSTAN/SAMEDAY)
-        // Jika ya, pertahankan label tersebut
-        const hasSpecialLabel = ecommerceFromParser.includes('INSTAN') || 
-                                ecommerceFromParser.includes('SAMEDAY') ||
-                                ecommerceFromParser.includes('KILAT');
-        
         if (s1Data) {
           // Ada di Stage 1, gunakan ecommerce dari sana
           let ecomFromS1 = s1Data.ecommerce || '';
@@ -1667,43 +730,20 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
           // Jika hanya "EKSPOR" tapi ada negara_ekspor, gabungkan
           if (ecomFromS1 === 'EKSPOR' && s1Data.negara_ekspor) {
             item.ecommerce = `EKSPOR - ${s1Data.negara_ekspor}`;
-            negaraForConversion = s1Data.negara_ekspor;
           } else if (ecomFromS1.startsWith('EKSPOR')) {
             // Sudah format lengkap atau tidak ada negara
             item.ecommerce = ecomFromS1;
-            // Extract negara dari ecommerce (misal "EKSPOR - PH" -> "PH")
-            const parts = ecomFromS1.split(' - ');
-            if (parts.length > 1) {
-              negaraForConversion = parts[1].trim();
-            }
           } else {
             // Bukan ekspor, gunakan dari Stage 1
             item.ecommerce = ecomFromS1 || uploadEcommerce;
           }
         } else {
-          // Tidak ada di Stage 1
-          // PENTING: Jika ecommerce dari parser punya label khusus, PERTAHANKAN
-          if (hasSpecialLabel) {
-            // Pertahankan label khusus dari parser (misal: TIKTOK INSTAN, SHOPEE SAMEDAY, dll)
-            item.ecommerce = ecommerceFromParser;
-          } else if (uploadEcommerce === 'EKSPOR') {
+          // Tidak ada di Stage 1, gunakan pilihan user
+          if (uploadEcommerce === 'EKSPOR') {
             item.ecommerce = `EKSPOR - ${uploadNegara}`;
-            negaraForConversion = uploadNegara;
           } else {
             item.ecommerce = uploadEcommerce;
           }
-        }
-        
-        // === SIMPAN MATA UANG UNTUK EKSPOR (TANPA KONVERSI) ===
-        // Jika ini adalah item Ekspor, simpan kode negara/mata uang tapi JANGAN konversi harga
-        if (negaraForConversion && (platform === 'shopee-intl' || item.ecommerce.startsWith('EKSPOR'))) {
-          // Gunakan negara dari detected_country jika ada, atau dari setting
-          const countryForRate = (item as any).detected_country || negaraForConversion;
-          
-          console.log(`[Ekspor] Keeping original price: ${item.total_price} (Currency: ${countryForRate})`);
-          
-          // Simpan mata uang untuk ditampilkan di UI
-          (item as any).mata_uang = countryForRate;
         }
         
         item.sub_toko = uploadSubToko;
@@ -1712,80 +752,41 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
       });
 
       if (correctedItems.length > 0) {
-          // === FITUR BARU: Buat map resi yang sudah ada di Stage 3 untuk di-UPDATE/INSERT ===
-          // Hanya untuk SHOPEE - jika resi sudah ada, data CSV akan mengisi/update baris yang ada
-          // TANPA mengubah kolom ecommerce dan toko (tetap dari scan aplikasi)
-          // 
-          // Ada 2 kasus:
-          // 1. ID format "db-XXX" -> sudah ada di resi_items, bisa di-UPDATE
-          // 2. ID format "s1-XXX" -> hanya ada di scan_resi, perlu INSERT baru tapi pakai ecommerce/toko dari scan
-          const existingResiMap = new Map<string, { id: string, ecommerce: string, toko: string, isFromDB: boolean }>();
+          const result = await saveCSVToResiItems(correctedItems, selectedStore);
           
-          if (platform === 'shopee') {
-            // Buat map dari resi yang sudah ada di rows (Stage 3)
-            for (const row of rows) {
-              const resiUpper = (row.resi || '').trim().toUpperCase();
-              if (resiUpper) {
-                // Cek apakah row ini dari database (db-XXX) atau dari Stage 1 scan (s1-XXX)
-                const isFromDB = row.id.startsWith('db-');
-                existingResiMap.set(resiUpper, {
-                  id: row.id,
-                  ecommerce: row.ecommerce,
-                  toko: row.sub_toko,
-                  isFromDB: isFromDB
-                });
-              }
-            }
+          // Gabungkan info skip dari pre-filter dan dari saveCSVToResiItems
+          const totalSkipped = skippedByBarangKeluar.length + result.skippedCount;
+          const allSkippedResis = [
+            ...new Set([
+              ...skippedByBarangKeluar.map(i => i.resi),
+              ...result.skippedResis
+            ])
+          ];
+          
+          if (totalSkipped > 0) {
+            // Ada item yang di-skip karena sudah ada di Barang Keluar
+            const skippedMsg = allSkippedResis.slice(0, 10).join(', ');
+            const moreMsg = allSkippedResis.length > 10 ? ` dan ${allSkippedResis.length - 10} lainnya` : '';
+            alert(
+              `✅ Berhasil import ${result.count} item sebagai ${uploadEcommerce} (${uploadSubToko}).\n\n` +
+              `⚠️ ${totalSkipped} item di-SKIP karena sudah ada di Barang Keluar (sudah terjual/keluar):\n` +
+              `${skippedMsg}${moreMsg}`
+            );
+          } else if (result.success) {
+            alert(`✅ Berhasil import ${result.count} item sebagai ${uploadEcommerce} (${uploadSubToko}).`);
+          } else {
+            alert(result.message);
           }
-          
-          addLog('info', 'SISTEM', `Menyimpan ${correctedItems.length} item ke database...`);
-          
-          // Log setiap item yang akan disimpan
-          for (const item of correctedItems) {
-            const resiDisplay = item.resi || item.order_id || '-';
-            addLog('success', resiDisplay, `Memproses - ${item.customer || 'Customer'}`);
-          }
-          
-          const result = await saveCSVToResiItems(correctedItems, selectedStore, existingResiMap);
-          
-          // Tambahkan skipped items dari saveCSVToResiItems (belum scan Stage 1, sudah Ready, dll)
-          if (result.skippedItems && result.skippedItems.length > 0) {
-            for (const sk of result.skippedItems) {
-              const resiDisplay = sk.resi || sk.order_id || '-';
-              addLog('skip', resiDisplay, sk.reason);
-            }
-            allSkippedItems.push(...result.skippedItems);
-          }
-          
-          // Log sukses final
-          addLog('info', 'SISTEM', `✓ Selesai: ${result.count} baru, ${result.updatedCount} update, ${allSkippedItems.length} skip`);
-          
-          // Set data untuk modal
-          setUploadSummary({
-            imported: result.count,
-            updated: result.updatedCount,
-            skipped: allSkippedItems.length
-          });
-          setSkippedItems(allSkippedItems);
-          setUpdatedItems(result.updatedItems || []);
-          
-          // Selesai processing
-          setIsProcessingUpload(false);
-          
       } else {
         // Semua item sudah di-filter
-        setUploadSummary({ imported: 0, updated: 0, skipped: allSkippedItems.length });
-        setSkippedItems(allSkippedItems);
-        setUpdatedItems([]);
-        setIsProcessingUpload(false);
+        const skippedResis = [...new Set(skippedByBarangKeluar.map(i => i.resi))].slice(0, 10).join(', ');
+        alert(`Semua item sudah ada di Barang Keluar!\n\nResi: ${skippedResis}...`);
       }
 
       await loadSavedDataFromDB();
       
     } catch (err: any) { 
       console.error(err);
-      setIsProcessingUpload(false);
-      setShowSkippedModal(false);
       alert(`Error Import: ${err.message}`); 
     } finally { 
       setLoading(false); 
@@ -1863,9 +864,8 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
       qty_keluar: 1,
       harga_total: 0,
       harga_satuan: 0,
-      mata_uang: (item.ecommerce || '').startsWith('EKSPOR') ? ((item.ecommerce || '').split(' - ')[1] || 'PHP') : 'IDR',
       no_pesanan: item.order_id || '',
-      customer: item.customer || '',
+      customer: item.customer || '-',
       is_db_verified: true,
       is_stock_valid: false,
       status_message: 'Butuh Input',
@@ -1885,13 +885,11 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
     const splitCount = parseInt(input);
     if (isNaN(splitCount) || splitCount < 2) return;
     const newPriceTotal = row.harga_total / splitCount;
-    
     const updatedParent: Stage3Row = {
       ...row,
       harga_total: newPriceTotal,
       harga_satuan: row.qty_keluar > 0 ? (newPriceTotal / row.qty_keluar) : 0,
-      // Nama CSV tetap sama, tidak perlu label pecahan
-      nama_barang_csv: row.nama_barang_csv
+      nama_barang_csv: `${row.nama_barang_csv} (Pecahan 1)`
     };
     const newChildren: Stage3Row[] = [];
     for (let i = 2; i <= splitCount; i++) {
@@ -1899,8 +897,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
         ...updatedParent,
         id: Math.random().toString(36).substr(2, 9), 
         part_number: '', 
-        // Nama CSV tetap sama, tidak perlu label pecahan
-        nama_barang_csv: row.nama_barang_csv,
+        nama_barang_csv: `${row.nama_barang_csv} (Pecahan ${i})`,
         nama_barang_base: '',
         stock_saat_ini: 0,
         status_message: 'Isi Part Number',
@@ -1919,51 +916,19 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
     });
   };
 
-  // Handler untuk hapus row - juga hapus dari database dengan konfirmasi
-  const handleDeleteRow = async (rowId: string, skipConfirm: boolean = false) => {
-    // Cari row untuk mendapatkan info resi
-    const rowToDelete = rows.find(r => r.id === rowId);
-    const resiInfo = rowToDelete?.resi || 'item ini';
-    
-    // Konfirmasi sebelum hapus (skip jika dari bulk delete)
-    if (!skipConfirm) {
-      const confirmed = window.confirm(
-        `Hapus resi "${resiInfo}"?\n\nItem akan dihapus permanen dan tidak akan muncul lagi di Pending DB (kecuali di-scan ulang).`
-      );
-      
-      if (!confirmed) return;
-    }
-    
+  // Handler untuk hapus row - juga hapus dari database
+  const handleDeleteRow = async (rowId: string) => {
     // Hapus dari state lokal dulu untuk responsivitas
     setRows(prev => prev.filter(r => r.id !== rowId));
     
-    let deleteResult = { success: false, message: '' };
-    
-    // Jika ID dimulai dengan "db-", hapus dari resi_items
+    // Jika ID dimulai dengan "db-", berarti sudah ada di database, hapus juga dari sana
     if (rowId.startsWith('db-')) {
-      deleteResult = await deleteResiItemById(selectedStore, rowId);
-    }
-    // Jika ID dimulai dengan "s1-", hapus dari scan_resi (Stage 1)
-    else if (rowId.startsWith('s1-')) {
-      deleteResult = await deleteScanResiById(selectedStore, rowId);
-    }
-    // ID lainnya (temporary) - hanya hapus dari state lokal
-    else {
-      deleteResult = { success: true, message: 'Item dihapus dari daftar' };
-    }
-    
-    // Tampilkan notifikasi hanya jika bukan bulk delete
-    if (!skipConfirm) {
-      if (deleteResult.success) {
-        // Notifikasi sukses - tidak perlu alert untuk bulk
-      } else {
-        console.warn('Gagal hapus dari database:', deleteResult.message);
-        // Reload data jika gagal
-        await loadSavedDataFromDB();
+      const result = await deleteResiItemById(selectedStore, rowId);
+      if (!result.success) {
+        console.warn('Gagal hapus dari database:', result.message);
+        // Opsional: bisa reload data jika gagal
       }
     }
-    
-    return deleteResult;
   };
 
   const handlePartNumberBlur = async (id: string, sku: string) => {
@@ -2010,115 +975,38 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
     });
     if (validRows.length === 0) { alert("Tidak ada item siap proses (Pastikan Status Hijau atau centang Override untuk Double)."); return; }
     if (!confirm(`Proses ${validRows.length} item ke Barang Keluar?`)) return;
-    
-    // PROCESSING MODAL: Initialize
-    const initialItems: ProcessingItem[] = validRows.map(r => ({
-      id: r.id,
-      resi: r.resi,
-      part_number: r.part_number,
-      nama_barang: r.nama_barang_csv || r.nama_barang_base || '-',
-      qty: r.qty_keluar,
-      customer: r.customer || '',
-      status: 'pending' as const
-    }));
-    
-    setProcessingItems(initialItems);
-    setProcessingProgress(0);
-    setProcessingCurrentItem('');
-    setProcessingComplete(false);
-    setProcessingSuccessCount(0);
-    setProcessingErrorCount(0);
-    setShowProcessingModal(true);
     setLoading(true);
     
-    let successCount = 0;
-    let errorCount = 0;
+    // Prepare items dengan nama_pesanan = nama_barang_base (atau csv jika base kosong)
+    const itemsToProcess = validRows.map(r => ({
+      ...r,
+      nama_pesanan: r.nama_barang_base || r.nama_barang_csv
+    }));
     
-    // Track successful row IDs locally (tidak pakai state karena async)
-    const successfulRowIds: Set<string> = new Set();
-    const successfulResiSet: Set<string> = new Set();
+    const result = await processBarangKeluarBatch(itemsToProcess, selectedStore);
     
-    // Process one by one untuk visual feedback
-    for (let i = 0; i < validRows.length; i++) {
-      const row = validRows[i];
-      const progress = Math.round(((i + 1) / validRows.length) * 100);
-      
-      // Update current item being processed
-      setProcessingCurrentItem(`${row.part_number} - ${row.nama_barang_csv || row.nama_barang_base}`);
-      setProcessingProgress(progress);
-      
-      // Update item status to processing
-      setProcessingItems(prev => prev.map(item => 
-        item.id === row.id ? { ...item, status: 'processing' } : item
-      ));
-      
-      try {
-        // Prepare single item untuk proses
-        const itemToProcess = [{
-          ...row,
-          nama_pesanan: row.nama_barang_base || row.nama_barang_csv
-        }];
-        
-        const result = await processBarangKeluarBatch(itemToProcess, selectedStore);
-        
-        if (result.success || result.processed > 0) {
-          // Insert alias
-          if (row.part_number && row.nama_barang_csv) {
-            await insertProductAlias(row.part_number, row.nama_barang_csv);
-          }
-          
-          // Delete from resi_items - gunakan ID langsung jika dari database
-          if (row.id.startsWith('db-')) {
-            // Hapus menggunakan ID langsung
-            const dbId = row.id.replace('db-', '');
-            await deleteResiItemById(selectedStore, dbId);
-          } else {
-            // Fallback: hapus menggunakan resi + part_number
-            await deleteProcessedResiItems(selectedStore, [{ resi: row.resi, part_number: row.part_number }]);
-          }
-          
-          // Track success
-          successfulRowIds.add(row.id);
-          if (row.resi) successfulResiSet.add(row.resi);
-          
-          // Update item status to success
-          setProcessingItems(prev => prev.map(item => 
-            item.id === row.id ? { ...item, status: 'success' } : item
-          ));
-          successCount++;
-          setProcessingSuccessCount(successCount);
-        } else {
-          // Update item status to error
-          setProcessingItems(prev => prev.map(item => 
-            item.id === row.id ? { ...item, status: 'error', errorMessage: result.errors.join(', ') } : item
-          ));
-          errorCount++;
-          setProcessingErrorCount(errorCount);
+    if (result.success || result.processed > 0) {
+      // Insert aliases untuk setiap item yang berhasil diproses
+      for (const row of validRows) {
+        if (row.part_number && row.nama_barang_csv) {
+          await insertProductAlias(row.part_number, row.nama_barang_csv);
         }
-      } catch (err: any) {
-        setProcessingItems(prev => prev.map(item => 
-          item.id === row.id ? { ...item, status: 'error', errorMessage: err.message } : item
-        ));
-        errorCount++;
-        setProcessingErrorCount(errorCount);
       }
       
-      // Small delay untuk visual effect
-      await new Promise(resolve => setTimeout(resolve, 100));
+      // Delete processed items from resi_items
+      const itemsToDelete = validRows.map(r => ({
+        resi: r.resi,
+        part_number: r.part_number
+      }));
+      await deleteProcessedResiItems(selectedStore, itemsToDelete);
+      
+      alert(`Sukses: ${result.processed} item diproses.`);
+      setRows(prev => prev.filter(r => !validRows.find(v => v.id === r.id)));
+      if (onRefresh) onRefresh();
+    } else { 
+      alert(`Error: ${result.errors.join('\n')}`); 
     }
-    
-    // Delete dari scan_resi setelah semua item selesai (menggunakan successfulResiSet yang di-track lokal)
-    if (successfulResiSet.size > 0) {
-      await deleteProcessedScanResi(selectedStore, [...successfulResiSet]);
-    }
-    
-    setProcessingComplete(true);
-    setProcessingCurrentItem('');
     setLoading(false);
-    
-    // Refresh data - hapus rows yang sukses diproses (menggunakan successfulRowIds yang di-track lokal)
-    setRows(prev => prev.filter(r => !successfulRowIds.has(r.id)));
-    if (onRefresh) onRefresh();
   };
 
   const displayedRows = rows.filter(row => {
@@ -2157,320 +1045,10 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
     }
     
     return true;
-  }).sort((a, b) => {
-    // Apply sorting jika ada sortField
-    if (!sortField) return 0;
-    
-    let valA: any = a[sortField as keyof Stage3Row];
-    let valB: any = b[sortField as keyof Stage3Row];
-    
-    // Handle null/undefined
-    if (valA == null) valA = '';
-    if (valB == null) valB = '';
-    
-    // Compare based on type
-    if (typeof valA === 'number' && typeof valB === 'number') {
-      return sortDirection === 'asc' ? valA - valB : valB - valA;
-    }
-    
-    // String comparison
-    const strA = String(valA).toLowerCase();
-    const strB = String(valB).toLowerCase();
-    if (sortDirection === 'asc') {
-      return strA.localeCompare(strB);
-    } else {
-      return strB.localeCompare(strA);
-    }
   });
 
-  // GROUP BY RESI - mengelompokkan item berdasarkan resi yang sama
-  const groupedByResi = displayedRows.reduce((acc, row) => {
-    const resiKey = row.resi || 'NO_RESI';
-    if (!acc[resiKey]) {
-      acc[resiKey] = [];
-    }
-    acc[resiKey].push(row);
-    return acc;
-  }, {} as Record<string, Stage3Row[]>);
-
-  // Hitung status per grup resi
-  const getGroupStatus = (items: Stage3Row[]) => {
-    const allReady = items.every(r => r.status_message === 'Ready' || (r.status_message === 'Double' && r.force_override_double));
-    const hasStokKurang = items.some(r => r.status_message === 'Stok Kurang' || r.status_message === 'Stok Total Kurang');
-    const hasBelumScan = items.some(r => r.status_message === 'Belum Scan S1');
-    const hasPendingS2 = items.some(r => r.status_message === 'Pending S2');
-    if (allReady) return { status: 'Ready', color: 'bg-green-600' };
-    if (hasBelumScan) return { status: 'Belum Scan S1', color: 'bg-red-800' };
-    if (hasPendingS2) return { status: 'Pending S2', color: 'bg-yellow-600' };
-    if (hasStokKurang) return { status: 'Stok Kurang', color: 'bg-red-600' };
-    return { status: 'Butuh Input', color: 'bg-blue-600' };
-  };
-
-  // Toggle select resi group
-  const toggleSelectResi = (resi: string) => {
-    setSelectedResis(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(resi)) {
-        newSet.delete(resi);
-      } else {
-        newSet.add(resi);
-      }
-      return newSet;
-    });
-  };
-
-  // Select all visible resis
-  const toggleSelectAll = () => {
-    const allResis = Object.keys(groupedByResi);
-    if (selectedResis.size === allResis.length) {
-      setSelectedResis(new Set());
-    } else {
-      setSelectedResis(new Set(allResis));
-    }
-  };
-
-  // Process only selected resis
-  const handleProcessSelected = async () => {
-    if (selectedResis.size === 0) {
-      alert("Pilih minimal 1 resi untuk diproses!");
-      return;
-    }
-    
-    // Filter rows yang resinya dipilih dan statusnya ready
-    const selectedRows = rows.filter(r => {
-      if (!selectedResis.has(r.resi)) return false;
-      const normalValid = r.is_db_verified && r.is_stock_valid && r.part_number;
-      const doubleOverridden = r.status_message === 'Double' && r.force_override_double && r.is_stock_valid && r.part_number;
-      return normalValid || doubleOverridden;
-    });
-    
-    if (selectedRows.length === 0) {
-      alert("Tidak ada item siap proses dari resi yang dipilih. Pastikan status hijau (Ready).");
-      return;
-    }
-    
-    if (!confirm(`Proses ${selectedRows.length} item dari ${selectedResis.size} resi ke Barang Keluar?`)) return;
-    
-    // PROCESSING MODAL: Initialize
-    const initialItems: ProcessingItem[] = selectedRows.map(r => ({
-      id: r.id,
-      resi: r.resi,
-      part_number: r.part_number,
-      nama_barang: r.nama_barang_csv || r.nama_barang_base || '-',
-      qty: r.qty_keluar,
-      customer: r.customer || '',
-      status: 'pending' as const
-    }));
-    
-    setProcessingItems(initialItems);
-    setProcessingProgress(0);
-    setProcessingCurrentItem('');
-    setProcessingComplete(false);
-    setProcessingSuccessCount(0);
-    setProcessingErrorCount(0);
-    setShowProcessingModal(true);
-    setLoading(true);
-    
-    let successCount = 0;
-    let errorCount = 0;
-    const processedIds: string[] = [];
-    
-    // Process one by one untuk visual feedback
-    for (let i = 0; i < selectedRows.length; i++) {
-      const row = selectedRows[i];
-      const progress = Math.round(((i + 1) / selectedRows.length) * 100);
-      
-      // Update current item being processed
-      setProcessingCurrentItem(`${row.part_number} - ${row.nama_barang_csv || row.nama_barang_base}`);
-      setProcessingProgress(progress);
-      
-      // Update item status to processing
-      setProcessingItems(prev => prev.map(item => 
-        item.id === row.id ? { ...item, status: 'processing' } : item
-      ));
-      
-      try {
-        // Prepare single item untuk proses
-        const itemToProcess = [{
-          ...row,
-          nama_pesanan: row.nama_barang_base || row.nama_barang_csv
-        }];
-        
-        const result = await processBarangKeluarBatch(itemToProcess, selectedStore);
-        
-        if (result.success || result.processed > 0) {
-          // Insert alias
-          if (row.part_number && row.nama_barang_csv) {
-            await insertProductAlias(row.part_number, row.nama_barang_csv);
-          }
-          
-          // Delete from resi_items
-          await deleteProcessedResiItems(selectedStore, [{ resi: row.resi, part_number: row.part_number }]);
-          
-          // Update item status to success
-          setProcessingItems(prev => prev.map(item => 
-            item.id === row.id ? { ...item, status: 'success' } : item
-          ));
-          successCount++;
-          processedIds.push(row.id);
-          setProcessingSuccessCount(successCount);
-        } else {
-          // Update item status to error
-          setProcessingItems(prev => prev.map(item => 
-            item.id === row.id ? { ...item, status: 'error', errorMessage: result.errors.join(', ') } : item
-          ));
-          errorCount++;
-          setProcessingErrorCount(errorCount);
-        }
-      } catch (err: any) {
-        setProcessingItems(prev => prev.map(item => 
-          item.id === row.id ? { ...item, status: 'error', errorMessage: err.message } : item
-        ));
-        errorCount++;
-        setProcessingErrorCount(errorCount);
-      }
-      
-      // Small delay untuk visual effect
-      await new Promise(resolve => setTimeout(resolve, 100));
-    }
-    
-    setProcessingComplete(true);
-    setProcessingCurrentItem('');
-    setLoading(false);
-    setSelectedResis(new Set()); // Clear selection
-    
-    // Refresh data
-    await loadSavedDataFromDB();
-    onRefresh?.();
-  };
-
-  // Handle delete all selected resis - Open modal
-  const handleDeleteSelectedAll = () => {
-    if (selectedResis.size === 0) {
-      alert("Pilih minimal 1 resi untuk dihapus!");
-      return;
-    }
-    
-    // Prepare items for delete modal
-    const itemsToDelete: DeleteItem[] = rows.filter(r => selectedResis.has(r.resi)).map(r => ({
-      id: r.id,
-      resi: r.resi,
-      part_number: r.part_number,
-      nama_barang: r.nama_barang_csv || r.nama_barang_base || '-',
-      customer: r.customer || '',
-      ecommerce: r.ecommerce,
-      sub_toko: r.sub_toko
-    }));
-    
-    setDeleteItems(itemsToDelete);
-    setIsDeleting(false);
-    setDeleteProgress(0);
-    setDeleteComplete(false);
-    setDeletedCount(0);
-    setDeleteErrorCount(0);
-    setShowDeleteModal(true);
-  };
-
-  // Execute delete after confirmation
-  const executeDelete = async () => {
-    setIsDeleting(true);
-    setDeleteProgress(0);
-    setDeletedCount(0);
-    setDeleteErrorCount(0);
-    
-    const itemsToDelete = rows.filter(r => selectedResis.has(r.resi));
-    let deleted = 0;
-    let errors = 0;
-    
-    // Collect unique resis for Stage 1 deletion
-    const uniqueResis = [...new Set(itemsToDelete.map(r => r.resi).filter(Boolean))];
-    
-    // Delete items one by one
-    for (let i = 0; i < itemsToDelete.length; i++) {
-      const row = itemsToDelete[i];
-      const progress = Math.round(((i + 1) / itemsToDelete.length) * 100);
-      setDeleteProgress(progress);
-      
-      try {
-        await handleDeleteRow(row.id, true); // true = skip confirmation
-        deleted++;
-        setDeletedCount(deleted);
-      } catch (err) {
-        errors++;
-        setDeleteErrorCount(errors);
-      }
-      
-      // Small delay for visual effect
-      await new Promise(resolve => setTimeout(resolve, 50));
-    }
-    
-    // Also delete from Stage 1 (scan_resi)
-    if (uniqueResis.length > 0) {
-      await deleteProcessedScanResi(selectedStore, uniqueResis);
-    }
-    
-    setDeleteComplete(true);
-    setSelectedResis(new Set());
-    
-    // Refresh data
-    await loadSavedDataFromDB();
-    onRefresh?.();
-  };
-
-  // Handle sort by column
-  const handleSort = (field: string) => {
-    if (sortField === field) {
-      setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
-    } else {
-      setSortField(field);
-      setSortDirection('asc');
-    }
-  };
-
-  // Format number with thousand separator (47320 -> 47.320)
-  const formatNumber = (num: number): string => {
-    return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
-  };
-
-  // Get row background color based on ecommerce and sub_toko
-  const getRowBgColor = (row: Stage3Row, isSelected: boolean): string => {
-    if (isSelected) return 'bg-blue-900/20';
-    if (!row.is_db_verified) return 'bg-red-900/10';
-    if (row.status_message === 'Stok Total Kurang') return 'bg-pink-900/20';
-    if (!row.is_stock_valid) return 'bg-yellow-900/10';
-    
-    // Warna berdasarkan E-Commerce
-    const ecomm = row.ecommerce?.toUpperCase() || '';
-    const toko = row.sub_toko?.toUpperCase() || '';
-    
-    if (ecomm.includes('SHOPEE')) {
-      if (toko === 'MJM') return 'bg-orange-900/15';
-      if (toko === 'BJW') return 'bg-orange-800/20';
-      if (toko === 'LARIS') return 'bg-orange-700/15';
-      return 'bg-orange-900/10';
-    }
-    if (ecomm.includes('TIKTOK')) {
-      if (toko === 'MJM') return 'bg-cyan-900/15';
-      if (toko === 'BJW') return 'bg-cyan-800/20';
-      if (toko === 'LARIS') return 'bg-cyan-700/15';
-      return 'bg-cyan-900/10';
-    }
-    if (ecomm.includes('EKSPOR')) {
-      if (toko === 'MJM') return 'bg-purple-900/15';
-      if (toko === 'BJW') return 'bg-purple-800/20';
-      return 'bg-purple-900/10';
-    }
-    if (ecomm.includes('RESELLER')) {
-      return 'bg-green-900/10';
-    }
-    if (ecomm.includes('KILAT')) {
-      return 'bg-red-900/10';
-    }
-    return '';
-  };
-
   return (
-    <div className="bg-gray-900 text-white h-screen p-2 pb-20 md:pb-2 text-sm font-sans flex flex-col overflow-hidden">
+    <div className="bg-gray-900 text-white min-h-screen p-2 pb-20 md:pb-2 text-sm font-sans flex flex-col">
       <datalist id="part-options">
         {partOptions.map((p, idx) => (<option key={idx} value={p} />))}
       </datalist>
@@ -2545,7 +1123,6 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                         <option value="MJM">MJM</option>
                         <option value="BJW">BJW</option>
                         <option value="LARIS">LARIS</option>
-                        <option value="PRAKTIS_PART">Praktis Part</option>
                     </select>
                 )}
 
@@ -2824,132 +1401,41 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
         </div>
       </div>
 
-      {/* BULK SELECT BAR - FIXED di atas table, tampil jika ada yang dipilih */}
-      {selectedResis.size > 0 && (
-        <div className="bg-blue-900/95 backdrop-blur-sm border border-blue-600 rounded-lg p-2 mb-2 flex items-center justify-between shadow-lg flex-shrink-0">
-          <div className="flex items-center gap-3">
-            <span className="text-blue-200 font-bold text-sm">
-              {selectedResis.size} resi dipilih ({rows.filter(r => selectedResis.has(r.resi)).length} item)
-            </span>
-            <button 
-              onClick={() => setSelectedResis(new Set())}
-              className="text-xs text-blue-300 hover:text-white underline"
-            >
-              Batalkan
-            </button>
-          </div>
-          <div className="flex items-center gap-2">
-            <button 
-              onClick={handleDeleteSelectedAll}
-              disabled={loading}
-              className="bg-red-600 hover:bg-red-500 text-white px-4 py-1.5 rounded font-bold text-sm flex items-center gap-2 disabled:opacity-50"
-            >
-              <Trash2 size={16}/> Hapus Semua
-            </button>
-            <button 
-              onClick={handleProcessSelected}
-              disabled={loading}
-              className="bg-green-600 hover:bg-green-500 text-white px-4 py-1.5 rounded font-bold text-sm flex items-center gap-2 disabled:opacity-50"
-            >
-              <CheckCircle size={16}/> Proses {selectedResis.size} Resi
-            </button>
-          </div>
-        </div>
-      )}
-
       {/* EXCEL-LIKE TABLE */}
-      <div className="flex-1 min-h-0 overflow-x-auto overflow-y-auto border border-gray-600 bg-gray-800 shadow-inner custom-scrollbar">
+      <div className="flex-1 overflow-x-auto overflow-y-auto border border-gray-600 bg-gray-800 shadow-inner custom-scrollbar">
         <table className="border-collapse text-[10px] md:text-xs min-w-[1000px] md:w-full md:table-fixed">
           <thead className="sticky top-0 z-20 shadow-md">
             <tr className="bg-gray-700 text-gray-200 font-semibold">
-              <th className="border border-gray-600 px-1 py-1 text-center w-[40px] md:w-[3%] bg-gray-700">
-                <input 
-                  type="checkbox" 
-                  checked={Object.keys(groupedByResi).length > 0 && selectedResis.size === Object.keys(groupedByResi).length}
-                  onChange={toggleSelectAll}
-                  className="w-4 h-4 accent-green-500 cursor-pointer"
-                  title="Pilih Semua"
-                />
-              </th>
-              <th className="border border-gray-600 px-1 py-1 text-center w-[55px] md:w-[5%] bg-gray-700 cursor-pointer hover:bg-gray-600" onClick={() => handleSort('status_message')}>
-                <div className="flex items-center justify-center gap-0.5">Status {sortField === 'status_message' && (sortDirection === 'asc' ? '↑' : '↓')}</div>
-              </th>
-              <th className="border border-gray-600 px-1 py-1 text-center w-[75px] md:w-[6%] bg-gray-700 cursor-pointer hover:bg-gray-600" onClick={() => handleSort('tanggal')}>
-                <div className="flex items-center justify-center gap-0.5">Tanggal {sortField === 'tanggal' && (sortDirection === 'asc' ? '↑' : '↓')}</div>
-              </th>
-              <th className="border border-gray-600 px-1 py-1 text-left w-[80px] md:w-[7%] bg-gray-700 cursor-pointer hover:bg-gray-600" onClick={() => handleSort('resi')}>
-                <div className="flex items-center gap-0.5">Resi {sortField === 'resi' && (sortDirection === 'asc' ? '↑' : '↓')}</div>
-              </th>
-              <th className="border border-gray-600 px-1 py-1 text-center w-[55px] md:w-[5%] bg-gray-700 cursor-pointer hover:bg-gray-600" onClick={() => handleSort('ecommerce')}>
-                <div className="flex items-center justify-center gap-0.5">E-Comm {sortField === 'ecommerce' && (sortDirection === 'asc' ? '↑' : '↓')}</div>
-              </th>
-              <th className="border border-gray-600 px-1 py-1 text-center w-[45px] md:w-[4%] bg-gray-700 cursor-pointer hover:bg-gray-600" onClick={() => handleSort('sub_toko')}>
-                <div className="flex items-center justify-center gap-0.5">Toko {sortField === 'sub_toko' && (sortDirection === 'asc' ? '↑' : '↓')}</div>
-              </th>
-              <th className="border border-gray-600 px-1 py-1 text-left w-[70px] md:w-[6%] bg-gray-600 cursor-pointer hover:bg-gray-500" onClick={() => handleSort('customer')}>
-                <div className="flex items-center gap-0.5">Customer {sortField === 'customer' && (sortDirection === 'asc' ? '↑' : '↓')}</div>
-              </th>
-              <th className="border border-gray-600 px-1 py-1 text-left border-b-2 border-b-yellow-600/50 w-[90px] md:w-[8%] bg-gray-600 cursor-pointer hover:bg-gray-500" onClick={() => handleSort('part_number')}>
-                <div className="flex items-center gap-0.5">Part No. {sortField === 'part_number' && (sortDirection === 'asc' ? '↑' : '↓')}</div>
-              </th>
-              <th className="border border-gray-600 px-1 py-1 text-left w-[140px] md:w-[12%] bg-gray-700">Nama (CSV)</th>
-              <th className="border border-gray-600 px-1 py-1 text-left w-[100px] md:w-[9%] bg-gray-700">Nama (Base)</th>
-              <th className="border border-gray-600 px-1 py-1 text-left w-[55px] md:w-[5%] bg-gray-700 cursor-pointer hover:bg-gray-600" onClick={() => handleSort('application')}>
-                <div className="flex items-center gap-0.5">Brand {sortField === 'application' && (sortDirection === 'asc' ? '↑' : '↓')}</div>
-              </th>
-              <th className="border border-gray-600 px-1 py-1 text-left w-[70px] md:w-[6%] bg-gray-700 cursor-pointer hover:bg-gray-600" onClick={() => handleSort('brand')}>
-                <div className="flex items-center gap-0.5">Aplikasi {sortField === 'brand' && (sortDirection === 'asc' ? '↑' : '↓')}</div>
-              </th>
-              <th className="border border-gray-600 px-1 py-1 text-center w-[40px] md:w-[3%] bg-gray-700 cursor-pointer hover:bg-gray-600" onClick={() => handleSort('stock_saat_ini')}>
-                <div className="flex items-center justify-center gap-0.5">Stok {sortField === 'stock_saat_ini' && (sortDirection === 'asc' ? '↑' : '↓')}</div>
-              </th>
-              <th className="border border-gray-600 px-1 py-1 text-center border-b-2 border-b-yellow-600/50 w-[40px] md:w-[3%] bg-gray-600 cursor-pointer hover:bg-gray-500" onClick={() => handleSort('qty_keluar')}>
-                <div className="flex items-center justify-center gap-0.5">Qty {sortField === 'qty_keluar' && (sortDirection === 'asc' ? '↑' : '↓')}</div>
-              </th>
-              <th className="border border-gray-600 px-1 py-1 text-right border-b-2 border-b-yellow-600/50 w-[70px] md:w-[5%] bg-gray-600 cursor-pointer hover:bg-gray-500" onClick={() => handleSort('harga_total')}>
-                <div className="flex items-center justify-end gap-0.5">Total {sortField === 'harga_total' && (sortDirection === 'asc' ? '↑' : '↓')}</div>
-              </th>
-              <th className="border border-gray-600 px-1 py-1 text-right w-[60px] md:w-[4%] bg-gray-700 cursor-pointer hover:bg-gray-600" onClick={() => handleSort('harga_satuan')}>
-                <div className="flex items-center justify-end gap-0.5">Satuan {sortField === 'harga_satuan' && (sortDirection === 'asc' ? '↑' : '↓')}</div>
-              </th>
-              <th className="border border-gray-600 px-1 py-1 text-left w-[60px] md:w-[4%] bg-gray-700">No. Pesanan</th>
+              <th className="border border-gray-600 px-1 py-1 text-center w-[55px] md:w-[5%] bg-gray-700">Status</th>
+              <th className="border border-gray-600 px-1 py-1 text-center w-[75px] md:w-[6%] bg-gray-700">Tanggal</th>
+              <th className="border border-gray-600 px-1 py-1 text-left w-[80px] md:w-[7%] bg-gray-700">Resi</th>
+              <th className="border border-gray-600 px-1 py-1 text-center w-[55px] md:w-[5%] bg-gray-700">E-Comm</th>
+              <th className="border border-gray-600 px-1 py-1 text-center w-[45px] md:w-[4%] bg-gray-700">Toko</th>
+              <th className="border border-gray-600 px-1 py-1 text-left w-[70px] md:w-[7%] bg-gray-600">Customer</th>
+              <th className="border border-gray-600 px-1 py-1 text-left border-b-2 border-b-yellow-600/50 w-[90px] md:w-[8%] bg-gray-600">Part No.</th>
+              <th className="border border-gray-600 px-1 py-1 text-left w-[110px] md:w-[11%] bg-gray-700">Nama (CSV)</th>
+              <th className="border border-gray-600 px-1 py-1 text-left w-[110px] md:w-[11%] bg-gray-700">Nama (Base)</th>
+              <th className="border border-gray-600 px-1 py-1 text-left w-[55px] md:w-[5%] bg-gray-700">Brand</th>
+              <th className="border border-gray-600 px-1 py-1 text-left w-[70px] md:w-[7%] bg-gray-700">Aplikasi</th>
+              <th className="border border-gray-600 px-1 py-1 text-center w-[40px] md:w-[3%] bg-gray-700">Stok</th>
+              <th className="border border-gray-600 px-1 py-1 text-center border-b-2 border-b-yellow-600/50 w-[40px] md:w-[3%] bg-gray-600">Qty</th>
+              <th className="border border-gray-600 px-1 py-1 text-right border-b-2 border-b-yellow-600/50 w-[70px] md:w-[6%] bg-gray-600">Total</th>
+              <th className="border border-gray-600 px-1 py-1 text-right w-[60px] md:w-[5%] bg-gray-700">Satuan</th>
+              <th className="border border-gray-600 px-1 py-1 text-left w-[60px] md:w-[5%] bg-gray-700">No. Pesanan</th>
               <th className="border border-gray-600 px-1 py-1 text-center w-[35px] md:w-[2%] bg-gray-700">#</th>
             </tr>
           </thead>
           <tbody className="bg-gray-900 text-gray-300">
-            {Object.keys(groupedByResi).length === 0 ? (
-              <tr><td colSpan={18} className="text-center py-10 text-gray-500 italic">Data Kosong. Silakan Import atau Load Pending.</td></tr>
+            {displayedRows.length === 0 ? (
+              <tr><td colSpan={17} className="text-center py-10 text-gray-500 italic">Data Kosong. Silakan Import atau Load Pending.</td></tr>
             ) : (
-              Object.entries(groupedByResi).map(([resiKey, resiItems]) => {
-                const groupStatus = getGroupStatus(resiItems);
-                const isSelected = selectedResis.has(resiKey);
-                const firstItem = resiItems[0];
-                const totalQty = resiItems.reduce((sum, r) => sum + r.qty_keluar, 0);
-                const totalHarga = resiItems.reduce((sum, r) => sum + r.harga_total, 0);
-                
-                return resiItems.map((row, itemIdx) => {
-                  const isFirstOfGroup = itemIdx === 0;
-                  const idx = displayedRows.indexOf(row);
+              displayedRows.map((row, idx) => (
+                <tr key={row.id} className={`group hover:bg-gray-800 transition-colors ${
+                  !row.is_db_verified ? 'bg-red-900/10' : 
+                  row.status_message === 'Stok Total Kurang' ? 'bg-pink-900/20' :
+                  !row.is_stock_valid ? 'bg-yellow-900/10' : ''
+                }`}>
                   
-                  return (
-                    <tr key={row.id} className={`group hover:bg-gray-700/50 transition-colors ${getRowBgColor(row, isSelected)} ${isFirstOfGroup && resiItems.length > 1 ? 'border-t-2 border-t-gray-500' : ''}`}>
-                      
-                      {/* CHECKBOX - hanya tampil di baris pertama grup */}
-                      {isFirstOfGroup ? (
-                        <td rowSpan={resiItems.length} className={`border border-gray-600 p-0 text-center align-middle ${isSelected ? 'bg-blue-900/30' : 'bg-gray-800'}`}>
-                          <div className="flex flex-col items-center gap-1 py-1">
-                            <input 
-                              type="checkbox"
-                              checked={isSelected}
-                              onChange={() => toggleSelectResi(resiKey)}
-                              className="w-5 h-5 accent-green-500 cursor-pointer"
-                            />
-                            {resiItems.length > 1 && (
-                              <span className="text-[9px] text-gray-400">{resiItems.length} item</span>
-                            )}
-                          </div>
-                        </td>
-                      ) : null}
                   {/* STATUS */}
                   <td className="border border-gray-600 p-0 text-center align-middle">
                      <div className="flex flex-col items-center gap-0.5 py-0.5">
@@ -3014,9 +1500,9 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                   <td className="border border-gray-600 px-1 text-center text-[11px]">
                     <div className="flex flex-col items-center gap-0.5">
                       <span>{row.ecommerce}</span>
-                      {/* Badge INSTANT: untuk SHOPEE (jika resi === no_pesanan) ATAU TikTok (jika label INSTAN) */}
-                      {((row.resi && row.no_pesanan && row.resi === row.no_pesanan && row.ecommerce?.toUpperCase().includes('SHOPEE')) ||
-                        row.ecommerce?.toUpperCase().includes('INSTAN')) && (
+                      {/* Badge INSTANT di bawah ecommerce jika resi === no_pesanan (kecuali RESELLER dan EKSPOR) */}
+                      {row.resi && row.no_pesanan && row.resi === row.no_pesanan && 
+                       row.ecommerce !== 'RESELLER' && !row.ecommerce?.startsWith('EKSPOR') && (
                         <span className="px-1 py-0.5 bg-orange-500 text-white text-[8px] font-bold rounded">INSTANT</span>
                       )}
                     </div>
@@ -3054,22 +1540,22 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
 
                   {/* NAMA BARANG DARI CSV/EXCEL */}
                   <td className="border border-gray-600 px-1.5 py-1 text-[11px] leading-tight align-middle text-blue-300 bg-blue-900/10">
-                    <div className="whitespace-normal break-words" title={row.nama_barang_csv}>
-                        {row.nama_barang_csv || ''}
+                    <div className="line-clamp-2 hover:line-clamp-none max-h-[3.5em] overflow-hidden" title={row.nama_barang_csv}>
+                        {row.nama_barang_csv ? row.nama_barang_csv : <span className="italic text-gray-500">-</span>}
                     </div>
                   </td>
 
                   {/* NAMA BARANG DARI BASE */}
                   <td className="border border-gray-600 px-1.5 py-1 text-[11px] leading-tight align-middle text-green-300 bg-green-900/10">
                     <div className="line-clamp-2 hover:line-clamp-none max-h-[3.5em] overflow-hidden" title={row.nama_barang_base}>
-                        {row.nama_barang_base || ''}
+                        {row.nama_barang_base || <span className="italic text-gray-500">-</span>}
                     </div>
                   </td>
 
-                  {/* BRAND - tampilkan dari application karena data tertukar di DB */}
-                  <td className="border border-gray-600 px-1 py-1 text-[11px] truncate text-gray-400">{row.application}</td>
-                  {/* APPLICATION / MOBIL - tampilkan dari brand karena data tertukar di DB */}
+                  {/* BRAND */}
                   <td className="border border-gray-600 px-1 py-1 text-[11px] truncate text-gray-400">{row.brand}</td>
+                  {/* APPLICATION / MOBIL */}
+                  <td className="border border-gray-600 px-1 py-1 text-[11px] truncate text-gray-400">{row.application}</td>
 
                   {/* STOK INFO */}
                   <td className={`border border-gray-600 px-1 text-center font-bold ${row.stock_saat_ini < row.qty_keluar ? 'text-red-500 bg-red-900/20' : 'text-green-500'}`}>
@@ -3089,43 +1575,29 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                     />
                   </td>
 
-                  {/* TOTAL HARGA (DISPLAY + INPUT) */}
-                  <td className="border border-gray-600 p-0 relative group/harga">
-                    <div className="w-full h-full px-1 text-right font-mono text-yellow-400 font-bold group-focus-within/harga:hidden flex items-center justify-end gap-1">
-                      <span>{row.harga_total ? formatNumber(row.harga_total) : ''}</span>
-                      {row.mata_uang && row.mata_uang !== 'IDR' && row.harga_total > 0 && (
-                        <span className="text-[9px] px-1 py-0.5 bg-purple-600/50 text-purple-200 rounded font-normal">{row.mata_uang}</span>
-                      )}
-                    </div>
+                  {/* TOTAL HARGA (INPUT) */}
+                  <td className="border border-gray-600 p-0">
                     <input 
                         id={`input-${idx}-harga_total`} 
                         type="number" 
-                        value={row.harga_total || ''} 
+                        value={row.harga_total} 
                         onChange={(e) => updateRow(row.id, 'harga_total', parseInt(e.target.value) || 0)} 
                         onBlur={() => handleSaveRow(row)} 
                         onKeyDown={(e) => handleKeyDown(e, idx, 'harga_total')} 
-                        className="absolute inset-0 w-full h-full bg-transparent text-right px-1 focus:bg-blue-900/50 outline-none font-mono text-yellow-400 font-bold opacity-0 focus:opacity-100"
-                        placeholder=""
+                        className="w-full h-full bg-transparent text-right px-1 focus:bg-blue-900/50 outline-none font-mono text-gray-300"
                     />
                   </td>
 
-                  {/* HARGA SATUAN (DISPLAY + INPUT) */}
-                  <td className="border border-gray-600 p-0 relative group/satuan">
-                    <div className="w-full h-full px-1 text-right font-mono text-yellow-300 text-[11px] group-focus-within/satuan:hidden flex items-center justify-end gap-1">
-                      <span>{row.harga_satuan ? formatNumber(row.harga_satuan) : ''}</span>
-                      {row.mata_uang && row.mata_uang !== 'IDR' && row.harga_satuan > 0 && (
-                        <span className="text-[8px] px-0.5 py-0.5 bg-purple-600/30 text-purple-300 rounded font-normal">{row.mata_uang}</span>
-                      )}
-                    </div>
+                  {/* HARGA SATUAN (INPUT) */}
+                  <td className="border border-gray-600 p-0">
                     <input 
                         id={`input-${idx}-harga_satuan`} 
                         type="number" 
-                        value={row.harga_satuan || ''} 
+                        value={row.harga_satuan} 
                         onChange={(e) => updateRow(row.id, 'harga_satuan', parseInt(e.target.value) || 0)} 
                         onBlur={() => handleSaveRow(row)} 
                         onKeyDown={(e) => handleKeyDown(e, idx, 'harga_satuan')} 
-                        className="absolute inset-0 w-full h-full bg-transparent text-right px-1 focus:bg-blue-900/50 outline-none font-mono text-yellow-300 text-[11px] opacity-0 focus:opacity-100"
-                        placeholder=""
+                        className="w-full h-full bg-transparent text-right px-1 focus:bg-blue-900/50 outline-none font-mono text-gray-500 text-[11px]"
                     />
                   </td>
 
@@ -3140,49 +1612,11 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                     </div>
                   </td>
                 </tr>
-                  );
-                })
-              })
+              ))
             )}
           </tbody>
         </table>
       </div>
-
-      {/* Modal untuk menampilkan proses dan hasil upload CSV */}
-      <UploadResultModal
-        isOpen={showSkippedModal}
-        onClose={() => setShowSkippedModal(false)}
-        skippedItems={skippedItems}
-        updatedItems={updatedItems}
-        summary={uploadSummary}
-        isProcessing={isProcessingUpload}
-        processLogs={processLogs}
-      />
-
-      {/* Processing Modal - Loading progress untuk proses barang keluar */}
-      <ProcessingModal
-        isOpen={showProcessingModal}
-        onClose={() => setShowProcessingModal(false)}
-        items={processingItems}
-        progress={processingProgress}
-        currentItem={processingCurrentItem}
-        isComplete={processingComplete}
-        successCount={processingSuccessCount}
-        errorCount={processingErrorCount}
-      />
-
-      {/* Delete Confirmation Modal */}
-      <DeleteConfirmModal
-        isOpen={showDeleteModal}
-        onClose={() => setShowDeleteModal(false)}
-        onConfirm={executeDelete}
-        items={deleteItems}
-        isDeleting={isDeleting}
-        deleteProgress={deleteProgress}
-        deleteComplete={deleteComplete}
-        deletedCount={deletedCount}
-        errorCount={deleteErrorCount}
-      />
     </div>
   );
 };

@@ -53,7 +53,11 @@ interface PivotGroup {
   items: any[];
 }
 
-export const ClosingView: React.FC = () => {
+interface ClosingViewProps {
+  refreshTrigger?: number;
+}
+
+export const ClosingView: React.FC<ClosingViewProps> = ({ refreshTrigger }) => {
   const { selectedStore } = useStore();
   const [viewMode, setViewMode] = useState<ViewMode>('masuk');
   const [startDate, setStartDate] = useState('');
@@ -76,12 +80,12 @@ export const ClosingView: React.FC = () => {
     setEndDate(today);
   }, []);
 
-  // Fetch data when dates or store change
+  // Fetch data when dates or store change or refreshTrigger
   useEffect(() => {
     if (startDate && endDate) {
       loadData();
     }
-  }, [selectedStore, startDate, endDate]);
+  }, [selectedStore, startDate, endDate, refreshTrigger]);
 
   const getTableName = (type: 'masuk' | 'keluar') => {
     const store = selectedStore?.toLowerCase() || 'mjm';

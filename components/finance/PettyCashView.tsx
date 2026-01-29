@@ -43,7 +43,11 @@ const formatCurrency = (amount: number): string => {
   });
 };
 
-export const PettyCashView: React.FC = () => {
+interface PettyCashViewProps {
+  refreshTrigger?: number;
+}
+
+export const PettyCashView: React.FC<PettyCashViewProps> = ({ refreshTrigger }) => {
   const [entries, setEntries] = useState<PettyCashEntry[]>([]);
   const [isAdding, setIsAdding] = useState(false);
   const [showPrintView, setShowPrintView] = useState(false);

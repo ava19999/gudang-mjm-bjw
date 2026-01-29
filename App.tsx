@@ -392,18 +392,18 @@ const AppContent: React.FC = () => {
       )}
 
       <div className="flex-1 overflow-y-auto bg-gray-900">
-        {activeView === 'shop' && <ShopView items={items} cart={cart} isAdmin={isAdmin} isKingFano={isKingFano} bannerUrl={bannerUrl} onAddToCart={addToCart} onRemoveFromCart={(id) => setCart(prev => prev.filter(c => c.id !== id))} onUpdateCartItem={updateCartItem} onCheckout={doCheckout} onUpdateBanner={handleUpdateBanner} />}
+        {activeView === 'shop' && <ShopView items={items} cart={cart} isAdmin={isAdmin} isKingFano={isKingFano} bannerUrl={bannerUrl} onAddToCart={addToCart} onRemoveFromCart={(id) => setCart(prev => prev.filter(c => c.id !== id))} onUpdateCartItem={updateCartItem} onCheckout={doCheckout} onUpdateBanner={handleUpdateBanner} refreshTrigger={refreshTrigger} />}
         {activeView === 'inventory' && isAdmin && <Dashboard items={items} orders={[]} history={history} refreshTrigger={refreshTrigger} onViewOrders={() => setActiveView('orders')} onAddNew={() => { setEditItem(null); setIsEditing(true); }} onEdit={(item) => { setEditItem(item); setIsEditing(true); }} onDelete={handleDelete} canDelete={['Bryan', 'Ava'].some(name => name.toLowerCase() === userName.toLowerCase())} />}
         {activeView === 'quick_input' && isAdmin && <QuickInputView items={items} onRefresh={refreshData} showToast={showToast} />}
-        {activeView === 'petty_cash' && isAdmin && <PettyCashView />}
-        {activeView === 'barang_kosong' && isAdmin && <BarangKosongView />}
-        {activeView === 'closing' && isAdmin && <ClosingView />}
+        {activeView === 'petty_cash' && isAdmin && <PettyCashView refreshTrigger={refreshTrigger} />}
+        {activeView === 'barang_kosong' && isAdmin && <BarangKosongView refreshTrigger={refreshTrigger} />}
+        {activeView === 'closing' && isAdmin && <ClosingView refreshTrigger={refreshTrigger} />}
         {activeView === 'data_agung' && isAdmin && <DataAgungView items={items} onRefresh={refreshData} showToast={showToast} />}
-        {activeView === 'scan_resi_stage1' && isAdmin && <ScanResiStage1 onRefresh={refreshData} />}
-        {activeView === 'scan_resi_stage2' && isAdmin && <ScanResiStage2 onRefresh={refreshData} />}
-        {activeView === 'scan_resi_stage3' && isAdmin && <ScanResiStage3 onRefresh={refreshData} />}
-        {activeView === 'scan_resi_history' && isAdmin && <RiwayatScanResi />}
-        {activeView === 'orders' && <OrderManagement />}
+        {activeView === 'scan_resi_stage1' && isAdmin && <ScanResiStage1 onRefresh={refreshData} refreshTrigger={refreshTrigger} />}
+        {activeView === 'scan_resi_stage2' && isAdmin && <ScanResiStage2 onRefresh={refreshData} refreshTrigger={refreshTrigger} />}
+        {activeView === 'scan_resi_stage3' && isAdmin && <ScanResiStage3 onRefresh={refreshData} refreshTrigger={refreshTrigger} />}
+        {activeView === 'scan_resi_history' && isAdmin && <RiwayatScanResi refreshTrigger={refreshTrigger} />}
+        {activeView === 'orders' && <OrderManagement refreshTrigger={refreshTrigger} />}
         
         {isEditing && isAdmin && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm animate-in fade-in">

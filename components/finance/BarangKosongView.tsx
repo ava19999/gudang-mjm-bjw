@@ -604,7 +604,11 @@ const OrderHistoryModal: React.FC<OrderHistoryModalProps> = ({
 };
 
 // Main Component
-export const BarangKosongView: React.FC = () => {
+interface BarangKosongViewProps {
+  refreshTrigger?: number;
+}
+
+export const BarangKosongView: React.FC<BarangKosongViewProps> = ({ refreshTrigger }) => {
   const { selectedStore, getStoreConfig } = useStore();
   const storeConfig = getStoreConfig();
 
@@ -690,7 +694,7 @@ export const BarangKosongView: React.FC = () => {
       loadData();
       loadSavedOrders();
     }
-  }, [selectedStore, stockThreshold]);
+  }, [selectedStore, stockThreshold, refreshTrigger]);
 
   // Toast helper
   const showToast = (msg: string, type: 'success' | 'error') => {

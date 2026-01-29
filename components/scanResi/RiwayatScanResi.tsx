@@ -23,6 +23,7 @@ import {
 
 interface RiwayatScanResiProps {
   onRefresh?: () => void;
+  refreshTrigger?: number;
 }
 
 const Toast = ({ message, type, onClose }: any) => (
@@ -37,7 +38,7 @@ const Toast = ({ message, type, onClose }: any) => (
   </div>
 );
 
-export const RiwayatScanResi: React.FC<RiwayatScanResiProps> = ({ onRefresh }) => {
+export const RiwayatScanResi: React.FC<RiwayatScanResiProps> = ({ onRefresh, refreshTrigger }) => {
   const { selectedStore } = useStore();
   
   const [resiHistory, setResiHistory] = useState<ResiScanStage[]>([]);
@@ -86,7 +87,7 @@ export const RiwayatScanResi: React.FC<RiwayatScanResiProps> = ({ onRefresh }) =
     return () => {
       mounted = false;
     };
-  }, [selectedStore, statusFilter, ecommerceFilter]);
+  }, [selectedStore, statusFilter, ecommerceFilter, refreshTrigger]);
   
   const loadHistory = async () => {
     setLoading(true);

@@ -132,13 +132,17 @@ export const fetchSearchSuggestions = async (
   const table = getTableName(store);
   if (!searchQuery || searchQuery.length < 1) return [];
 
+  // SWAP: Di database, kolom brand berisi application dan sebaliknya
+  // Jadi saat user minta 'brand', kita query kolom 'application' di DB
+  const dbColumn = field === 'brand' ? 'application' : (field === 'application' ? 'brand' : field);
+
   try {
     const { data, error } = await supabase
       .from(table)
-      .select(field)
-      .ilike(field, `%${searchQuery}%`)
-      .not(field, 'is', null)
-      .not(field, 'eq', '')
+      .select(dbColumn)
+      .ilike(dbColumn, `%${searchQuery}%`)
+      .not(dbColumn, 'is', null)
+      .not(dbColumn, 'eq', '')
       .limit(50);
 
     if (error) {
@@ -146,10 +150,10 @@ export const fetchSearchSuggestions = async (
       return [];
     }
 
-    // Get unique values
+    // Get unique values - use dbColumn to read from result since that's what we queried
     const uniqueValues = [...new Set(
       (data || [])
-        .map((d: any) => d[field]?.toString().trim())
+        .map((d: any) => d[dbColumn]?.toString().trim())
         .filter(Boolean)
     )];
     return uniqueValues.sort().slice(0, 20);
@@ -166,22 +170,25 @@ export const fetchAllDistinctValues = async (
 ): Promise<string[]> => {
   const table = getTableName(store);
 
+  // SWAP: Di database, kolom brand berisi application dan sebaliknya
+  const dbColumn = field === 'brand' ? 'application' : (field === 'application' ? 'brand' : field);
+
   try {
     const { data, error } = await supabase
       .from(table)
-      .select(field)
-      .not(field, 'is', null)
-      .not(field, 'eq', '');
+      .select(dbColumn)
+      .not(dbColumn, 'is', null)
+      .not(dbColumn, 'eq', '');
 
     if (error) {
       console.error(`Fetch All ${field} Error:`, error);
       return [];
     }
 
-    // Get unique values
+    // Get unique values - use dbColumn to read from result
     const uniqueValues = [...new Set(
       (data || [])
-        .map((d: any) => d[field]?.toString().trim())
+        .map((d: any) => d[dbColumn]?.toString().trim())
         .filter(Boolean)
     )];
     return uniqueValues.sort();
@@ -272,7 +279,7 @@ const mapItemFromDB = (item: any, photoData?: any): InventoryItem => {
     id: pk, 
     partNumber: pk,
     name: item.name,
-    // UI label swap fix: display application as brand and vice versa
+    // SWAP: Di database, kolom brand berisi application dan sebaliknya
     brand: item.application,
     application: item.brand,
     shelf: item.shelf,
@@ -293,7 +300,7 @@ const mapItemToDB = (data: any) => {
   const dbPayload: any = {
     part_number: data.partNumber || data.part_number, 
     name: data.name,
-    // UI label swap fix: save brand field to application column and vice versa
+    // SWAP: Di database, kolom brand berisi application dan sebaliknya
     brand: data.application,
     application: data.brand,
     shelf: data.shelf,
@@ -458,9 +465,9 @@ export const fetchInventoryPaginated = async (store: string | null, page: number
   if (filters?.partNumber) query = query.ilike('part_number', `%${filters.partNumber}%`);
   // Filter by name
   if (filters?.name) query = query.ilike('name', `%${filters.name}%`);
-  // Filter by brand (searches application column - UI label swap fix)
+  // Filter by brand (SWAP: user's brand filter queries 'application' column in DB)
   if (filters?.brand) query = query.ilike('application', `%${filters.brand}%`);
-  // Filter by application (searches brand column - UI label swap fix)
+  // Filter by application (SWAP: user's app filter queries 'brand' column in DB)
   if (filters?.app) query = query.ilike('brand', `%${filters.app}%`);
   // Filter by stock type
   if (filters?.type === 'low') query = query.gt('quantity', 0).lte('quantity', 3);
@@ -540,9 +547,9 @@ export const fetchInventoryAllFiltered = async (store: string | null, filters?: 
   if (filters?.partNumber) query = query.ilike('part_number', `%${filters.partNumber}%`);
   // Filter by name
   if (filters?.name) query = query.ilike('name', `%${filters.name}%`);
-  // Filter by brand (searches application column - UI label swap fix)
+  // Filter by brand (SWAP: user's brand filter queries 'application' column in DB)
   if (filters?.brand) query = query.ilike('application', `%${filters.brand}%`);
-  // Filter by application (searches brand column - UI label swap fix)
+  // Filter by application (SWAP: user's app filter queries 'brand' column in DB)
   if (filters?.app) query = query.ilike('brand', `%${filters.app}%`);
   // Filter by stock type
   if (filters?.type === 'low') query = query.gt('quantity', 0).lte('quantity', 3);
@@ -748,9 +755,9 @@ export const fetchShopItems = async (
     if (searchTerm) query = query.or(`name.ilike.%${searchTerm}%,part_number.ilike.%${searchTerm}%`);
     if (partNumberSearch) query = query.ilike('part_number', `%${partNumberSearch}%`);
     if (nameSearch) query = query.ilike('name', `%${nameSearch}%`);
-    // UI label swap fix: brandSearch searches application column
+    // Filter by brand (SWAP: user's brand filter queries 'application' column in DB)
     if (brandSearch) query = query.ilike('application', `%${brandSearch}%`);
-    // UI label swap fix: applicationSearch searches brand column
+    // Filter by application (SWAP: user's app filter queries 'brand' column in DB)
     if (applicationSearch) query = query.ilike('brand', `%${applicationSearch}%`);
 
     const { data: items, count, error } = await query.range(from, to).order('name', { ascending: true });
@@ -1797,8 +1804,8 @@ export const fetchLowStockItems = async (
       result.push({
         partNumber: item.part_number,
         name: item.name || '',
-        brand: item.application || '',
-        application: item.brand || '',
+        brand: item.brand || '',
+        application: item.application || '',
         quantity: item.quantity || 0,
         shelf: item.shelf || '',
         suppliers

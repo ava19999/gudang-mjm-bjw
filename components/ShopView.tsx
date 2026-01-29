@@ -24,7 +24,8 @@ interface ShopViewProps {
     onRemoveFromCart: (itemId: string) => void; 
     onUpdateCartItem: (itemId: string, changes: Partial<CartItem>) => void; 
     onCheckout: (customerName: string) => void; 
-    onUpdateBanner: (base64: string) => Promise<void>; 
+    onUpdateBanner: (base64: string) => Promise<void>;
+    refreshTrigger?: number;
 }
 
 export const ShopView: React.FC<ShopViewProps> = ({ 
@@ -36,7 +37,8 @@ export const ShopView: React.FC<ShopViewProps> = ({
     onRemoveFromCart, 
     onUpdateCartItem, 
     onCheckout, 
-    onUpdateBanner 
+    onUpdateBanner,
+    refreshTrigger
 }) => {
   const { selectedStore } = useStore();
   
@@ -108,7 +110,7 @@ export const ShopView: React.FC<ShopViewProps> = ({
   useEffect(() => {
     const timer = setTimeout(async () => {
       if (brandSearch.length >= 1) {
-        const suggestions = await fetchSearchSuggestions(selectedStore, 'application', brandSearch);
+        const suggestions = await fetchSearchSuggestions(selectedStore, 'brand', brandSearch);
         setBrandOptions(suggestions);
       } else {
         setBrandOptions([]);
@@ -120,7 +122,7 @@ export const ShopView: React.FC<ShopViewProps> = ({
   useEffect(() => {
     const timer = setTimeout(async () => {
       if (applicationSearch.length >= 1) {
-        const suggestions = await fetchSearchSuggestions(selectedStore, 'brand', applicationSearch);
+        const suggestions = await fetchSearchSuggestions(selectedStore, 'application', applicationSearch);
         setApplicationOptions(suggestions);
       } else {
         setApplicationOptions([]);
@@ -191,7 +193,7 @@ export const ShopView: React.FC<ShopViewProps> = ({
     loadData();
     
     return () => { mounted = false; };
-  }, [page, debouncedSearch, category, debouncedPartNumber, debouncedName, debouncedBrand, debouncedApplication, selectedStore]); // Hanya jalan jika ini berubah
+  }, [page, debouncedSearch, category, debouncedPartNumber, debouncedName, debouncedBrand, debouncedApplication, selectedStore, refreshTrigger]); // Hanya jalan jika ini berubah
 
   // --- Banner Upload Handlers ---
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => { 
