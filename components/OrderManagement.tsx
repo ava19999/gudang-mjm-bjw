@@ -457,6 +457,7 @@ export const OrderManagement: React.FC = () => {
       resi: string, 
       ecommerce: string, 
       tempo: string,
+      toko: string,
       date: string, 
       items: SoldItemRow[], 
       totalQty: number,
@@ -467,6 +468,7 @@ export const OrderManagement: React.FC = () => {
       const safeCustomer = (item.customer || 'Tanpa Nama').trim();
       const safeResi = (item.resi || '-').trim();
       const safeEcommerce = (item.ecommerce || 'OFFLINE').trim();
+      const safeToko = (item.kode_toko || '-').trim().toUpperCase();
       // Group by resi jika ada, kalau tidak by customer + date
       const key = safeResi !== '-' ? `${safeResi}` : `${safeCustomer}-${item.created_at?.slice(0, 10)}`;
       
@@ -477,6 +479,7 @@ export const OrderManagement: React.FC = () => {
           resi: safeResi, 
           ecommerce: safeEcommerce,
           tempo: item.tempo || 'CASH',
+          toko: safeToko,
           date: item.created_at, 
           items: [], 
           totalQty: 0,
@@ -1157,32 +1160,96 @@ export const OrderManagement: React.FC = () => {
           </div>
         )}
 
-        {/* --- 3. TAB TERJUAL (GROUPED VIEW dengan PAGINATION) --- */}
+        {/* --- 3. TAB TERJUAL (GROUPED VIEW dengan PAGINATION) - MODERN DESIGN --- */}
         {activeTab === 'TERJUAL' && (
           <div className="space-y-4">
-            {paginatedSoldGroups.length === 0 && <EmptyState msg="Belum ada data penjualan." />}
+            {paginatedSoldGroups.length === 0 && (
+              <div className="flex flex-col items-center justify-center py-16 bg-gray-800/30 rounded-2xl border border-gray-700/50">
+                <div className="w-20 h-20 rounded-full bg-gray-800 flex items-center justify-center mb-4">
+                  <CheckCircle size={40} className="text-gray-600"/>
+                </div>
+                <h3 className="text-lg font-bold text-gray-400 mb-1">Belum Ada Penjualan</h3>
+                <p className="text-sm text-gray-500">Data penjualan akan muncul di sini</p>
+              </div>
+            )}
             
-            {paginatedSoldGroups.map((group) => {
+            {paginatedSoldGroups.map((group, groupIdx) => {
               const groupKey = group.id;
               // Default to expanded (true) if not explicitly set to false
               const isExpanded = expandedGroups[groupKey] !== false;
               const ecommerceColors = getEcommerceColor(group.ecommerce);
 
+              // Get marketplace icon based on ecommerce
+              const getMarketplaceIcon = (ecom: string) => {
+                const upper = ecom.toUpperCase();
+                if (upper === 'SHOPEE' || upper === 'SHOPPE') return '🛍️';
+                if (upper === 'TIKTOK') return '🎵';
+                if (upper === 'TOKOPEDIA') return '🛒';
+                if (upper === 'LAZADA') return '🔵';
+                if (upper === 'KILAT') return '⚡';
+                if (upper === 'RESELLER') return '👥';
+                return '🏪';
+              };
+
               return (
-                <div key={groupKey} className={`${ecommerceColors.bg} border ${ecommerceColors.border} rounded-xl overflow-hidden hover:border-gray-500 transition-all shadow-lg`}>
+                <div 
+                  key={groupKey} 
+                  className={`group relative bg-gradient-to-br from-gray-800 to-gray-900 border-2 rounded-2xl overflow-hidden transition-all duration-300 hover:shadow-2xl hover:shadow-purple-900/20 ${ecommerceColors.border}`}
+                  style={{ animationDelay: `${groupIdx * 50}ms` }}
+                >
+                  {/* Decorative accent line */}
+                  <div className={`absolute top-0 left-0 right-0 h-1 bg-gradient-to-r ${
+                    group.ecommerce.toUpperCase() === 'SHOPEE' || group.ecommerce.toUpperCase() === 'SHOPPE' ? 'from-orange-500 to-red-500' :
+                    group.ecommerce.toUpperCase() === 'TIKTOK' ? 'from-pink-500 to-purple-500' :
+                    group.ecommerce.toUpperCase() === 'TOKOPEDIA' ? 'from-green-500 to-emerald-500' :
+                    group.ecommerce.toUpperCase() === 'LAZADA' ? 'from-blue-500 to-indigo-500' :
+                    'from-gray-500 to-gray-600'
+                  }`}/>
+                  
                   {/* GROUP HEADER */}
-                  <div className={`p-3 flex flex-col md:flex-row justify-between gap-2 ${ecommerceColors.bg}`}>
+                  <div className="p-4 flex flex-col md:flex-row justify-between gap-3">
                     <div className="flex-1 cursor-pointer select-none" onClick={() => toggleExpand(groupKey)}>
-                      <div className="flex items-center gap-2 mb-1 flex-wrap">
-                        <span className={`text-sm font-bold px-3 py-1 rounded border ${ecommerceColors.bg} ${ecommerceColors.border} ${ecommerceColors.text}`}>
+                      {/* Top Row - Tags */}
+                      <div className="flex items-center gap-2 mb-3 flex-wrap">
+                        {/* Marketplace Badge */}
+                        <span className={`inline-flex items-center gap-1.5 text-sm font-bold px-3 py-1.5 rounded-lg border shadow-sm ${ecommerceColors.bg} ${ecommerceColors.border} ${ecommerceColors.text}`}>
+                          <span className="text-base">{getMarketplaceIcon(group.ecommerce)}</span>
                           {group.ecommerce}
                         </span>
-                        <span className="text-sm font-mono bg-gray-700/50 px-2 py-0.5 rounded text-gray-300">
-                          {new Date(group.date).toLocaleString('id-ID', {timeZone: 'Asia/Jakarta'})}
+                        
+                        {/* Date Badge */}
+                        <span className="inline-flex items-center gap-1.5 text-xs font-medium bg-gray-700/80 px-2.5 py-1.5 rounded-lg text-gray-300 border border-gray-600">
+                          <svg className="w-3.5 h-3.5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                          </svg>
+                          {new Date(group.date).toLocaleDateString('id-ID', {timeZone: 'Asia/Jakarta', day: 'numeric', month: 'short', year: 'numeric'})}
+                          <span className="text-gray-500">•</span>
+                          {new Date(group.date).toLocaleTimeString('id-ID', {timeZone: 'Asia/Jakarta', hour: '2-digit', minute: '2-digit'})}
                         </span>
-                        <span className="text-sm bg-blue-900/30 text-blue-300 px-2 py-0.5 rounded border border-blue-800 flex items-center gap-1">
-                          <Layers size={14} /> {group.items.length} Item
+                        
+                        {/* Items Count Badge */}
+                        <span className="inline-flex items-center gap-1.5 text-xs font-semibold bg-blue-900/40 text-blue-300 px-2.5 py-1.5 rounded-lg border border-blue-800/50">
+                          <Package size={14} />
+                          {group.items.length} Item
                         </span>
+                        
+                        {/* Store/Toko Badge */}
+                        {group.toko && group.toko !== '-' && (
+                          <span className={`inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1.5 rounded-lg border ${
+                            group.toko === 'MJM' 
+                              ? 'bg-cyan-900/40 text-cyan-300 border-cyan-800/50' 
+                              : group.toko === 'BJW' 
+                                ? 'bg-amber-900/40 text-amber-300 border-amber-800/50'
+                                : 'bg-gray-700/60 text-gray-300 border-gray-600/50'
+                          }`}>
+                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                            </svg>
+                            Toko {group.toko}
+                          </span>
+                        )}
+                        
+                        {/* Resi Badge */}
                         {group.resi !== '-' && (
                           <button 
                             onClick={(e) => {
@@ -1190,119 +1257,273 @@ export const OrderManagement: React.FC = () => {
                               navigator.clipboard.writeText(group.resi);
                               showToast(`Resi "${group.resi}" disalin!`);
                             }}
-                            className="text-sm bg-purple-900/30 text-purple-300 px-2 py-0.5 rounded border border-purple-800 font-mono hover:bg-purple-800/50 transition-colors flex items-center gap-1.5 cursor-pointer"
+                            className="inline-flex items-center gap-1.5 text-xs font-mono font-semibold bg-purple-900/40 text-purple-300 px-2.5 py-1.5 rounded-lg border border-purple-800/50 hover:bg-purple-800/60 transition-colors cursor-pointer group/resi"
                             title="Klik untuk copy resi"
                           >
-                            Resi: {group.resi}
-                            <Copy size={12} className="opacity-70"/>
+                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                            </svg>
+                            {group.resi}
+                            <Copy size={12} className="opacity-50 group-hover/resi:opacity-100 transition-opacity"/>
                           </button>
                         )}
                       </div>
-                      <div className="flex items-center gap-2">
-                        {isExpanded ? <ChevronUp size={20} className="text-purple-400"/> : <ChevronDown size={20} className="text-gray-400"/>}
-                        <h3 className="font-extrabold text-xl text-white flex items-center gap-2">
-                          <User size={20} className="text-gray-400"/> {group.customer}
-                        </h3>
-                        {/* Hide tempo for online marketplaces (Shopee, TikTok, etc) */}
-                        {group.ecommerce === 'OFFLINE' && (
-                          <span className="text-base text-gray-500">• {group.tempo}</span>
-                        )}
+                      
+                      {/* Customer Name Row */}
+                      <div className="flex items-center gap-3">
+                        <button className="p-1 hover:bg-gray-700/50 rounded-lg transition-colors">
+                          {isExpanded ? 
+                            <ChevronUp size={22} className="text-purple-400"/> : 
+                            <ChevronDown size={22} className="text-gray-500 group-hover:text-gray-300 transition-colors"/>
+                          }
+                        </button>
+                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-600 to-blue-600 flex items-center justify-center text-white font-bold text-lg shadow-lg">
+                          {(group.customer || 'G').charAt(0).toUpperCase()}
+                        </div>
+                        <div>
+                          <h3 className="font-bold text-lg text-white leading-tight">
+                            {group.customer}
+                          </h3>
+                          {group.ecommerce === 'OFFLINE' && group.tempo && (
+                            <span className={`text-xs font-medium px-2 py-0.5 rounded ${
+                              group.tempo === 'CASH' ? 'bg-green-900/40 text-green-400' : 'bg-orange-900/40 text-orange-400'
+                            }`}>
+                              {group.tempo}
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
 
-                    <div className="flex flex-col items-end gap-1 border-t md:border-t-0 border-gray-700 pt-2 md:pt-0">
-                      <div className="text-right">
-                        <span className="text-gray-400 text-xs mr-2">Total:</span>
-                        <span className="text-lg font-bold text-green-400">{group.totalQty} Pcs</span>
+                    {/* Right Side - Stats & Actions */}
+                    <div className="flex flex-col items-end gap-2 border-t md:border-t-0 border-gray-700/50 pt-3 md:pt-0 md:pl-4 md:border-l md:border-gray-700/50">
+                      {/* Stats */}
+                      <div className="flex items-center gap-4 mb-1">
+                        <div className="text-right">
+                          <p className="text-xs text-gray-400 uppercase tracking-wide">Quantity</p>
+                          <p className="text-xl font-bold text-white">{group.totalQty} <span className="text-sm text-gray-400">pcs</span></p>
+                        </div>
+                        <div className="w-px h-10 bg-gray-700"/>
+                        <div className="text-right">
+                          <p className="text-xs text-gray-400 uppercase tracking-wide">Total</p>
+                          <p className="text-xl font-bold bg-gradient-to-r from-yellow-400 to-orange-400 bg-clip-text text-transparent">{formatRupiah(group.totalAmount)}</p>
+                        </div>
                       </div>
-                      <span className="text-base font-bold font-mono text-yellow-400">{formatRupiah(group.totalAmount)}</span>
+                      
                       {/* Bulk Action Buttons */}
                       <div className="flex items-center gap-2">
                         <button 
                           onClick={(e) => { e.stopPropagation(); handleReturAllGroupItems(group.items); }} 
-                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-orange-900/30 text-orange-400 hover:bg-orange-900/50 transition-colors border border-orange-800 text-sm font-bold"
+                          className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-gradient-to-r from-orange-900/40 to-orange-800/30 text-orange-400 hover:from-orange-800/60 hover:to-orange-700/40 transition-all duration-200 border border-orange-700/50 text-xs font-bold shadow-lg shadow-orange-900/10"
                           title="Retur Semua Item"
                         >
-                          <RotateCcw size={16}/> Retur Semua
+                          <RotateCcw size={14}/> Retur
                         </button>
                         <button 
                           onClick={(e) => { e.stopPropagation(); handleDeleteAllGroupItems(group.items); }} 
-                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-900/30 text-red-400 hover:bg-red-900/50 transition-colors border border-red-800 text-sm font-bold"
+                          className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-gradient-to-r from-red-900/40 to-red-800/30 text-red-400 hover:from-red-800/60 hover:to-red-700/40 transition-all duration-200 border border-red-700/50 text-xs font-bold shadow-lg shadow-red-900/10"
                           title="Hapus Semua Item"
                         >
-                          <Trash2 size={16}/> Hapus Semua
+                          <Trash2 size={14}/> Hapus
                         </button>
                       </div>
                     </div>
                   </div>
 
-                  {/* ITEM LIST */}
+                  {/* ITEM LIST - Modern Cards */}
                   {isExpanded && (
-                    <div className="bg-gray-900/80 border-t border-gray-700 p-1 space-y-1 animate-in slide-in-from-top-2 duration-200">
-                      {group.items.map((item, idx) => (
-                        <div key={`${item.id}-${idx}`} className={`flex justify-between items-center p-3 rounded-lg border ${ecommerceColors.bg} ${ecommerceColors.border} hover:border-gray-500 ml-2 mr-1`}>
-                          <div className="flex-1">
-                            {/* Part Number - Large and Prominent */}
-                            <p className="text-lg font-bold text-white font-mono tracking-wider">{item.part_number || '-'}</p>
-                            {/* Item Name */}
-                            <p className="text-sm font-semibold text-gray-200 mt-0.5">{item.name}</p>
-                            {/* Brand & Application */}
-                            {(item.brand || item.application) && (
-                              <p className="text-xs text-gray-400 mt-0.5">
-                                {item.brand && <span className="text-blue-300 font-medium">{item.brand}</span>}
-                                {item.brand && item.application && <span className="mx-2">•</span>}
-                                {item.application && <span className="text-green-300">{item.application}</span>}
-                              </p>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <div className="text-right">
-                              <p className="text-sm font-bold text-white">{item.qty_keluar} x {formatRupiah(item.harga_total / item.qty_keluar || 0)}</p>
-                              <p className="text-xs text-green-400 font-mono">{formatRupiah(item.harga_total)}</p>
+                    <div className="bg-gray-900/60 border-t border-gray-700/50 px-3 py-3 space-y-2 animate-in slide-in-from-top-2 duration-200">
+                      {group.items.map((item, idx) => {
+                        const unitPrice = item.qty_keluar > 0 ? item.harga_total / item.qty_keluar : 0;
+                        
+                        return (
+                          <div 
+                            key={`${item.id}-${idx}`} 
+                            className="group/item relative flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 p-4 rounded-xl bg-gradient-to-r from-gray-800/80 to-gray-800/40 border border-gray-700/50 hover:border-gray-600 hover:bg-gray-800/90 transition-all duration-200 ml-2"
+                          >
+                            {/* Item Number Badge */}
+                            <div className="absolute -left-1 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-gray-700 border-2 border-gray-600 flex items-center justify-center text-[10px] font-bold text-gray-400">
+                              {idx + 1}
                             </div>
-                            <button 
-                              onClick={() => openReturModal(item)} 
-                              className="p-1.5 rounded bg-orange-900/30 text-orange-400 hover:bg-orange-900/50 transition-colors border border-orange-800" 
-                              title="Retur"
-                            >
-                              <RotateCcw size={16}/>
-                            </button>
-                            <button 
-                              onClick={() => handleDeleteSoldItem(item)} 
-                              className="p-1.5 rounded bg-red-900/30 text-red-400 hover:bg-red-900/50 transition-colors border border-red-800" 
-                              title="Hapus"
-                            >
-                              <Trash2 size={16}/>
-                            </button>
+                            
+                            {/* Item Info */}
+                            <div className="flex-1 ml-4 sm:ml-6">
+                              <div className="flex items-start gap-3">
+                                {/* Part Number Icon */}
+                                <div className={`hidden sm:flex w-10 h-10 rounded-lg ${ecommerceColors.bg} border ${ecommerceColors.border} items-center justify-center flex-shrink-0`}>
+                                  <Hash size={18} className={ecommerceColors.text}/>
+                                </div>
+                                
+                                <div className="flex-1 min-w-0">
+                                  {/* Part Number */}
+                                  <p className="text-base font-bold text-white font-mono tracking-wide mb-0.5 flex items-center gap-2">
+                                    {item.part_number || '-'}
+                                    <button 
+                                      onClick={() => {
+                                        navigator.clipboard.writeText(item.part_number || '');
+                                        showToast('Part number disalin!');
+                                      }}
+                                      className="opacity-0 group-hover/item:opacity-100 transition-opacity p-1 hover:bg-gray-700 rounded"
+                                      title="Copy Part Number"
+                                    >
+                                      <Copy size={12} className="text-gray-400"/>
+                                    </button>
+                                  </p>
+                                  
+                                  {/* Item Name */}
+                                  <p className="text-sm text-gray-300 font-medium truncate max-w-[300px]" title={item.name}>
+                                    {item.name}
+                                  </p>
+                                  
+                                  {/* Brand, Application & Store Tags */}
+                                  <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                                    {/* Store Badge per Item */}
+                                    {item.kode_toko && (
+                                      <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                                        item.kode_toko.toUpperCase() === 'MJM' 
+                                          ? 'bg-cyan-900/40 text-cyan-300 border-cyan-700/50' 
+                                          : item.kode_toko.toUpperCase() === 'BJW' 
+                                            ? 'bg-amber-900/40 text-amber-300 border-amber-700/50'
+                                            : 'bg-gray-700/50 text-gray-300 border-gray-600/50'
+                                      }`}>
+                                        <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                                        </svg>
+                                        {item.kode_toko.toUpperCase()}
+                                      </span>
+                                    )}
+                                    {item.brand && (
+                                      <span className="inline-flex items-center gap-1 text-[10px] font-medium bg-blue-900/30 text-blue-300 px-2 py-0.5 rounded-full border border-blue-800/50">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-blue-400"/>
+                                        {item.brand}
+                                      </span>
+                                    )}
+                                    {item.application && (
+                                      <span className="inline-flex items-center gap-1 text-[10px] font-medium bg-green-900/30 text-green-300 px-2 py-0.5 rounded-full border border-green-800/50">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-green-400"/>
+                                        {item.application}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                            
+                            {/* Pricing & Actions */}
+                            <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-end ml-4 sm:ml-0">
+                              {/* Pricing Info */}
+                              <div className="flex items-center gap-3">
+                                {/* Quantity Badge */}
+                                <div className="bg-gray-700/60 rounded-lg px-3 py-1.5 text-center border border-gray-600/50">
+                                  <p className="text-lg font-bold text-white leading-tight">{item.qty_keluar}</p>
+                                  <p className="text-[9px] text-gray-400 uppercase tracking-wide">pcs</p>
+                                </div>
+                                
+                                {/* Price Breakdown */}
+                                <div className="text-right">
+                                  <p className="text-xs text-gray-400">
+                                    @ {formatRupiah(unitPrice)}
+                                  </p>
+                                  <p className="text-base font-bold text-green-400">
+                                    {formatRupiah(item.harga_total)}
+                                  </p>
+                                </div>
+                              </div>
+                              
+                              {/* Action Buttons */}
+                              <div className="flex items-center gap-1.5">
+                                <button 
+                                  onClick={() => openReturModal(item)} 
+                                  className="p-2 rounded-lg bg-orange-900/30 text-orange-400 hover:bg-orange-900/50 transition-all duration-200 border border-orange-800/50 hover:scale-105" 
+                                  title="Retur Item"
+                                >
+                                  <RotateCcw size={16}/>
+                                </button>
+                                <button 
+                                  onClick={() => handleDeleteSoldItem(item)} 
+                                  className="p-2 rounded-lg bg-red-900/30 text-red-400 hover:bg-red-900/50 transition-all duration-200 border border-red-800/50 hover:scale-105" 
+                                  title="Hapus Item"
+                                >
+                                  <Trash2 size={16}/>
+                                </button>
+                              </div>
+                            </div>
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </div>
               );
             })}
 
-            {/* PAGINATION */}
+            {/* MODERN PAGINATION */}
             {soldTotalPages > 1 && (
-              <div className="flex justify-center items-center gap-4 pt-4 border-t border-gray-700">
-                <button 
-                  onClick={() => setSoldPage(p => Math.max(1, p - 1))} 
-                  disabled={soldPage === 1}
-                  className="p-2 bg-gray-700 rounded-lg disabled:opacity-30 hover:bg-gray-600"
-                >
-                  <ChevronLeft size={18}/>
-                </button>
-                <span className="text-sm text-gray-400">
-                  Halaman {soldPage} dari {soldTotalPages} ({groupedSoldData.length} grup)
-                </span>
-                <button 
-                  onClick={() => setSoldPage(p => Math.min(soldTotalPages, p + 1))} 
-                  disabled={soldPage === soldTotalPages}
-                  className="p-2 bg-gray-700 rounded-lg disabled:opacity-30 hover:bg-gray-600"
-                >
-                  <ChevronRight size={18}/>
-                </button>
+              <div className="flex flex-col sm:flex-row justify-between items-center gap-4 pt-4 mt-4 border-t border-gray-700/50">
+                <p className="text-sm text-gray-500">
+                  Menampilkan <span className="font-bold text-gray-300">{((soldPage - 1) * ITEMS_PER_PAGE) + 1}-{Math.min(soldPage * ITEMS_PER_PAGE, groupedSoldData.length)}</span> dari <span className="font-bold text-gray-300">{groupedSoldData.length}</span> transaksi
+                </p>
+                <div className="flex items-center gap-2">
+                  <button 
+                    onClick={() => setSoldPage(1)} 
+                    disabled={soldPage === 1}
+                    className="p-2 bg-gray-800 rounded-lg disabled:opacity-30 hover:bg-gray-700 transition-colors border border-gray-700 disabled:cursor-not-allowed"
+                    title="Halaman Pertama"
+                  >
+                    <ChevronLeft size={16}/>
+                    <ChevronLeft size={16} className="-ml-3"/>
+                  </button>
+                  <button 
+                    onClick={() => setSoldPage(p => Math.max(1, p - 1))} 
+                    disabled={soldPage === 1}
+                    className="p-2 bg-gray-800 rounded-lg disabled:opacity-30 hover:bg-gray-700 transition-colors border border-gray-700 disabled:cursor-not-allowed"
+                  >
+                    <ChevronLeft size={18}/>
+                  </button>
+                  <div className="flex items-center gap-1 px-3">
+                    {Array.from({ length: Math.min(5, soldTotalPages) }, (_, i) => {
+                      let pageNum;
+                      if (soldTotalPages <= 5) {
+                        pageNum = i + 1;
+                      } else if (soldPage <= 3) {
+                        pageNum = i + 1;
+                      } else if (soldPage >= soldTotalPages - 2) {
+                        pageNum = soldTotalPages - 4 + i;
+                      } else {
+                        pageNum = soldPage - 2 + i;
+                      }
+                      return (
+                        <button
+                          key={pageNum}
+                          onClick={() => setSoldPage(pageNum)}
+                          className={`w-9 h-9 rounded-lg font-bold text-sm transition-all duration-200 ${
+                            soldPage === pageNum 
+                              ? 'bg-purple-600 text-white shadow-lg shadow-purple-900/30' 
+                              : 'bg-gray-800 text-gray-400 hover:bg-gray-700 border border-gray-700'
+                          }`}
+                        >
+                          {pageNum}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <button 
+                    onClick={() => setSoldPage(p => Math.min(soldTotalPages, p + 1))} 
+                    disabled={soldPage === soldTotalPages}
+                    className="p-2 bg-gray-800 rounded-lg disabled:opacity-30 hover:bg-gray-700 transition-colors border border-gray-700 disabled:cursor-not-allowed"
+                  >
+                    <ChevronRight size={18}/>
+                  </button>
+                  <button 
+                    onClick={() => setSoldPage(soldTotalPages)} 
+                    disabled={soldPage === soldTotalPages}
+                    className="p-2 bg-gray-800 rounded-lg disabled:opacity-30 hover:bg-gray-700 transition-colors border border-gray-700 disabled:cursor-not-allowed"
+                    title="Halaman Terakhir"
+                  >
+                    <ChevronRight size={16}/>
+                    <ChevronRight size={16} className="-ml-3"/>
+                  </button>
+                </div>
               </div>
             )}
           </div>
