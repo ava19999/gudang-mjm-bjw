@@ -1131,8 +1131,8 @@ export const deleteBarangLog = async (
     }
 };
 
-export const fetchHistory = async () => [];
-export const fetchItemHistory = async () => [];
+export const fetchHistory = async (store?: string | null) => [];
+export const fetchItemHistory = async (store?: string | null, itemId?: string) => [];
 
 // FETCH HISTORY LOGS PAGINATED - untuk modal detail Masuk/Keluar di Dashboard
 export const fetchHistoryLogsPaginated = async (
