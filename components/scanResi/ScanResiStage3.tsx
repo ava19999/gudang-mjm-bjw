@@ -1252,6 +1252,11 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
            }
            seenKeys.add(dupeKey);
 
+           // Filter nama_produk: jika "-" atau "Item CSV", jadikan kosong
+           const namaCsv = item.nama_produk && item.nama_produk !== '-' && item.nama_produk !== 'Item CSV' 
+             ? item.nama_produk 
+             : '';
+           
            loadedRows.push({
              id: `db-${item.id}`,
              tanggal: item.created_at ? item.created_at.split('T')[0] : new Date().toISOString().split('T')[0],
@@ -1259,7 +1264,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
              ecommerce: ecommerceDB,
              sub_toko: subToko,
              part_number: item.part_number || '',
-             nama_barang_csv: item.nama_produk || 'Item CSV', 
+             nama_barang_csv: namaCsv, 
              nama_barang_base: namaBase, 
              brand: brand,
              application: app,
@@ -3027,14 +3032,14 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                   {/* NAMA BARANG DARI CSV/EXCEL */}
                   <td className="border border-gray-600 px-1.5 py-1 text-[11px] leading-tight align-middle text-blue-300 bg-blue-900/10">
                     <div className="whitespace-normal break-words" title={row.nama_barang_csv}>
-                        {row.nama_barang_csv ? row.nama_barang_csv : <span className="italic text-gray-500">-</span>}
+                        {row.nama_barang_csv || ''}
                     </div>
                   </td>
 
                   {/* NAMA BARANG DARI BASE */}
                   <td className="border border-gray-600 px-1.5 py-1 text-[11px] leading-tight align-middle text-green-300 bg-green-900/10">
                     <div className="line-clamp-2 hover:line-clamp-none max-h-[3.5em] overflow-hidden" title={row.nama_barang_base}>
-                        {row.nama_barang_base || <span className="italic text-gray-500">-</span>}
+                        {row.nama_barang_base || ''}
                     </div>
                   </td>
 
