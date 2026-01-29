@@ -1099,11 +1099,17 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
   const uniqueTokos = Array.from(new Set(rows.map(r => r.sub_toko))).filter(Boolean);
 
   useEffect(() => {
+    let mounted = true;
+    
     const loadParts = async () => {
       const parts = await getAvailableParts(selectedStore);
-      setPartOptions(parts);
+      if (mounted) {
+        setPartOptions(parts);
+      }
     };
     loadParts();
+    
+    return () => { mounted = false; };
   }, [selectedStore]);
 
   // Update uploadSubToko ketika selectedStore berubah
@@ -1113,11 +1119,17 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
 
   // Load Stage 1 resi list untuk dropdown search
   useEffect(() => {
+    let mounted = true;
+    
     const loadStage1Resi = async () => {
       const resiList = await getStage1ResiList(selectedStore);
-      setStage1ResiList(resiList);
+      if (mounted) {
+        setStage1ResiList(resiList);
+      }
     };
     loadStage1Resi();
+    
+    return () => { mounted = false; };
   }, [selectedStore]);
 
   // Close dropdown when clicking outside
@@ -2022,6 +2034,10 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
     let successCount = 0;
     let errorCount = 0;
     
+    // Track successful row IDs locally (tidak pakai state karena async)
+    const successfulRowIds: Set<string> = new Set();
+    const successfulResiSet: Set<string> = new Set();
+    
     // Process one by one untuk visual feedback
     for (let i = 0; i < validRows.length; i++) {
       const row = validRows[i];
@@ -2051,8 +2067,19 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
             await insertProductAlias(row.part_number, row.nama_barang_csv);
           }
           
-          // Delete from resi_items
-          await deleteProcessedResiItems(selectedStore, [{ resi: row.resi, part_number: row.part_number }]);
+          // Delete from resi_items - gunakan ID langsung jika dari database
+          if (row.id.startsWith('db-')) {
+            // Hapus menggunakan ID langsung
+            const dbId = row.id.replace('db-', '');
+            await deleteResiItemById(selectedStore, dbId);
+          } else {
+            // Fallback: hapus menggunakan resi + part_number
+            await deleteProcessedResiItems(selectedStore, [{ resi: row.resi, part_number: row.part_number }]);
+          }
+          
+          // Track success
+          successfulRowIds.add(row.id);
+          if (row.resi) successfulResiSet.add(row.resi);
           
           // Update item status to success
           setProcessingItems(prev => prev.map(item => 
@@ -2080,22 +2107,17 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
       await new Promise(resolve => setTimeout(resolve, 100));
     }
     
-    // Delete dari scan_resi setelah semua item selesai
-    const successfulResis = [...new Set(validRows.filter(r => 
-      initialItems.find(i => i.id === r.id)?.status !== 'error'
-    ).map(r => r.resi).filter(Boolean))];
-    if (successfulResis.length > 0) {
-      await deleteProcessedScanResi(selectedStore, successfulResis);
+    // Delete dari scan_resi setelah semua item selesai (menggunakan successfulResiSet yang di-track lokal)
+    if (successfulResiSet.size > 0) {
+      await deleteProcessedScanResi(selectedStore, [...successfulResiSet]);
     }
     
     setProcessingComplete(true);
     setProcessingCurrentItem('');
     setLoading(false);
     
-    // Refresh data
-    setRows(prev => prev.filter(r => !validRows.find(v => v.id === r.id && 
-      processingItems.find(p => p.id === v.id)?.status !== 'error'
-    )));
+    // Refresh data - hapus rows yang sukses diproses (menggunakan successfulRowIds yang di-track lokal)
+    setRows(prev => prev.filter(r => !successfulRowIds.has(r.id)));
     if (onRefresh) onRefresh();
   };
 
@@ -2523,6 +2545,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                         <option value="MJM">MJM</option>
                         <option value="BJW">BJW</option>
                         <option value="LARIS">LARIS</option>
+                        <option value="PRAKTIS_PART">Praktis Part</option>
                     </select>
                 )}
 

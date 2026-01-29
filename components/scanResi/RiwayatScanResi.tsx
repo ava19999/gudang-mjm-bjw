@@ -56,22 +56,56 @@ export const RiwayatScanResi: React.FC<RiwayatScanResiProps> = ({ onRefresh }) =
   };
   
   useEffect(() => {
-    loadHistory();
+    let mounted = true;
+    
+    const loadData = async () => {
+      setLoading(true);
+      try {
+        const filters: any = {};
+        if (statusFilter !== 'all') filters.status = statusFilter;
+        if (ecommerceFilter !== 'all') filters.ecommerce = ecommerceFilter;
+        
+        const data = await getResiHistory(selectedStore, filters);
+        if (mounted) {
+          setResiHistory(data);
+        }
+      } catch (err) {
+        console.error('Load history error:', err);
+        if (mounted) {
+          showToast('Gagal memuat riwayat', 'error');
+        }
+      } finally {
+        if (mounted) {
+          setLoading(false);
+        }
+      }
+    };
+    
+    loadData();
+    
+    return () => {
+      mounted = false;
+    };
   }, [selectedStore, statusFilter, ecommerceFilter]);
   
   const loadHistory = async () => {
     setLoading(true);
-    
-    const filters: any = {};
-    if (statusFilter !== 'all') filters.status = statusFilter;
-    if (ecommerceFilter !== 'all') filters.ecommerce = ecommerceFilter;
-    if (searchTerm) filters.search = searchTerm;
-    if (dateFrom) filters.dateFrom = dateFrom;
-    if (dateTo) filters.dateTo = dateTo;
-    
-    const data = await getResiHistory(selectedStore, filters);
-    setResiHistory(data);
-    setLoading(false);
+    try {
+      const filters: any = {};
+      if (statusFilter !== 'all') filters.status = statusFilter;
+      if (ecommerceFilter !== 'all') filters.ecommerce = ecommerceFilter;
+      if (searchTerm) filters.search = searchTerm;
+      if (dateFrom) filters.dateFrom = dateFrom;
+      if (dateTo) filters.dateTo = dateTo;
+      
+      const data = await getResiHistory(selectedStore, filters);
+      setResiHistory(data);
+    } catch (err) {
+      console.error('Load history error:', err);
+      showToast('Gagal memuat riwayat', 'error');
+    } finally {
+      setLoading(false);
+    }
   };
   
   const handleSearch = () => {

@@ -542,13 +542,49 @@ export const verifyResiStage2Bulk = async (
 // STAGE 3: DATA ENTRY & FINALISASI
 // ============================================================================
 
-export const getResiHistory = async (store: string | null) => {
+interface ResiHistoryFilters {
+  status?: string;
+  ecommerce?: string;
+  search?: string;
+  dateFrom?: string;
+  dateTo?: string;
+}
+
+export const getResiHistory = async (
+  store: string | null, 
+  filters?: ResiHistoryFilters
+) => {
   const table = getTableName(store);
-  const { data, error } = await supabase
+  
+  let query = supabase
     .from(table)
     .select('*')
     .order('stage1_scanned_at', { ascending: false })
     .limit(100);
+  
+  // Apply filters jika ada
+  if (filters) {
+    if (filters.status && filters.status !== 'all') {
+      query = query.eq('status', filters.status);
+    }
+    if (filters.ecommerce && filters.ecommerce !== 'all') {
+      query = query.ilike('ecommerce', filters.ecommerce);
+    }
+    if (filters.search) {
+      query = query.or(`resi.ilike.%${filters.search}%,no_pesanan.ilike.%${filters.search}%`);
+    }
+    if (filters.dateFrom) {
+      query = query.gte('stage1_scanned_at', filters.dateFrom);
+    }
+    if (filters.dateTo) {
+      // Add 1 day to include the end date fully
+      const endDate = new Date(filters.dateTo);
+      endDate.setDate(endDate.getDate() + 1);
+      query = query.lt('stage1_scanned_at', endDate.toISOString().split('T')[0]);
+    }
+  }
+  
+  const { data, error } = await query;
     
   if (error) return [];
   return mapToBoolean(data || []);

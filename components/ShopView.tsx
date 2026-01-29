@@ -144,6 +144,8 @@ export const ShopView: React.FC<ShopViewProps> = ({
 
   // PERBAIKAN 3: Load Data Stable
   useEffect(() => {
+    let mounted = true;
+    
     const loadData = async () => {
         setLoading(true);
         try {
@@ -160,13 +162,6 @@ export const ShopView: React.FC<ShopViewProps> = ({
                 applicationSearch: debouncedApplication
             };
             
-            console.log('[ShopView] Fetching shop items with params:', {
-                page, 
-                limit,
-                filters,
-                selectedStore
-            });
-            
             const result = await fetchShopItems(
                 page, 
                 limit, 
@@ -174,22 +169,28 @@ export const ShopView: React.FC<ShopViewProps> = ({
                 selectedStore
             );
             
-            console.log('[ShopView] Received data:', result);
-            
-            setShopItems(result.data || []);
-            const safeCount = result.count || 0;
-            setTotalPages(safeCount > 0 ? Math.ceil(safeCount / limit) : 1);
-            
-            console.log('[ShopView] Set shop items:', result.data?.length, 'Total pages:', Math.ceil(safeCount / limit));
+            if (mounted) {
+                setShopItems(result.data || []);
+                const safeCount = result.count || 0;
+                setTotalPages(safeCount > 0 ? Math.ceil(safeCount / limit) : 1);
+            }
         } catch (err) {
-            console.error("[ShopView] Gagal load shop items:", err);
-            setShopItems([]);
+            if (process.env.NODE_ENV !== 'production') {
+                console.error("[ShopView] Gagal load shop items:", err);
+            }
+            if (mounted) {
+                setShopItems([]);
+            }
         } finally {
-            setLoading(false);
+            if (mounted) {
+                setLoading(false);
+            }
         }
     };
 
     loadData();
+    
+    return () => { mounted = false; };
   }, [page, debouncedSearch, category, debouncedPartNumber, debouncedName, debouncedBrand, debouncedApplication, selectedStore]); // Hanya jalan jika ini berubah
 
   // --- Banner Upload Handlers ---

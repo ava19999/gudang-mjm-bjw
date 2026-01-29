@@ -208,7 +208,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
   useEffect(() => {
     const timer = setTimeout(async () => {
       if (brandSearch.length >= 1) {
-        const suggestions = await fetchSearchSuggestions(selectedStore, 'application', brandSearch);
+        // BJW: brand = brand, MJM: brand field is swapped with application
+        const column = selectedStore === 'mjm' ? 'application' : 'brand';
+        const suggestions = await fetchSearchSuggestions(selectedStore, column, brandSearch);
         setBrandOptions(suggestions);
       } else {
         setBrandOptions([]);
@@ -220,7 +222,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
   useEffect(() => {
     const timer = setTimeout(async () => {
       if (appSearch.length >= 1) {
-        const suggestions = await fetchSearchSuggestions(selectedStore, 'brand', appSearch);
+        // BJW: application = application, MJM: application field is swapped with brand
+        const column = selectedStore === 'mjm' ? 'brand' : 'application';
+        const suggestions = await fetchSearchSuggestions(selectedStore, column, appSearch);
         setAppOptions(suggestions);
       } else {
         setAppOptions([]);

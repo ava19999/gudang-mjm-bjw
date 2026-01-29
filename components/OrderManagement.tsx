@@ -317,39 +317,37 @@ export const OrderManagement: React.FC = () => {
 
   // Load inventory langsung saat komponen mount - TANPA CACHE untuk menghindari masalah
   useEffect(() => {
+    let mounted = true;
+    
     const loadInventory = async () => {
       setInventoryLoading(true);
       try {
-        console.log('=== LOADING INVENTORY ===');
         const [invMjm, invBjw] = await Promise.all([
           fetchInventory('mjm'),
           fetchInventory('bjw')
         ]);
         
-        console.log('MJM items:', invMjm?.length || 0);
-        console.log('BJW items:', invBjw?.length || 0);
-        
-        // Log sample dari setiap toko
-        if (invMjm?.length > 0) {
-          console.log('Sample MJM:', invMjm[0]);
+        if (mounted) {
+          // Gabungkan semua
+          const all = [...(invMjm || []), ...(invBjw || [])];
+          setInventory(all);
         }
-        if (invBjw?.length > 0) {
-          console.log('Sample BJW:', invBjw[0]);
-        }
-        
-        // Gabungkan semua
-        const all = [...(invMjm || []), ...(invBjw || [])];
-        console.log('Total inventory:', all.length);
-        
-        setInventory(all);
       } catch (err) {
-        console.error("Error fetching inventory:", err);
+        if (process.env.NODE_ENV !== 'production') {
+          console.error("Error fetching inventory:", err);
+        }
       } finally {
-        setInventoryLoading(false);
+        if (mounted) {
+          setInventoryLoading(false);
+        }
       }
     };
     
     loadInventory();
+    
+    return () => {
+      mounted = false;
+    };
   }, []); // Load sekali saat mount
 
   // Update selectedItem when partNumber changes
