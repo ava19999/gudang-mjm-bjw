@@ -208,9 +208,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
   useEffect(() => {
     const timer = setTimeout(async () => {
       if (brandSearch.length >= 1) {
-        // BJW: brand = brand, MJM: brand field is swapped with application
-        const column = selectedStore === 'mjm' ? 'application' : 'brand';
-        const suggestions = await fetchSearchSuggestions(selectedStore, column, brandSearch);
+        // Query langsung ke kolom 'brand' untuk semua toko (MJM & BJW sama)
+        const suggestions = await fetchSearchSuggestions(selectedStore, 'brand', brandSearch);
         setBrandOptions(suggestions);
       } else {
         setBrandOptions([]);
@@ -222,9 +221,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
   useEffect(() => {
     const timer = setTimeout(async () => {
       if (appSearch.length >= 1) {
-        // BJW: application = application, MJM: application field is swapped with brand
-        const column = selectedStore === 'mjm' ? 'brand' : 'application';
-        const suggestions = await fetchSearchSuggestions(selectedStore, column, appSearch);
+        // Query langsung ke kolom 'application' untuk semua toko (MJM & BJW sama)
+        const suggestions = await fetchSearchSuggestions(selectedStore, 'application', appSearch);
         setAppOptions(suggestions);
       } else {
         setAppOptions([]);

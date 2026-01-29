@@ -132,8 +132,8 @@ export const fetchSearchSuggestions = async (
   const table = getTableName(store);
   if (!searchQuery || searchQuery.length < 1) return [];
 
-  // SWAP: Di database, kolom 'brand' berisi application dan 'application' berisi brand
-  const dbColumn = field === 'brand' ? 'application' : (field === 'application' ? 'brand' : field);
+  // Query langsung ke kolom yang dimaksud tanpa swap
+  const dbColumn = field;
 
   try {
     const { data, error } = await supabase
@@ -169,8 +169,8 @@ export const fetchAllDistinctValues = async (
 ): Promise<string[]> => {
   const table = getTableName(store);
 
-  // SWAP: Di database, kolom 'brand' berisi application dan 'application' berisi brand
-  const dbColumn = field === 'brand' ? 'application' : (field === 'application' ? 'brand' : field);
+  // Query langsung ke kolom yang dimaksud tanpa swap
+  const dbColumn = field;
 
   try {
     const { data, error } = await supabase
@@ -278,9 +278,9 @@ const mapItemFromDB = (item: any, photoData?: any): InventoryItem => {
     id: pk, 
     partNumber: pk,
     name: item.name,
-    // SWAP: Di database, kolom 'brand' berisi application dan 'application' berisi brand
-    brand: item.application,
-    application: item.brand,
+    // Data langsung dari database tanpa swap
+    brand: item.brand || '',
+    application: item.application || '',
     shelf: item.shelf,
     quantity: Number(item.quantity || 0),
     price: 0, 
@@ -299,9 +299,9 @@ const mapItemToDB = (data: any) => {
   const dbPayload: any = {
     part_number: data.partNumber || data.part_number, 
     name: data.name,
-    // SWAP: Di database, kolom 'brand' berisi application dan 'application' berisi brand
-    brand: data.application,
-    application: data.brand,
+    // Data langsung dari user input tanpa swap
+    brand: data.brand || '',
+    application: data.application || '',
     shelf: data.shelf,
     quantity: Number(data.quantity) || 0,
     created_at: getWIBDate().toISOString()
@@ -464,10 +464,10 @@ export const fetchInventoryPaginated = async (store: string | null, page: number
   if (filters?.partNumber) query = query.ilike('part_number', `%${filters.partNumber}%`);
   // Filter by name
   if (filters?.name) query = query.ilike('name', `%${filters.name}%`);
-  // Filter by brand (SWAP: user's brand = DB's application column)
-  if (filters?.brand) query = query.ilike('application', `%${filters.brand}%`);
-  // Filter by application (SWAP: user's app = DB's brand column)
-  if (filters?.app) query = query.ilike('brand', `%${filters.app}%`);
+  // Filter by brand - langsung ke kolom brand
+  if (filters?.brand) query = query.ilike('brand', `%${filters.brand}%`);
+  // Filter by application - langsung ke kolom application
+  if (filters?.app) query = query.ilike('application', `%${filters.app}%`);
   // Filter by stock type
   if (filters?.type === 'low') query = query.gt('quantity', 0).lte('quantity', 3);
   if (filters?.type === 'empty') query = query.eq('quantity', 0);
@@ -546,10 +546,10 @@ export const fetchInventoryAllFiltered = async (store: string | null, filters?: 
   if (filters?.partNumber) query = query.ilike('part_number', `%${filters.partNumber}%`);
   // Filter by name
   if (filters?.name) query = query.ilike('name', `%${filters.name}%`);
-  // Filter by brand (SWAP: user's brand = DB's application column)
-  if (filters?.brand) query = query.ilike('application', `%${filters.brand}%`);
-  // Filter by application (SWAP: user's app = DB's brand column)
-  if (filters?.app) query = query.ilike('brand', `%${filters.app}%`);
+  // Filter by brand - langsung ke kolom brand
+  if (filters?.brand) query = query.ilike('brand', `%${filters.brand}%`);
+  // Filter by application - langsung ke kolom application
+  if (filters?.app) query = query.ilike('application', `%${filters.app}%`);
   // Filter by stock type
   if (filters?.type === 'low') query = query.gt('quantity', 0).lte('quantity', 3);
   if (filters?.type === 'empty') query = query.eq('quantity', 0);
@@ -754,10 +754,10 @@ export const fetchShopItems = async (
     if (searchTerm) query = query.or(`name.ilike.%${searchTerm}%,part_number.ilike.%${searchTerm}%`);
     if (partNumberSearch) query = query.ilike('part_number', `%${partNumberSearch}%`);
     if (nameSearch) query = query.ilike('name', `%${nameSearch}%`);
-    // Filter by brand (SWAP: user's brand = DB's application column)
-    if (brandSearch) query = query.ilike('application', `%${brandSearch}%`);
-    // Filter by application (SWAP: user's app = DB's brand column)
-    if (applicationSearch) query = query.ilike('brand', `%${applicationSearch}%`);
+    // Filter by brand - langsung ke kolom brand
+    if (brandSearch) query = query.ilike('brand', `%${brandSearch}%`);
+    // Filter by application - langsung ke kolom application
+    if (applicationSearch) query = query.ilike('application', `%${applicationSearch}%`);
 
     const { data: items, count, error } = await query.range(from, to).order('name', { ascending: true });
 
