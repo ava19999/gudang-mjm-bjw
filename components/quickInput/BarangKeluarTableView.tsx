@@ -3,7 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { useStore } from '../../context/StoreContext';
 import { fetchBarangKeluarLog } from '../../services/supabaseService'; // Pastikan fungsi ini sudah diimport
 import { formatRupiah, formatDate } from '../../utils';
-import { Loader2, RefreshCw, ChevronLeft, ChevronRight, Truck } from 'lucide-react';
+import { Loader2, RefreshCw, ChevronLeft, ChevronRight, Truck, Search, X } from 'lucide-react';
 
 interface Props { refreshTrigger: number; }
 
@@ -13,12 +13,37 @@ export const BarangKeluarTableView: React.FC<Props> = ({ refreshTrigger }) => {
     const [loading, setLoading] = useState(false);
     const [page, setPage] = useState(1);
     const [totalRows, setTotalRows] = useState(0);
+    const [showFilter, setShowFilter] = useState(false);
+    const [filterDateFrom, setFilterDateFrom] = useState('');
+    const [filterDateTo, setFilterDateTo] = useState('');
+    const [filterPartNumber, setFilterPartNumber] = useState('');
+    const [filterCustomer, setFilterCustomer] = useState('');
     const LIMIT = 10;
 
     const loadData = async () => {
         setLoading(true);
         try {
-            const { data: logs, total } = await fetchBarangKeluarLog(selectedStore, page, LIMIT);
+            // Build filters object
+            const filters: {
+                dateFrom?: string;
+                dateTo?: string;
+                partNumber?: string;
+                customer?: string;
+            } = {};
+            
+            if (filterDateFrom) filters.dateFrom = filterDateFrom;
+            if (filterDateTo) filters.dateTo = filterDateTo;
+            if (filterPartNumber) filters.partNumber = filterPartNumber;
+            if (filterCustomer) filters.customer = filterCustomer;
+            
+            // Fetch with server-side filtering
+            const { data: logs, total } = await fetchBarangKeluarLog(
+                selectedStore, 
+                page, 
+                LIMIT,
+                Object.keys(filters).length > 0 ? filters : undefined
+            );
+            
             setData(logs);
             setTotalRows(total);
         } catch (e) {
@@ -28,8 +53,21 @@ export const BarangKeluarTableView: React.FC<Props> = ({ refreshTrigger }) => {
         }
     };
 
+    const resetFilters = () => {
+        setFilterDateFrom('');
+        setFilterDateTo('');
+        setFilterPartNumber('');
+        setFilterCustomer('');
+        setPage(1);
+    };
+
     useEffect(() => { setPage(1); }, [selectedStore]);
-    useEffect(() => { loadData(); }, [selectedStore, page, refreshTrigger]);
+    // Server-side filtering: searches entire database, not just current page
+    useEffect(() => { 
+        setPage(1); // Reset to page 1 when filters change
+    }, [filterDateFrom, filterDateTo, filterPartNumber, filterCustomer]);
+    
+    useEffect(() => { loadData(); }, [selectedStore, page, refreshTrigger, filterDateFrom, filterDateTo, filterPartNumber, filterCustomer]);
 
     const totalPages = Math.ceil(totalRows / LIMIT);
 
@@ -40,10 +78,75 @@ export const BarangKeluarTableView: React.FC<Props> = ({ refreshTrigger }) => {
                     <Truck size={16} className="text-red-500"/>
                     Riwayat Barang Keluar ({selectedStore?.toUpperCase()})
                 </h3>
-                <button onClick={loadData} className="p-1.5 hover:bg-gray-700 rounded text-gray-400">
-                    <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
-                </button>
+                <div className="flex items-center gap-2">
+                    <button 
+                        onClick={() => setShowFilter(!showFilter)} 
+                        className={`p-1.5 hover:bg-gray-700 rounded transition-colors ${
+                            showFilter ? 'bg-gray-700 text-green-400' : 'text-gray-400'
+                        }`}
+                        title="Toggle Filter"
+                    >
+                        <Search size={14} />
+                    </button>
+                    <button onClick={loadData} className="p-1.5 hover:bg-gray-700 rounded text-gray-400">
+                        <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
+                    </button>
+                </div>
             </div>
+
+            {/* Filter Bar */}
+            {showFilter && (
+                <div className="px-4 py-3 bg-gray-800/50 border-b border-gray-700 space-y-2">
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
+                        <div>
+                            <label className="text-[10px] text-gray-400 block mb-1">Tanggal Dari</label>
+                            <input 
+                                type="date" 
+                                value={filterDateFrom}
+                                onChange={(e) => setFilterDateFrom(e.target.value)}
+                                className="w-full px-2 py-1 text-xs bg-gray-900 border border-gray-600 rounded text-gray-300 focus:outline-none focus:border-red-500"
+                            />
+                        </div>
+                        <div>
+                            <label className="text-[10px] text-gray-400 block mb-1">Tanggal Sampai</label>
+                            <input 
+                                type="date" 
+                                value={filterDateTo}
+                                onChange={(e) => setFilterDateTo(e.target.value)}
+                                className="w-full px-2 py-1 text-xs bg-gray-900 border border-gray-600 rounded text-gray-300 focus:outline-none focus:border-red-500"
+                            />
+                        </div>
+                        <div>
+                            <label className="text-[10px] text-gray-400 block mb-1">Part Number</label>
+                            <input 
+                                type="text" 
+                                value={filterPartNumber}
+                                onChange={(e) => setFilterPartNumber(e.target.value)}
+                                placeholder="Cari part number..."
+                                className="w-full px-2 py-1 text-xs bg-gray-900 border border-gray-600 rounded text-gray-300 focus:outline-none focus:border-red-500"
+                            />
+                        </div>
+                        <div>
+                            <label className="text-[10px] text-gray-400 block mb-1">Customer</label>
+                            <input 
+                                type="text" 
+                                value={filterCustomer}
+                                onChange={(e) => setFilterCustomer(e.target.value)}
+                                placeholder="Cari customer..."
+                                className="w-full px-2 py-1 text-xs bg-gray-900 border border-gray-600 rounded text-gray-300 focus:outline-none focus:border-red-500"
+                            />
+                        </div>
+                    </div>
+                    <div className="flex justify-end">
+                        <button
+                            onClick={resetFilters}
+                            className="px-3 py-1 text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 rounded flex items-center gap-1 transition-colors"
+                        >
+                            <X size={12} /> Reset Filter
+                        </button>
+                    </div>
+                </div>
+            )}
 
             <div className="flex-1 overflow-auto p-2">
                 <table className="w-full text-left border-collapse">

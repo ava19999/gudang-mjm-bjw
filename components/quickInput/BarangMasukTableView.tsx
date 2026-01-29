@@ -27,45 +27,28 @@ export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger, onRefres
     const loadData = async () => {
         setLoading(true);
         try {
-            const { data: logs, total } = await fetchBarangMasukLog(selectedStore, page, LIMIT);
+            // Build filters object
+            const filters: {
+                dateFrom?: string;
+                dateTo?: string;
+                partNumber?: string;
+                customer?: string;
+            } = {};
             
-            // Apply client-side filters
-            let filteredLogs = logs;
+            if (filterDateFrom) filters.dateFrom = filterDateFrom;
+            if (filterDateTo) filters.dateTo = filterDateTo;
+            if (filterPartNumber) filters.partNumber = filterPartNumber;
+            if (filterCustomer) filters.customer = filterCustomer;
             
-            if (filterDateFrom || filterDateTo || filterPartNumber || filterCustomer) {
-                filteredLogs = logs.filter((item: any) => {
-                    // Date filtering
-                    if (filterDateFrom) {
-                        const itemDate = new Intl.DateTimeFormat('sv-SE', {
-                            timeZone: 'Asia/Jakarta'
-                        }).format(new Date(item.created_at));
-                        if (itemDate < filterDateFrom) return false;
-                    }
-                    if (filterDateTo) {
-                        const itemDate = new Intl.DateTimeFormat('sv-SE', {
-                            timeZone: 'Asia/Jakarta'
-                        }).format(new Date(item.created_at));
-                        if (itemDate > filterDateTo) return false;
-                    }
-                    
-                    // Part number filtering
-                    if (filterPartNumber && !item.part_number?.toLowerCase().includes(filterPartNumber.toLowerCase())) {
-                        return false;
-                    }
-                    
-                    // Customer filtering
-                    if (filterCustomer) {
-                        const customer = item.customer || item.ecommerce || '';
-                        if (!customer.toLowerCase().includes(filterCustomer.toLowerCase())) {
-                            return false;
-                        }
-                    }
-                    
-                    return true;
-                });
-            }
+            // Fetch with server-side filtering
+            const { data: logs, total } = await fetchBarangMasukLog(
+                selectedStore, 
+                page, 
+                LIMIT,
+                Object.keys(filters).length > 0 ? filters : undefined
+            );
             
-            setData(filteredLogs);
+            setData(logs);
             setTotalRows(total);
         } catch (e) {
             console.error("Gagal memuat data barang masuk:", e);
@@ -127,7 +110,11 @@ export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger, onRefres
     };
 
     useEffect(() => { setPage(1); }, [selectedStore]);
-    // Note: Filters trigger immediate reload. For production, consider debouncing filter inputs to reduce API calls.
+    // Server-side filtering: searches entire database, not just current page
+    useEffect(() => { 
+        setPage(1); // Reset to page 1 when filters change
+    }, [filterDateFrom, filterDateTo, filterPartNumber, filterCustomer]);
+    
     useEffect(() => { loadData(); }, [selectedStore, page, refreshTrigger, filterDateFrom, filterDateTo, filterPartNumber, filterCustomer]);
 
     const totalPages = Math.ceil(totalRows / LIMIT);

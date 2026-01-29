@@ -697,15 +697,35 @@ export const getItemByPartNumber = async (partNumber: string, store?: string | n
   return mapped;
 };
 
-export const fetchBarangMasukLog = async (store: string | null, page = 1, limit = 20, search = '') => {
+export const fetchBarangMasukLog = async (
+    store: string | null, 
+    page = 1, 
+    limit = 20, 
+    filters?: {
+        dateFrom?: string;
+        dateTo?: string;
+        partNumber?: string;
+        customer?: string;
+    }
+) => {
     const table = getLogTableName('barang_masuk', store);
     const from = (page - 1) * limit;
     const to = from + limit - 1;
 
     let query = supabase.from(table).select('*', { count: 'exact' });
 
-    if (search) {
-        query = query.or(`part_number.ilike.%${search}%,nama_barang.ilike.%${search}%,customer.ilike.%${search}%`);
+    // Apply filters
+    if (filters?.dateFrom) {
+        query = query.gte('created_at', `${filters.dateFrom}T00:00:00`);
+    }
+    if (filters?.dateTo) {
+        query = query.lte('created_at', `${filters.dateTo}T23:59:59`);
+    }
+    if (filters?.partNumber) {
+        query = query.ilike('part_number', `%${filters.partNumber}%`);
+    }
+    if (filters?.customer) {
+        query = query.or(`customer.ilike.%${filters.customer}%,ecommerce.ilike.%${filters.customer}%`);
     }
 
     // Order by id descending (newest first) as primary, then created_at as fallback
@@ -1049,15 +1069,35 @@ export const saveOfflineOrder = async (
   }
 };
 
-export const fetchBarangKeluarLog = async (store: string | null, page = 1, limit = 20, search = '') => {
+export const fetchBarangKeluarLog = async (
+    store: string | null, 
+    page = 1, 
+    limit = 20, 
+    filters?: {
+        dateFrom?: string;
+        dateTo?: string;
+        partNumber?: string;
+        customer?: string;
+    }
+) => {
     const table = getLogTableName('barang_keluar', store);
     const from = (page - 1) * limit;
     const to = from + limit - 1;
 
     let query = supabase.from(table).select('*', { count: 'exact' });
 
-    if (search) {
-        query = query.or(`part_number.ilike.%${search}%,name.ilike.%${search}%,customer.ilike.%${search}%`);
+    // Apply filters
+    if (filters?.dateFrom) {
+        query = query.gte('created_at', `${filters.dateFrom}T00:00:00`);
+    }
+    if (filters?.dateTo) {
+        query = query.lte('created_at', `${filters.dateTo}T23:59:59`);
+    }
+    if (filters?.partNumber) {
+        query = query.ilike('part_number', `%${filters.partNumber}%`);
+    }
+    if (filters?.customer) {
+        query = query.or(`customer.ilike.%${filters.customer}%,ecommerce.ilike.%${filters.customer}%`);
     }
 
     // Order by id descending (newest first)
