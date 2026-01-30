@@ -24,6 +24,7 @@ import {
 import { 
   parseShopeeCSV, 
   parseTikTokCSV, 
+  parseShopeeIntlCSV,
   detectCSVPlatform 
 } from '../../services/csvParserService';
 import { 
@@ -480,15 +481,30 @@ export const ScanResiStage3 = ({ onRefresh, refreshTrigger }: { onRefresh?: () =
         });
 
         // Simpan loadedRows untuk digunakan nanti
-        const csvResiSet = new Set(loadedRows.map(r => r.resi));
+        // [FIX] Buat set yang berisi BOTH resi dan order_id (UPPERCASE untuk case-insensitive matching)
+        // Ini penting karena user mungkin scan no_pesanan sebagai "resi" di Stage 1,
+        // tapi di CSV no_pesanan ada di kolom order_id, bukan resi
+        const csvResiAndOrderSet = new Set<string>();
+        loadedRows.forEach(r => {
+          if (r.resi) csvResiAndOrderSet.add(r.resi.trim().toUpperCase());
+          if (r.no_pesanan) csvResiAndOrderSet.add(r.no_pesanan.trim().toUpperCase());
+        });
         
         // === TAMBAHAN: Ambil resi dari Stage 1 yang belum ada di CSV ===
         const stage1Resi = await getAllPendingStage1Resi(selectedStore);
         
         // Filter resi Stage 1 yang belum ada di CSV
+        // [FIX] Cek BOTH s1.resi dan s1.no_pesanan terhadap csvResiAndOrderSet
         const stage1OnlyRows: Stage3Row[] = [];
         for (const s1 of stage1Resi) {
-          if (!csvResiSet.has(s1.resi)) {
+          const s1ResiUpper = (s1.resi || '').trim().toUpperCase();
+          const s1OrderUpper = (s1.no_pesanan || '').trim().toUpperCase();
+          
+          // Skip jika SALAH SATU dari s1.resi atau s1.no_pesanan sudah ada di CSV
+          const alreadyInCSV = csvResiAndOrderSet.has(s1ResiUpper) || 
+                               (s1OrderUpper && csvResiAndOrderSet.has(s1OrderUpper));
+          
+          if (!alreadyInCSV) {
             // Tentukan ecommerce dengan negara
             let ecommerce = s1.ecommerce || '-';
             if (ecommerce === 'EKSPOR' && s1.negara_ekspor) {
@@ -520,27 +536,17 @@ export const ScanResiStage3 = ({ onRefresh, refreshTrigger }: { onRefresh?: () =
               status_message: statusMsg,
               force_override_double: false
             });
-            csvResiSet.add(s1.resi);
+            // [FIX] Tambahkan ke set untuk mencegah duplikat dalam loop yang sama
+            if (s1.resi) csvResiAndOrderSet.add(s1.resi.trim().toUpperCase());
+            if (s1.no_pesanan) csvResiAndOrderSet.add(s1.no_pesanan.trim().toUpperCase());
           }
         }
         
         // Gabungkan semua rows (dari CSV + Stage 1 only)
         const allRows = [...loadedRows, ...stage1OnlyRows];
         
-        setRows(prev => {
-            const newMap = new Map();
-            allRows.forEach(r => newMap.set(r.resi + r.part_number, r));
-            const mergedRows = prev.map(existingRow => {
-                const key = existingRow.resi + existingRow.part_number;
-                if (newMap.has(key)) {
-                    const freshData = newMap.get(key);
-                    newMap.delete(key);
-                    return freshData;
-                }
-                return existingRow;
-            });
-            return [...mergedRows, ...Array.from(newMap.values()) as Stage3Row[]];
-        });
+        // Langsung set rows tanpa merge - ini memastikan data fresh dari database
+        setRows(allRows);
       } else {
         // Jika tidak ada CSV items, tetap load dari Stage 1
         const stage1Resi = await getAllPendingStage1Resi(selectedStore);
@@ -650,22 +656,32 @@ export const ScanResiStage3 = ({ onRefresh, refreshTrigger }: { onRefresh?: () =
       // Konversi ke CSV dengan rawNumbers: true agar angka panjang tidak jadi scientific notation
       const csvText = XLSX.utils.sheet_to_csv(worksheet, { rawNumbers: true });
 
+      // [DEBUG] Log first 500 chars of CSV to check header
+      console.log('[handleFileUpload] CSV preview (first 500 chars):', csvText.substring(0, 500));
+      
       const platform = detectCSVPlatform(csvText);
+      console.log('[handleFileUpload] Detected platform:', platform);
+      
       let parsedItems: any[] = [];
       
-      // Parsing berdasarkan deteksi format file (Shopee/TikTok)
+      // Parsing berdasarkan deteksi format file (Shopee/TikTok/Shopee International)
       // Namun attribute ecommerce/toko akan kita override dengan pilihan user
       if (platform === 'shopee') parsedItems = parseShopeeCSV(csvText);
+      else if (platform === 'shopee-intl') parsedItems = parseShopeeIntlCSV(csvText);
       else if (platform === 'tiktok') parsedItems = parseTikTokCSV(csvText);
       else { 
         // Fallback coba parse Shopee standar jika tidak terdeteksi
+        console.log('[handleFileUpload] Platform unknown, trying parseShopeeCSV fallback...');
         parsedItems = parseShopeeCSV(csvText);
+        console.log('[handleFileUpload] Fallback parseShopeeCSV result count:', parsedItems.length);
         if(parsedItems.length === 0) {
              alert('Format File tidak dikenali! Pastikan header kolom "No. Resi" atau "No. Pesanan" ada.'); 
              setLoading(false); 
              return; 
         }
       }
+      
+      console.log('[handleFileUpload] Parsed items count:', parsedItems.length);
 
       if (parsedItems.length === 0) {
         alert('Tidak ada data valid (Mungkin status Batal/Belum Bayar?).');
@@ -783,6 +799,14 @@ export const ScanResiStage3 = ({ onRefresh, refreshTrigger }: { onRefresh?: () =
         alert(`Semua item sudah ada di Barang Keluar!\n\nResi: ${skippedResis}...`);
       }
 
+      // === FORCE REFRESH SETELAH UPLOAD ===
+      // Clear state dulu agar tidak ada data lama yang tertinggal
+      setRows([]);
+      
+      // Tunggu sebentar agar database selesai update
+      await new Promise(resolve => setTimeout(resolve, 300));
+      
+      // Load ulang data dari database
       await loadSavedDataFromDB();
       
     } catch (err: any) { 
