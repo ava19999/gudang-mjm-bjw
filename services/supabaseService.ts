@@ -1122,7 +1122,7 @@ export const fetchBarangKeluarLog = async (
 };
 
 export const deleteBarangLog = async (
-    id: number, 
+    id: number | string, 
     type: 'in' | 'out', 
     partNumber: string, 
     qty: number, 
@@ -1131,49 +1131,146 @@ export const deleteBarangLog = async (
     const logTable = getLogTableName(type === 'in' ? 'barang_masuk' : 'barang_keluar', store);
     const stockTable = getTableName(store);
 
-    console.log('deleteBarangLog called:', { id, type, partNumber, qty, store, logTable, stockTable });
+    // ID bisa berupa UUID string atau number, gunakan apa adanya
+    const idValue = id;
+    
+    console.log('deleteBarangLog called:', { id, idValue, type, partNumber, qty, store, logTable, stockTable });
 
     try {
-        if (!id || !partNumber || qty <= 0) {
-            console.error('Invalid params:', { id, partNumber, qty });
+        // Validasi id
+        if (!idValue) {
+            console.error('Invalid params: id is required', { id, idValue });
             return false;
         }
 
-        const { data: currentItem, error: fetchError } = await supabase
-            .from(stockTable)
-            .select('quantity')
-            .eq('part_number', partNumber)
-            .single();
+        // Jika part_number ada dan qty > 0, update stok
+        if (partNumber && qty > 0) {
+            const { data: currentItem, error: fetchError } = await supabase
+                .from(stockTable)
+                .select('quantity')
+                .eq('part_number', partNumber)
+                .single();
 
-        console.log('Current stock:', currentItem, 'Error:', fetchError);
+            console.log('Current stock:', currentItem, 'Error:', fetchError);
 
-        if (fetchError || !currentItem) throw new Error("Item tidak ditemukan untuk rollback stok");
+            if (!fetchError && currentItem) {
+                let newQty = currentItem.quantity;
+                if (type === 'in') newQty = Math.max(0, newQty - qty);
+                else newQty = newQty + qty;
+                
+                console.log('Stock will be updated from', currentItem.quantity, 'to', newQty);
 
-        let newQty = currentItem.quantity;
-        if (type === 'in') newQty = Math.max(0, newQty - qty);
-        else newQty = newQty + qty;
-        
-        console.log('Stock will be updated from', currentItem.quantity, 'to', newQty);
+                const { error: updateError } = await supabase
+                    .from(stockTable)
+                    .update({ quantity: newQty })
+                    .eq('part_number', partNumber);
 
-        const { error: deleteError } = await supabase.from(logTable).delete().eq('id', id);
-        if (deleteError) throw new Error("Gagal menghapus log: " + deleteError.message);
-
-        const { error: updateError } = await supabase
-            .from(stockTable)
-            .update({ quantity: newQty })
-            .eq('part_number', partNumber);
-
-        if (updateError) {
-            console.error("Stock update error:", updateError);
-            throw new Error("WARNING: Log terhapus tapi stok gagal diupdate: " + updateError.message);
+                if (updateError) {
+                    console.error("Stock update error:", updateError);
+                    // Lanjutkan hapus log meski update stok gagal
+                }
+                
+                console.log('Stock updated successfully to', newQty);
+            } else {
+                console.warn('Item tidak ditemukan di stok, skip update stok');
+            }
+        } else {
+            console.warn('part_number atau qty tidak valid, skip update stok:', { partNumber, qty });
         }
-        
-        console.log('Stock updated successfully to', newQty);
 
+        // Hapus log entry - gunakan id apa adanya (bisa UUID atau number)
+        console.log('Attempting to delete from', logTable, 'where id =', idValue);
+        const { error: deleteError } = await supabase
+            .from(logTable)
+            .delete()
+            .eq('id', idValue);
+            
+        if (deleteError) {
+            console.error("Delete log error:", deleteError);
+            throw new Error("Gagal menghapus log: " + deleteError.message);
+        }
+
+        console.log('Log deleted successfully');
         return true;
     } catch (e) {
         console.error("Delete Log Error:", e);
         return false;
+    }
+};
+
+// INSERT BARANG KELUAR - untuk Undo delete
+export const insertBarangKeluar = async (
+    item: {
+        kode_toko?: string;
+        tempo?: string;
+        ecommerce?: string;
+        customer?: string;
+        part_number: string;
+        name: string;
+        brand?: string;
+        application?: string;
+        qty_keluar: number;
+        harga_total: number;
+        resi?: string;
+        tanggal?: string;
+    },
+    store: string | null
+): Promise<{ success: boolean; id?: number }> => {
+    const logTable = getLogTableName('barang_keluar', store);
+    const stockTable = getTableName(store);
+
+    console.log('insertBarangKeluar called:', { item, store, logTable });
+
+    try {
+        // 1. Insert ke barang_keluar
+        const { data: insertedData, error: insertError } = await supabase
+            .from(logTable)
+            .insert([{
+                kode_toko: item.kode_toko || (store === 'bjw' ? 'BJW' : 'MJM'),
+                tempo: item.tempo || 'CASH',
+                ecommerce: item.ecommerce || '-',
+                customer: item.customer || '-',
+                part_number: item.part_number,
+                name: item.name,
+                nama_barang: item.name,
+                brand: item.brand || '',
+                application: item.application || '',
+                qty_keluar: item.qty_keluar,
+                harga_total: item.harga_total,
+                resi: item.resi || '-',
+                tanggal: item.tanggal || new Date().toISOString()
+            }])
+            .select('id')
+            .single();
+
+        if (insertError) {
+            console.error('Insert barang_keluar error:', insertError);
+            return { success: false };
+        }
+
+        // 2. Kurangi stok
+        if (item.part_number && item.qty_keluar > 0) {
+            const { data: currentStock, error: fetchError } = await supabase
+                .from(stockTable)
+                .select('quantity')
+                .eq('part_number', item.part_number)
+                .single();
+
+            if (!fetchError && currentStock) {
+                const newQty = Math.max(0, currentStock.quantity - item.qty_keluar);
+                await supabase
+                    .from(stockTable)
+                    .update({ quantity: newQty })
+                    .eq('part_number', item.part_number);
+                console.log('Stock reduced from', currentStock.quantity, 'to', newQty);
+            }
+        }
+
+        console.log('Insert barang_keluar success, id:', insertedData?.id);
+        return { success: true, id: insertedData?.id };
+    } catch (e) {
+        console.error("Insert Barang Keluar Error:", e);
+        return { success: false };
     }
 };
 

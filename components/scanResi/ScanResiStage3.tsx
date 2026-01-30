@@ -16,6 +16,7 @@ import {
   insertProductAlias,
   deleteProcessedResiItems,
   deleteResiItemById,
+  deleteScanResiById,
   checkResiOrOrderStatus,
   checkExistingInBarangKeluar,
   getStage1ResiList,
@@ -942,15 +943,28 @@ export const ScanResiStage3 = ({ onRefresh, refreshTrigger }: { onRefresh?: () =
 
   // Handler untuk hapus row - juga hapus dari database
   const handleDeleteRow = async (rowId: string) => {
+    console.log('[handleDeleteRow] Deleting row:', rowId);
+    
     // Hapus dari state lokal dulu untuk responsivitas
     setRows(prev => prev.filter(r => r.id !== rowId));
     
-    // Jika ID dimulai dengan "db-", berarti sudah ada di database, hapus juga dari sana
+    // Jika ID dimulai dengan "db-", berarti dari resi_items, hapus dari sana
     if (rowId.startsWith('db-')) {
+      console.log('[handleDeleteRow] Calling deleteResiItemById for:', rowId);
       const result = await deleteResiItemById(selectedStore, rowId);
+      console.log('[handleDeleteRow] deleteResiItemById result:', result);
       if (!result.success) {
-        console.warn('Gagal hapus dari database:', result.message);
-        // Opsional: bisa reload data jika gagal
+        console.warn('Gagal hapus dari resi_items:', result.message);
+      }
+    }
+    
+    // Jika ID dimulai dengan "s1-", berarti dari scan_resi (Stage 1), hapus dari sana
+    if (rowId.startsWith('s1-')) {
+      console.log('[handleDeleteRow] Calling deleteScanResiById for:', rowId);
+      const result = await deleteScanResiById(selectedStore, rowId);
+      console.log('[handleDeleteRow] deleteScanResiById result:', result);
+      if (!result.success) {
+        console.warn('Gagal hapus dari scan_resi:', result.message);
       }
     }
   };
@@ -1147,6 +1161,7 @@ export const ScanResiStage3 = ({ onRefresh, refreshTrigger }: { onRefresh?: () =
                         <option value="MJM">MJM</option>
                         <option value="BJW">BJW</option>
                         <option value="LARIS">LARIS</option>
+                        <option value="PRAKTIS_PART">PRAKTIS PART</option>
                     </select>
                 )}
 

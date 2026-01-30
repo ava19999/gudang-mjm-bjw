@@ -1308,14 +1308,23 @@ export const deleteResiItemById = async (
     // ID dari database biasanya format "db-123", perlu extract angkanya
     const dbId = String(id).startsWith('db-') ? String(id).replace('db-', '') : String(id);
     
-    const { error } = await supabase
+    console.log('[deleteResiItemById] Deleting from', table, 'where id =', dbId);
+    
+    const { data, error } = await supabase
       .from(table)
       .delete()
-      .eq('id', dbId);
+      .eq('id', dbId)
+      .select();
+
+    console.log('[deleteResiItemById] Result:', { data, error });
 
     if (error) {
       console.error('Delete resi item by ID gagal:', error);
       return { success: false, message: error.message };
+    }
+
+    if (!data || data.length === 0) {
+      console.warn('[deleteResiItemById] No rows deleted - item mungkin tidak ditemukan');
     }
 
     return { success: true, message: 'Item berhasil dihapus' };
@@ -1354,5 +1363,60 @@ export const deleteScanResiById = async (
   } catch (err: any) {
     console.error('Delete scan_resi exception:', err);
     return { success: false, message: err.message || 'Gagal menghapus item scan' };
+  }
+};
+
+// ============================================================================
+// [BARU] FUNGSI REVERT SOLD ITEM KE RESI ITEMS
+// Untuk mengembalikan item dari barang_keluar ke resi_items agar bisa dicek ulang admin
+// ============================================================================
+export const revertSoldItemToResiItems = async (
+  store: string | null,
+  soldItem: {
+    resi: string;
+    part_number: string;
+    name: string;
+    brand?: string;
+    application?: string;
+    qty_keluar: number;
+    harga_total: number;
+    customer: string;
+    ecommerce?: string;
+    kode_toko?: string;
+  }
+): Promise<{ success: boolean; message: string }> => {
+  const resiItemsTable = store === 'mjm' ? 'resi_items_mjm' : (store === 'bjw' ? 'resi_items_bjw' : null);
+  if (!resiItemsTable) return { success: false, message: 'Toko tidak valid' };
+
+  try {
+    // Hitung harga satuan
+    const hargaSatuan = soldItem.qty_keluar > 0 
+      ? soldItem.harga_total / soldItem.qty_keluar 
+      : 0;
+
+    // Insert ke resi_items agar bisa dicek ulang oleh admin
+    const { error } = await supabase
+      .from(resiItemsTable)
+      .insert([{
+        resi: soldItem.resi || '-',
+        part_number: soldItem.part_number || '',
+        nama_produk: soldItem.name || '',
+        jumlah: soldItem.qty_keluar,
+        total_harga_produk: soldItem.harga_total,
+        customer: soldItem.customer || '-',
+        ecommerce: soldItem.ecommerce || '-',
+        toko: soldItem.kode_toko || (store === 'bjw' ? 'BJW' : 'MJM'),
+        order_id: '' // Tidak ada order_id dari barang_keluar
+      }]);
+
+    if (error) {
+      console.error('Insert to resi_items gagal:', error);
+      return { success: false, message: error.message };
+    }
+
+    return { success: true, message: 'Item berhasil dikembalikan ke resi items untuk dicek ulang' };
+  } catch (err: any) {
+    console.error('Revert sold item exception:', err);
+    return { success: false, message: err.message || 'Gagal mengembalikan item' };
   }
 };

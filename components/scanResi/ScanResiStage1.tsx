@@ -663,6 +663,7 @@ export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh, refre
                   <option value="MJM">MJM</option>
                   <option value="BJW">BJW</option>
                   <option value="LARIS">LARIS</option>
+                  <option value="PRAKTIS_PART">PRAKTIS PART</option>
                 </select>
               )}
             </div>
@@ -975,6 +976,7 @@ export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh, refre
                       <option value="MJM">MJM</option>
                       <option value="BJW">BJW</option>
                       <option value="LARIS">LARIS</option>
+                      <option value="PRAKTIS_PART">PRAKTIS PART</option>
                     </select>
                   )}
                 </div>
