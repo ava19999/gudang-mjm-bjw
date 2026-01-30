@@ -24,8 +24,7 @@ interface ShopViewProps {
     onRemoveFromCart: (itemId: string) => void; 
     onUpdateCartItem: (itemId: string, changes: Partial<CartItem>) => void; 
     onCheckout: (customerName: string) => void; 
-    onUpdateBanner: (base64: string) => Promise<void>;
-    refreshTrigger?: number;
+    onUpdateBanner: (base64: string) => Promise<void>; 
 }
 
 export const ShopView: React.FC<ShopViewProps> = ({ 
@@ -37,8 +36,7 @@ export const ShopView: React.FC<ShopViewProps> = ({
     onRemoveFromCart, 
     onUpdateCartItem, 
     onCheckout, 
-    onUpdateBanner,
-    refreshTrigger
+    onUpdateBanner 
 }) => {
   const { selectedStore } = useStore();
   
@@ -110,6 +108,7 @@ export const ShopView: React.FC<ShopViewProps> = ({
   useEffect(() => {
     const timer = setTimeout(async () => {
       if (brandSearch.length >= 1) {
+        // Brand di UI = merek spare part = kolom brand di DB
         const suggestions = await fetchSearchSuggestions(selectedStore, 'brand', brandSearch);
         setBrandOptions(suggestions);
       } else {
@@ -122,6 +121,7 @@ export const ShopView: React.FC<ShopViewProps> = ({
   useEffect(() => {
     const timer = setTimeout(async () => {
       if (applicationSearch.length >= 1) {
+        // Aplikasi di UI = jenis mobil = kolom application di DB
         const suggestions = await fetchSearchSuggestions(selectedStore, 'application', applicationSearch);
         setApplicationOptions(suggestions);
       } else {
@@ -146,8 +146,6 @@ export const ShopView: React.FC<ShopViewProps> = ({
 
   // PERBAIKAN 3: Load Data Stable
   useEffect(() => {
-    let mounted = true;
-    
     const loadData = async () => {
         setLoading(true);
         try {
@@ -164,6 +162,13 @@ export const ShopView: React.FC<ShopViewProps> = ({
                 applicationSearch: debouncedApplication
             };
             
+            console.log('[ShopView] Fetching shop items with params:', {
+                page, 
+                limit,
+                filters,
+                selectedStore
+            });
+            
             const result = await fetchShopItems(
                 page, 
                 limit, 
@@ -171,29 +176,23 @@ export const ShopView: React.FC<ShopViewProps> = ({
                 selectedStore
             );
             
-            if (mounted) {
-                setShopItems(result.data || []);
-                const safeCount = result.count || 0;
-                setTotalPages(safeCount > 0 ? Math.ceil(safeCount / limit) : 1);
-            }
+            console.log('[ShopView] Received data:', result);
+            
+            setShopItems(result.data || []);
+            const safeCount = result.count || 0;
+            setTotalPages(safeCount > 0 ? Math.ceil(safeCount / limit) : 1);
+            
+            console.log('[ShopView] Set shop items:', result.data?.length, 'Total pages:', Math.ceil(safeCount / limit));
         } catch (err) {
-            if (process.env.NODE_ENV !== 'production') {
-                console.error("[ShopView] Gagal load shop items:", err);
-            }
-            if (mounted) {
-                setShopItems([]);
-            }
+            console.error("[ShopView] Gagal load shop items:", err);
+            setShopItems([]);
         } finally {
-            if (mounted) {
-                setLoading(false);
-            }
+            setLoading(false);
         }
     };
 
     loadData();
-    
-    return () => { mounted = false; };
-  }, [page, debouncedSearch, category, debouncedPartNumber, debouncedName, debouncedBrand, debouncedApplication, selectedStore, refreshTrigger]); // Hanya jalan jika ini berubah
+  }, [page, debouncedSearch, category, debouncedPartNumber, debouncedName, debouncedBrand, debouncedApplication, selectedStore]); // Hanya jalan jika ini berubah
 
   // --- Banner Upload Handlers ---
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => { 

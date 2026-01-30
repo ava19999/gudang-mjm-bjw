@@ -272,9 +272,9 @@ const mapItemFromDB = (item: any, photoData?: any): InventoryItem => {
     id: pk, 
     partNumber: pk,
     name: item.name,
-    // UI label swap fix: display application as brand and vice versa
-    brand: item.application,
-    application: item.brand,
+    // No swap needed - brand is brand, application is application
+    brand: item.brand,
+    application: item.application,
     shelf: item.shelf,
     quantity: Number(item.quantity || 0),
     price: 0, 
@@ -293,9 +293,9 @@ const mapItemToDB = (data: any) => {
   const dbPayload: any = {
     part_number: data.partNumber || data.part_number, 
     name: data.name,
-    // UI label swap fix: save brand field to application column and vice versa
-    brand: data.application,
-    application: data.brand,
+    // No swap needed - brand is brand, application is application
+    brand: data.brand,
+    application: data.application,
     shelf: data.shelf,
     quantity: Number(data.quantity) || 0,
     created_at: getWIBDate().toISOString()
@@ -458,10 +458,10 @@ export const fetchInventoryPaginated = async (store: string | null, page: number
   if (filters?.partNumber) query = query.ilike('part_number', `%${filters.partNumber}%`);
   // Filter by name
   if (filters?.name) query = query.ilike('name', `%${filters.name}%`);
-  // Filter by brand (searches application column - UI label swap fix)
-  if (filters?.brand) query = query.ilike('application', `%${filters.brand}%`);
-  // Filter by application (searches brand column - UI label swap fix)
-  if (filters?.app) query = query.ilike('brand', `%${filters.app}%`);
+  // Filter by brand (merek spare part) - kolom brand di DB
+  if (filters?.brand) query = query.ilike('brand', `%${filters.brand}%`);
+  // Filter by application (jenis mobil) - kolom application di DB
+  if (filters?.app) query = query.ilike('application', `%${filters.app}%`);
   // Filter by stock type
   if (filters?.type === 'low') query = query.gt('quantity', 0).lte('quantity', 3);
   if (filters?.type === 'empty') query = query.eq('quantity', 0);
@@ -540,10 +540,10 @@ export const fetchInventoryAllFiltered = async (store: string | null, filters?: 
   if (filters?.partNumber) query = query.ilike('part_number', `%${filters.partNumber}%`);
   // Filter by name
   if (filters?.name) query = query.ilike('name', `%${filters.name}%`);
-  // Filter by brand (searches application column - UI label swap fix)
-  if (filters?.brand) query = query.ilike('application', `%${filters.brand}%`);
-  // Filter by application (searches brand column - UI label swap fix)
-  if (filters?.app) query = query.ilike('brand', `%${filters.app}%`);
+  // Filter by brand (merek spare part) - kolom brand di DB
+  if (filters?.brand) query = query.ilike('brand', `%${filters.brand}%`);
+  // Filter by application (jenis mobil) - kolom application di DB
+  if (filters?.app) query = query.ilike('application', `%${filters.app}%`);
   // Filter by stock type
   if (filters?.type === 'low') query = query.gt('quantity', 0).lte('quantity', 3);
   if (filters?.type === 'empty') query = query.eq('quantity', 0);
@@ -765,13 +765,14 @@ export const fetchShopItems = async (
   try {
     let query = supabase.from(table).select('*', { count: 'exact' }); 
 
-    if (searchTerm) query = query.or(`name.ilike.%${searchTerm}%,part_number.ilike.%${searchTerm}%`);
+    // Search all fields: name, part_number, brand, application
+    if (searchTerm) query = query.or(`name.ilike.%${searchTerm}%,part_number.ilike.%${searchTerm}%,brand.ilike.%${searchTerm}%,application.ilike.%${searchTerm}%`);
     if (partNumberSearch) query = query.ilike('part_number', `%${partNumberSearch}%`);
     if (nameSearch) query = query.ilike('name', `%${nameSearch}%`);
-    // UI label swap fix: brandSearch searches application column
-    if (brandSearch) query = query.ilike('application', `%${brandSearch}%`);
-    // UI label swap fix: applicationSearch searches brand column
-    if (applicationSearch) query = query.ilike('brand', `%${applicationSearch}%`);
+    // Brand di UI = merek spare part = kolom brand di DB
+    if (brandSearch) query = query.ilike('brand', `%${brandSearch}%`);
+    // Aplikasi di UI = jenis mobil = kolom application di DB
+    if (applicationSearch) query = query.ilike('application', `%${applicationSearch}%`);
 
     const { data: items, count, error } = await query.range(from, to).order('name', { ascending: true });
 
@@ -1956,8 +1957,8 @@ export const fetchLowStockItems = async (
       result.push({
         partNumber: item.part_number,
         name: item.name || '',
-        brand: item.application || '',
-        application: item.brand || '',
+        brand: item.brand || '',
+        application: item.application || '',
         quantity: item.quantity || 0,
         shelf: item.shelf || '',
         suppliers

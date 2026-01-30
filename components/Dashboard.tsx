@@ -208,7 +208,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   useEffect(() => {
     const timer = setTimeout(async () => {
       if (brandSearch.length >= 1) {
-        // Query langsung ke kolom 'brand' untuk semua toko (MJM & BJW sama)
+        // Brand = merek spare part = kolom brand di DB
         const suggestions = await fetchSearchSuggestions(selectedStore, 'brand', brandSearch);
         setBrandOptions(suggestions);
       } else {
@@ -221,7 +221,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   useEffect(() => {
     const timer = setTimeout(async () => {
       if (appSearch.length >= 1) {
-        // Query langsung ke kolom 'application' untuk semua toko (MJM & BJW sama)
+        // Application = jenis mobil = kolom application di DB
         const suggestions = await fetchSearchSuggestions(selectedStore, 'application', appSearch);
         setAppOptions(suggestions);
       } else {
