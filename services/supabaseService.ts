@@ -33,6 +33,137 @@ const parseDateToNumber = (dateVal: any): number => {
   return isNaN(parsed) ? Date.now() : parsed;
 };
 
+// --- FETCH FOTO PRODUK ---
+export interface FotoProdukRow {
+  id?: number;
+  part_number: string;
+  foto_1?: string;
+  foto_2?: string;
+  foto_3?: string;
+  foto_4?: string;
+  foto_5?: string;
+  foto_6?: string;
+  foto_7?: string;
+  foto_8?: string;
+  foto_9?: string;
+  foto_10?: string;
+}
+
+export interface FotoLinkRow {
+  id?: number;
+  sku: string;
+  nama_csv: string;
+}
+
+export const fetchFotoProduk = async (search?: string): Promise<FotoProdukRow[]> => {
+  try {
+    let query = supabase
+      .from('foto')
+      .select('*')
+      .order('part_number', { ascending: true });
+    
+    if (search && search.trim()) {
+      query = query.ilike('part_number', `%${search.trim()}%`);
+    }
+    
+    const { data, error } = await query;
+    
+    if (error) {
+      console.error('Fetch Foto Produk Error:', error);
+      return [];
+    }
+    
+    return data || [];
+  } catch (err) {
+    console.error('Fetch Foto Produk Exception:', err);
+    return [];
+  }
+};
+
+// Fetch all part numbers from base_mjm for dropdown autocomplete
+export const fetchAllPartNumbersMJM = async (): Promise<{ part_number: string; name: string }[]> => {
+  try {
+    const { data, error } = await supabase
+      .from('base_mjm')
+      .select('part_number, name')
+      .order('part_number', { ascending: true });
+    
+    if (error) {
+      console.error('Fetch Part Numbers MJM Error:', error);
+      return [];
+    }
+    
+    return data || [];
+  } catch (err) {
+    console.error('Fetch Part Numbers MJM Exception:', err);
+    return [];
+  }
+};
+
+// Check existing part_numbers di tabel foto
+export const checkExistingFotoPartNumbers = async (partNumbers: string[]): Promise<Set<string>> => {
+  try {
+    const { data, error } = await supabase
+      .from('foto')
+      .select('part_number')
+      .in('part_number', partNumbers);
+    
+    if (error) {
+      console.error('Check Existing Foto Error:', error);
+      return new Set();
+    }
+    
+    return new Set((data || []).map(d => d.part_number));
+  } catch (err) {
+    console.error('Check Existing Foto Exception:', err);
+    return new Set();
+  }
+};
+
+// Insert batch ke tabel foto
+export const insertFotoBatch = async (rows: FotoProdukRow[]): Promise<{ success: boolean; inserted: number; error?: string }> => {
+  try {
+    if (rows.length === 0) return { success: true, inserted: 0 };
+    
+    const { data, error } = await supabase
+      .from('foto')
+      .insert(rows)
+      .select();
+    
+    if (error) {
+      console.error('Insert Foto Batch Error:', error);
+      return { success: false, inserted: 0, error: error.message };
+    }
+    
+    return { success: true, inserted: data?.length || 0 };
+  } catch (err: any) {
+    console.error('Insert Foto Batch Exception:', err);
+    return { success: false, inserted: 0, error: err.message };
+  }
+};
+
+// Insert batch ke tabel foto_link
+export const insertFotoLinkBatch = async (rows: FotoLinkRow[]): Promise<{ success: boolean; inserted: number; error?: string }> => {
+  try {
+    if (rows.length === 0) return { success: true, inserted: 0 };
+    
+    const { data, error } = await supabase
+      .from('foto_link')
+      .insert(rows)
+      .select();
+    
+    if (error) {
+      console.error('Insert FotoLink Batch Error:', error);
+      return { success: false, inserted: 0, error: error.message };
+    }
+    
+    return { success: true, inserted: data?.length || 0 };
+  } catch (err: any) {
+    console.error('Insert FotoLink Batch Exception:', err);
+    return { success: false, inserted: 0, error: err.message };
+  }
+};
+
 // --- FETCH DISTINCT ECOMMERCE VALUES ---
 export const fetchDistinctEcommerce = async (store: string | null): Promise<string[]> => {
   const table = store === 'mjm' ? 'barang_keluar_mjm' : (store === 'bjw' ? 'barang_keluar_bjw' : null);

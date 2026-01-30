@@ -13,6 +13,7 @@ import { PettyCashView } from './components/finance/PettyCashView';
 import { BarangKosongView } from './components/finance/BarangKosongView';
 import { ClosingView } from './components/finance/ClosingView';
 import { DataAgungView } from './components/online/DataAgungView';
+import { FotoProdukView } from './components/online/FotoProdukView';
 import { ScanResiStage1 } from './components/scanResi/ScanResiStage1';
 import { ScanResiStage2 } from './components/scanResi/ScanResiStage2';
 import { ScanResiStage3 } from './components/scanResi/ScanResiStage3';
@@ -399,6 +400,7 @@ const AppContent: React.FC = () => {
         {activeView === 'barang_kosong' && isAdmin && <BarangKosongView refreshTrigger={refreshTrigger} />}
         {activeView === 'closing' && isAdmin && <ClosingView refreshTrigger={refreshTrigger} />}
         {activeView === 'data_agung' && isAdmin && <DataAgungView items={items} onRefresh={refreshData} showToast={showToast} />}
+        {activeView === 'foto_produk' && isAdmin && <FotoProdukView />}
         {activeView === 'scan_resi_stage1' && isAdmin && <ScanResiStage1 onRefresh={refreshData} refreshTrigger={refreshTrigger} />}
         {activeView === 'scan_resi_stage2' && isAdmin && <ScanResiStage2 onRefresh={refreshData} refreshTrigger={refreshTrigger} />}
         {activeView === 'scan_resi_stage3' && isAdmin && <ScanResiStage3 onRefresh={refreshData} refreshTrigger={refreshTrigger} />}
