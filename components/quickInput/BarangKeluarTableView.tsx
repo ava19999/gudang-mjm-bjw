@@ -158,15 +158,16 @@ export const BarangKeluarTableView: React.FC<Props> = ({ refreshTrigger }) => {
                             <th className="px-3 py-2">Part Number</th>
                             <th className="px-3 py-2">Nama Barang</th>
                             <th className="px-3 py-2 text-right">Qty Keluar</th>
+                            <th className="px-3 py-2 text-right">Stok Saat Ini</th>
                             <th className="px-3 py-2 text-right">Hrg Satuan</th>
                             <th className="px-3 py-2 text-right">Total</th>
                         </tr>
                     </thead>
                     <tbody className="text-xs divide-y divide-gray-700/50">
                         {loading ? (
-                            <tr><td colSpan={8} className="py-8 text-center text-gray-500"><Loader2 size={16} className="animate-spin inline mr-2"/>Memuat data...</td></tr>
+                            <tr><td colSpan={9} className="py-8 text-center text-gray-500"><Loader2 size={16} className="animate-spin inline mr-2"/>Memuat data...</td></tr>
                         ) : data.length === 0 ? (
-                            <tr><td colSpan={8} className="py-8 text-center text-gray-600 italic">Belum ada data barang keluar.</td></tr>
+                            <tr><td colSpan={9} className="py-8 text-center text-gray-600 italic">Belum ada data barang keluar.</td></tr>
                         ) : (
                             data.map((item, idx) => (
                                 <tr key={item.id || idx} className="hover:bg-gray-800/50 transition-colors">
@@ -176,6 +177,7 @@ export const BarangKeluarTableView: React.FC<Props> = ({ refreshTrigger }) => {
                                     <td className="px-3 py-2 font-bold text-gray-200 font-mono">{item.part_number}</td>
                                     <td className="px-3 py-2 text-gray-300 max-w-[200px] truncate" title={item.name}>{item.name || '-'}</td>
                                     <td className="px-3 py-2 text-right font-bold text-red-400">-{item.quantity}</td>
+                                    <td className="px-3 py-2 text-right font-bold text-cyan-400">{item.current_qty ?? 0}</td>
                                     <td className="px-3 py-2 text-right text-gray-400 font-mono">{formatRupiah(item.harga_satuan)}</td>
                                     <td className="px-3 py-2 text-right text-orange-300 font-mono">{formatRupiah(item.harga_total)}</td>
                                 </tr>

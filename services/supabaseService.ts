@@ -132,16 +132,13 @@ export const fetchSearchSuggestions = async (
   const table = getTableName(store);
   if (!searchQuery || searchQuery.length < 1) return [];
 
-  // Query langsung ke kolom yang dimaksud tanpa swap
-  const dbColumn = field;
-
   try {
     const { data, error } = await supabase
       .from(table)
-      .select(dbColumn)
-      .ilike(dbColumn, `%${searchQuery}%`)
-      .not(dbColumn, 'is', null)
-      .not(dbColumn, 'eq', '')
+      .select(field)
+      .ilike(field, `%${searchQuery}%`)
+      .not(field, 'is', null)
+      .not(field, 'eq', '')
       .limit(50);
 
     if (error) {
@@ -149,10 +146,10 @@ export const fetchSearchSuggestions = async (
       return [];
     }
 
-    // Get unique values - use dbColumn since that's what we queried
+    // Get unique values
     const uniqueValues = [...new Set(
       (data || [])
-        .map((d: any) => d[dbColumn]?.toString().trim())
+        .map((d: any) => d[field]?.toString().trim())
         .filter(Boolean)
     )];
     return uniqueValues.sort().slice(0, 20);
@@ -169,25 +166,22 @@ export const fetchAllDistinctValues = async (
 ): Promise<string[]> => {
   const table = getTableName(store);
 
-  // Query langsung ke kolom yang dimaksud tanpa swap
-  const dbColumn = field;
-
   try {
     const { data, error } = await supabase
       .from(table)
-      .select(dbColumn)
-      .not(dbColumn, 'is', null)
-      .not(dbColumn, 'eq', '');
+      .select(field)
+      .not(field, 'is', null)
+      .not(field, 'eq', '');
 
     if (error) {
       console.error(`Fetch All ${field} Error:`, error);
       return [];
     }
 
-    // Get unique values - use dbColumn
+    // Get unique values
     const uniqueValues = [...new Set(
       (data || [])
-        .map((d: any) => d[dbColumn]?.toString().trim())
+        .map((d: any) => d[field]?.toString().trim())
         .filter(Boolean)
     )];
     return uniqueValues.sort();
@@ -278,9 +272,9 @@ const mapItemFromDB = (item: any, photoData?: any): InventoryItem => {
     id: pk, 
     partNumber: pk,
     name: item.name,
-    // Data langsung dari database tanpa swap
-    brand: item.brand || '',
-    application: item.application || '',
+    // UI label swap fix: display application as brand and vice versa
+    brand: item.application,
+    application: item.brand,
     shelf: item.shelf,
     quantity: Number(item.quantity || 0),
     price: 0, 
@@ -299,9 +293,9 @@ const mapItemToDB = (data: any) => {
   const dbPayload: any = {
     part_number: data.partNumber || data.part_number, 
     name: data.name,
-    // Data langsung dari user input tanpa swap
-    brand: data.brand || '',
-    application: data.application || '',
+    // UI label swap fix: save brand field to application column and vice versa
+    brand: data.application,
+    application: data.brand,
     shelf: data.shelf,
     quantity: Number(data.quantity) || 0,
     created_at: getWIBDate().toISOString()
@@ -464,10 +458,10 @@ export const fetchInventoryPaginated = async (store: string | null, page: number
   if (filters?.partNumber) query = query.ilike('part_number', `%${filters.partNumber}%`);
   // Filter by name
   if (filters?.name) query = query.ilike('name', `%${filters.name}%`);
-  // Filter by brand - langsung ke kolom brand
-  if (filters?.brand) query = query.ilike('brand', `%${filters.brand}%`);
-  // Filter by application - langsung ke kolom application
-  if (filters?.app) query = query.ilike('application', `%${filters.app}%`);
+  // Filter by brand (searches application column - UI label swap fix)
+  if (filters?.brand) query = query.ilike('application', `%${filters.brand}%`);
+  // Filter by application (searches brand column - UI label swap fix)
+  if (filters?.app) query = query.ilike('brand', `%${filters.app}%`);
   // Filter by stock type
   if (filters?.type === 'low') query = query.gt('quantity', 0).lte('quantity', 3);
   if (filters?.type === 'empty') query = query.eq('quantity', 0);
@@ -546,10 +540,10 @@ export const fetchInventoryAllFiltered = async (store: string | null, filters?: 
   if (filters?.partNumber) query = query.ilike('part_number', `%${filters.partNumber}%`);
   // Filter by name
   if (filters?.name) query = query.ilike('name', `%${filters.name}%`);
-  // Filter by brand - langsung ke kolom brand
-  if (filters?.brand) query = query.ilike('brand', `%${filters.brand}%`);
-  // Filter by application - langsung ke kolom application
-  if (filters?.app) query = query.ilike('application', `%${filters.app}%`);
+  // Filter by brand (searches application column - UI label swap fix)
+  if (filters?.brand) query = query.ilike('application', `%${filters.brand}%`);
+  // Filter by application (searches brand column - UI label swap fix)
+  if (filters?.app) query = query.ilike('brand', `%${filters.app}%`);
   // Filter by stock type
   if (filters?.type === 'low') query = query.gt('quantity', 0).lte('quantity', 3);
   if (filters?.type === 'empty') query = query.eq('quantity', 0);
@@ -697,35 +691,16 @@ export const getItemByPartNumber = async (partNumber: string, store?: string | n
   return mapped;
 };
 
-export const fetchBarangMasukLog = async (
-    store: string | null, 
-    page = 1, 
-    limit = 20, 
-    filters?: {
-        dateFrom?: string;
-        dateTo?: string;
-        partNumber?: string;
-        customer?: string;
-    }
-) => {
+export const fetchBarangMasukLog = async (store: string | null, page = 1, limit = 20, search = '') => {
     const table = getLogTableName('barang_masuk', store);
+    const stockTable = getTableName(store);
     const from = (page - 1) * limit;
     const to = from + limit - 1;
 
     let query = supabase.from(table).select('*', { count: 'exact' });
 
-    // Apply filters
-    if (filters?.dateFrom) {
-        query = query.gte('created_at', `${filters.dateFrom}T00:00:00`);
-    }
-    if (filters?.dateTo) {
-        query = query.lte('created_at', `${filters.dateTo}T23:59:59`);
-    }
-    if (filters?.partNumber) {
-        query = query.ilike('part_number', `%${filters.partNumber}%`);
-    }
-    if (filters?.customer) {
-        query = query.or(`customer.ilike.%${filters.customer}%,ecommerce.ilike.%${filters.customer}%`);
+    if (search) {
+        query = query.or(`part_number.ilike.%${search}%,nama_barang.ilike.%${search}%,customer.ilike.%${search}%`);
     }
 
     // Order by id descending (newest first) as primary, then created_at as fallback
@@ -737,11 +712,30 @@ export const fetchBarangMasukLog = async (
         console.error("Error fetching barang masuk:", error);
         return { data: [], total: 0 };
     }
+
+    // Fetch current quantities from stock table
+    const partNumbers = [...new Set((data || []).map(row => row.part_number).filter(Boolean))];
+    let stockMap: Record<string, number> = {};
+    
+    if (partNumbers.length > 0) {
+        const { data: stockData } = await supabase
+            .from(stockTable)
+            .select('part_number, quantity')
+            .in('part_number', partNumbers);
+        
+        if (stockData) {
+            stockMap = stockData.reduce((acc, item) => {
+                acc[item.part_number] = item.quantity;
+                return acc;
+            }, {} as Record<string, number>);
+        }
+    }
     
     const mappedData = (data || []).map(row => ({
         ...row,
         name: row.nama_barang || row.name, 
-        quantity: row.qty_masuk
+        quantity: row.qty_masuk,
+        current_qty: stockMap[row.part_number] ?? 0
     }));
 
     return { data: mappedData, total: count || 0 };
@@ -774,10 +768,10 @@ export const fetchShopItems = async (
     if (searchTerm) query = query.or(`name.ilike.%${searchTerm}%,part_number.ilike.%${searchTerm}%`);
     if (partNumberSearch) query = query.ilike('part_number', `%${partNumberSearch}%`);
     if (nameSearch) query = query.ilike('name', `%${nameSearch}%`);
-    // Filter by brand - langsung ke kolom brand
-    if (brandSearch) query = query.ilike('brand', `%${brandSearch}%`);
-    // Filter by application - langsung ke kolom application
-    if (applicationSearch) query = query.ilike('application', `%${applicationSearch}%`);
+    // UI label swap fix: brandSearch searches application column
+    if (brandSearch) query = query.ilike('application', `%${brandSearch}%`);
+    // UI label swap fix: applicationSearch searches brand column
+    if (applicationSearch) query = query.ilike('brand', `%${applicationSearch}%`);
 
     const { data: items, count, error } = await query.range(from, to).order('name', { ascending: true });
 
@@ -1069,35 +1063,16 @@ export const saveOfflineOrder = async (
   }
 };
 
-export const fetchBarangKeluarLog = async (
-    store: string | null, 
-    page = 1, 
-    limit = 20, 
-    filters?: {
-        dateFrom?: string;
-        dateTo?: string;
-        partNumber?: string;
-        customer?: string;
-    }
-) => {
+export const fetchBarangKeluarLog = async (store: string | null, page = 1, limit = 20, search = '') => {
     const table = getLogTableName('barang_keluar', store);
+    const stockTable = getTableName(store);
     const from = (page - 1) * limit;
     const to = from + limit - 1;
 
     let query = supabase.from(table).select('*', { count: 'exact' });
 
-    // Apply filters
-    if (filters?.dateFrom) {
-        query = query.gte('created_at', `${filters.dateFrom}T00:00:00`);
-    }
-    if (filters?.dateTo) {
-        query = query.lte('created_at', `${filters.dateTo}T23:59:59`);
-    }
-    if (filters?.partNumber) {
-        query = query.ilike('part_number', `%${filters.partNumber}%`);
-    }
-    if (filters?.customer) {
-        query = query.or(`customer.ilike.%${filters.customer}%,ecommerce.ilike.%${filters.customer}%`);
+    if (search) {
+        query = query.or(`part_number.ilike.%${search}%,name.ilike.%${search}%,customer.ilike.%${search}%`);
     }
 
     // Order by id descending (newest first)
@@ -1109,20 +1084,39 @@ export const fetchBarangKeluarLog = async (
         console.error("Error fetching barang keluar:", error);
         return { data: [], total: 0 };
     }
+
+    // Fetch current quantities from stock table
+    const partNumbers = [...new Set((data || []).map(row => row.part_number).filter(Boolean))];
+    let stockMap: Record<string, number> = {};
+    
+    if (partNumbers.length > 0) {
+        const { data: stockData } = await supabase
+            .from(stockTable)
+            .select('part_number, quantity')
+            .in('part_number', partNumbers);
+        
+        if (stockData) {
+            stockMap = stockData.reduce((acc, item) => {
+                acc[item.part_number] = item.quantity;
+                return acc;
+            }, {} as Record<string, number>);
+        }
+    }
     
     const mappedData = (data || []).map(row => ({
         ...row,
         name: row.name || row.nama_barang, 
         quantity: row.qty_keluar,
         customer: row.customer || '-',
-        tempo: row.tempo || 'CASH'
+        tempo: row.tempo || 'CASH',
+        current_qty: stockMap[row.part_number] ?? 0
     }));
 
     return { data: mappedData, total: count || 0 };
 };
 
 export const deleteBarangLog = async (
-    id: number | string, 
+    id: number, 
     type: 'in' | 'out', 
     partNumber: string, 
     qty: number, 
@@ -1131,66 +1125,45 @@ export const deleteBarangLog = async (
     const logTable = getLogTableName(type === 'in' ? 'barang_masuk' : 'barang_keluar', store);
     const stockTable = getTableName(store);
 
-    // ID bisa berupa UUID string atau number, gunakan apa adanya
-    const idValue = id;
-    
-    console.log('deleteBarangLog called:', { id, idValue, type, partNumber, qty, store, logTable, stockTable });
+    console.log('deleteBarangLog called:', { id, type, partNumber, qty, store, logTable, stockTable });
 
     try {
-        // Validasi id
-        if (!idValue) {
-            console.error('Invalid params: id is required', { id, idValue });
+        if (!id || !partNumber || qty <= 0) {
+            console.error('Invalid params:', { id, partNumber, qty });
             return false;
         }
 
-        // Jika part_number ada dan qty > 0, update stok
-        if (partNumber && qty > 0) {
-            const { data: currentItem, error: fetchError } = await supabase
-                .from(stockTable)
-                .select('quantity')
-                .eq('part_number', partNumber)
-                .single();
+        const { data: currentItem, error: fetchError } = await supabase
+            .from(stockTable)
+            .select('quantity')
+            .eq('part_number', partNumber)
+            .single();
 
-            console.log('Current stock:', currentItem, 'Error:', fetchError);
+        console.log('Current stock:', currentItem, 'Error:', fetchError);
 
-            if (!fetchError && currentItem) {
-                let newQty = currentItem.quantity;
-                if (type === 'in') newQty = Math.max(0, newQty - qty);
-                else newQty = newQty + qty;
-                
-                console.log('Stock will be updated from', currentItem.quantity, 'to', newQty);
+        if (fetchError || !currentItem) throw new Error("Item tidak ditemukan untuk rollback stok");
 
-                const { error: updateError } = await supabase
-                    .from(stockTable)
-                    .update({ quantity: newQty })
-                    .eq('part_number', partNumber);
+        let newQty = currentItem.quantity;
+        if (type === 'in') newQty = Math.max(0, newQty - qty);
+        else newQty = newQty + qty;
+        
+        console.log('Stock will be updated from', currentItem.quantity, 'to', newQty);
 
-                if (updateError) {
-                    console.error("Stock update error:", updateError);
-                    // Lanjutkan hapus log meski update stok gagal
-                }
-                
-                console.log('Stock updated successfully to', newQty);
-            } else {
-                console.warn('Item tidak ditemukan di stok, skip update stok');
-            }
-        } else {
-            console.warn('part_number atau qty tidak valid, skip update stok:', { partNumber, qty });
+        const { error: deleteError } = await supabase.from(logTable).delete().eq('id', id);
+        if (deleteError) throw new Error("Gagal menghapus log: " + deleteError.message);
+
+        const { error: updateError } = await supabase
+            .from(stockTable)
+            .update({ quantity: newQty })
+            .eq('part_number', partNumber);
+
+        if (updateError) {
+            console.error("Stock update error:", updateError);
+            throw new Error("WARNING: Log terhapus tapi stok gagal diupdate: " + updateError.message);
         }
+        
+        console.log('Stock updated successfully to', newQty);
 
-        // Hapus log entry - gunakan id apa adanya (bisa UUID atau number)
-        console.log('Attempting to delete from', logTable, 'where id =', idValue);
-        const { error: deleteError } = await supabase
-            .from(logTable)
-            .delete()
-            .eq('id', idValue);
-            
-        if (deleteError) {
-            console.error("Delete log error:", deleteError);
-            throw new Error("Gagal menghapus log: " + deleteError.message);
-        }
-
-        console.log('Log deleted successfully');
         return true;
     } catch (e) {
         console.error("Delete Log Error:", e);
@@ -1198,84 +1171,8 @@ export const deleteBarangLog = async (
     }
 };
 
-// INSERT BARANG KELUAR - untuk Undo delete
-export const insertBarangKeluar = async (
-    item: {
-        kode_toko?: string;
-        tempo?: string;
-        ecommerce?: string;
-        customer?: string;
-        part_number: string;
-        name: string;
-        brand?: string;
-        application?: string;
-        qty_keluar: number;
-        harga_total: number;
-        resi?: string;
-        tanggal?: string;
-    },
-    store: string | null
-): Promise<{ success: boolean; id?: number }> => {
-    const logTable = getLogTableName('barang_keluar', store);
-    const stockTable = getTableName(store);
-
-    console.log('insertBarangKeluar called:', { item, store, logTable });
-
-    try {
-        // 1. Insert ke barang_keluar
-        const { data: insertedData, error: insertError } = await supabase
-            .from(logTable)
-            .insert([{
-                kode_toko: item.kode_toko || (store === 'bjw' ? 'BJW' : 'MJM'),
-                tempo: item.tempo || 'CASH',
-                ecommerce: item.ecommerce || '-',
-                customer: item.customer || '-',
-                part_number: item.part_number,
-                name: item.name,
-                nama_barang: item.name,
-                brand: item.brand || '',
-                application: item.application || '',
-                qty_keluar: item.qty_keluar,
-                harga_total: item.harga_total,
-                resi: item.resi || '-',
-                tanggal: item.tanggal || new Date().toISOString()
-            }])
-            .select('id')
-            .single();
-
-        if (insertError) {
-            console.error('Insert barang_keluar error:', insertError);
-            return { success: false };
-        }
-
-        // 2. Kurangi stok
-        if (item.part_number && item.qty_keluar > 0) {
-            const { data: currentStock, error: fetchError } = await supabase
-                .from(stockTable)
-                .select('quantity')
-                .eq('part_number', item.part_number)
-                .single();
-
-            if (!fetchError && currentStock) {
-                const newQty = Math.max(0, currentStock.quantity - item.qty_keluar);
-                await supabase
-                    .from(stockTable)
-                    .update({ quantity: newQty })
-                    .eq('part_number', item.part_number);
-                console.log('Stock reduced from', currentStock.quantity, 'to', newQty);
-            }
-        }
-
-        console.log('Insert barang_keluar success, id:', insertedData?.id);
-        return { success: true, id: insertedData?.id };
-    } catch (e) {
-        console.error("Insert Barang Keluar Error:", e);
-        return { success: false };
-    }
-};
-
-export const fetchHistory = async (store?: string | null) => [];
-export const fetchItemHistory = async (store?: string | null, itemId?: string) => [];
+export const fetchHistory = async () => [];
+export const fetchItemHistory = async () => [];
 
 // FETCH HISTORY LOGS PAGINATED - untuk modal detail Masuk/Keluar di Dashboard
 export const fetchHistoryLogsPaginated = async (
@@ -1290,6 +1187,7 @@ export const fetchHistoryLogsPaginated = async (
   const tableName = type === 'in' 
     ? getLogTableName('barang_masuk', effectiveStore)
     : getLogTableName('barang_keluar', effectiveStore);
+  const stockTable = getTableName(effectiveStore);
   
   try {
     // Build query
@@ -1335,6 +1233,24 @@ export const fetchHistoryLogsPaginated = async (
       return { data: [], count: 0 };
     }
     
+    // Fetch current quantities from stock table
+    const partNumbers = [...new Set((data || []).map(row => row.part_number).filter(Boolean))];
+    let stockMap: Record<string, number> = {};
+    
+    if (partNumbers.length > 0) {
+      const { data: stockData } = await supabase
+        .from(stockTable)
+        .select('part_number, quantity')
+        .in('part_number', partNumbers);
+      
+      if (stockData) {
+        stockMap = stockData.reduce((acc, item) => {
+          acc[item.part_number] = item.quantity;
+          return acc;
+        }, {} as Record<string, number>);
+      }
+    }
+    
     // Map data ke format StockHistory yang dipakai HistoryTable
     const mappedData = (data || []).map((row: any) => {
       const isIn = type === 'in';
@@ -1366,6 +1282,7 @@ export const fetchHistoryLogsPaginated = async (
         quantity: isIn ? (row.qty_masuk || 0) : (row.qty_keluar || 0),
         previousStock: 0,
         currentStock: isIn ? (row.stok_akhir || 0) : (row.stock_ahir || 0),
+        currentQty: stockMap[row.part_number] ?? 0,
         price: row.harga_satuan || 0,
         totalPrice: row.harga_total || 0,
         timestamp: row.created_at ? new Date(row.created_at).getTime() : null,
@@ -1940,8 +1857,8 @@ export const fetchLowStockItems = async (
       result.push({
         partNumber: item.part_number,
         name: item.name || '',
-        brand: item.brand || '',
-        application: item.application || '',
+        brand: item.application || '',
+        application: item.brand || '',
         quantity: item.quantity || 0,
         shelf: item.shelf || '',
         suppliers

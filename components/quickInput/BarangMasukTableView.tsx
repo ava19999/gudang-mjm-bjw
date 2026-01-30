@@ -27,28 +27,45 @@ export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger, onRefres
     const loadData = async () => {
         setLoading(true);
         try {
-            // Build filters object
-            const filters: {
-                dateFrom?: string;
-                dateTo?: string;
-                partNumber?: string;
-                customer?: string;
-            } = {};
+            const { data: logs, total } = await fetchBarangMasukLog(selectedStore, page, LIMIT);
             
-            if (filterDateFrom) filters.dateFrom = filterDateFrom;
-            if (filterDateTo) filters.dateTo = filterDateTo;
-            if (filterPartNumber) filters.partNumber = filterPartNumber;
-            if (filterCustomer) filters.customer = filterCustomer;
+            // Apply client-side filters
+            let filteredLogs = logs;
             
-            // Fetch with server-side filtering
-            const { data: logs, total } = await fetchBarangMasukLog(
-                selectedStore, 
-                page, 
-                LIMIT,
-                Object.keys(filters).length > 0 ? filters : undefined
-            );
+            if (filterDateFrom || filterDateTo || filterPartNumber || filterCustomer) {
+                filteredLogs = logs.filter((item: any) => {
+                    // Date filtering
+                    if (filterDateFrom) {
+                        const itemDate = new Intl.DateTimeFormat('sv-SE', {
+                            timeZone: 'Asia/Jakarta'
+                        }).format(new Date(item.created_at));
+                        if (itemDate < filterDateFrom) return false;
+                    }
+                    if (filterDateTo) {
+                        const itemDate = new Intl.DateTimeFormat('sv-SE', {
+                            timeZone: 'Asia/Jakarta'
+                        }).format(new Date(item.created_at));
+                        if (itemDate > filterDateTo) return false;
+                    }
+                    
+                    // Part number filtering
+                    if (filterPartNumber && !item.part_number?.toLowerCase().includes(filterPartNumber.toLowerCase())) {
+                        return false;
+                    }
+                    
+                    // Customer filtering
+                    if (filterCustomer) {
+                        const customer = item.customer || item.ecommerce || '';
+                        if (!customer.toLowerCase().includes(filterCustomer.toLowerCase())) {
+                            return false;
+                        }
+                    }
+                    
+                    return true;
+                });
+            }
             
-            setData(logs);
+            setData(filteredLogs);
             setTotalRows(total);
         } catch (e) {
             console.error("Gagal memuat data barang masuk:", e);
@@ -110,11 +127,7 @@ export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger, onRefres
     };
 
     useEffect(() => { setPage(1); }, [selectedStore]);
-    // Server-side filtering: searches entire database, not just current page
-    useEffect(() => { 
-        setPage(1); // Reset to page 1 when filters change
-    }, [filterDateFrom, filterDateTo, filterPartNumber, filterCustomer]);
-    
+    // Note: Filters trigger immediate reload. For production, consider debouncing filter inputs to reduce API calls.
     useEffect(() => { loadData(); }, [selectedStore, page, refreshTrigger, filterDateFrom, filterDateTo, filterPartNumber, filterCustomer]);
 
     const totalPages = Math.ceil(totalRows / LIMIT);
@@ -202,6 +215,7 @@ export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger, onRefres
                             <th className="px-3 py-2">Part Number</th>
                             <th className="px-3 py-2">Nama Barang</th>
                             <th className="px-3 py-2 text-right">Qty</th>
+                            <th className="px-3 py-2 text-right">Stok Saat Ini</th>
                             <th className="px-3 py-2 text-right">Harga Satuan</th>
                             <th className="px-3 py-2 text-right">Total</th>
                             <th className="px-3 py-2">Customer/Sumber</th>
@@ -211,9 +225,9 @@ export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger, onRefres
                     </thead>
                     <tbody className="text-xs divide-y divide-gray-700/50">
                         {loading ? (
-                            <tr><td colSpan={9} className="py-8 text-center text-gray-500"><Loader2 size={16} className="animate-spin inline mr-2"/>Memuat data...</td></tr>
+                            <tr><td colSpan={10} className="py-8 text-center text-gray-500"><Loader2 size={16} className="animate-spin inline mr-2"/>Memuat data...</td></tr>
                         ) : data.length === 0 ? (
-                            <tr><td colSpan={9} className="py-8 text-center text-gray-600 italic">Belum ada data barang masuk.</td></tr>
+                            <tr><td colSpan={10} className="py-8 text-center text-gray-600 italic">Belum ada data barang masuk.</td></tr>
                         ) : (
                             data.map((item, idx) => (
                                 <tr key={item.id || idx} className="hover:bg-gray-800/50 transition-colors">
@@ -221,6 +235,7 @@ export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger, onRefres
                                     <td className="px-3 py-2 font-bold text-gray-200 font-mono">{item.part_number}</td>
                                     <td className="px-3 py-2 text-gray-300 max-w-[200px] truncate" title={item.name}>{item.name || '-'}</td>
                                     <td className="px-3 py-2 text-right font-bold text-green-400">+{item.quantity || item.qty_masuk}</td>
+                                    <td className="px-3 py-2 text-right font-bold text-cyan-400">{item.current_qty ?? 0}</td>
                                     <td className="px-3 py-2 text-right text-gray-400 font-mono">{formatRupiah(item.harga_satuan)}</td>
                                     <td className="px-3 py-2 text-right text-orange-300 font-mono">{formatRupiah(item.harga_total)}</td>
                                     <td className="px-3 py-2 text-gray-400">{item.customer && item.customer !== '-' ? item.customer : (item.ecommerce || '-')}</td>

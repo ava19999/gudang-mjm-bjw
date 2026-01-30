@@ -95,6 +95,10 @@ export const GlobalHistoryModal: React.FC<GlobalHistoryModalProps> = ({ type, on
           aVal = a.quantity || 0;
           bVal = b.quantity || 0;
           break;
+        case 'currentQty':
+          aVal = (a as any).currentQty || 0;
+          bVal = (b as any).currentQty || 0;
+          break;
         case 'price':
           aVal = a.price || 0;
           bVal = b.price || 0;
