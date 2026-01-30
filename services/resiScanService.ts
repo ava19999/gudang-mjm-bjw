@@ -287,8 +287,11 @@ export const getResiStage1List = async (store: string | null) => {
     return [];
   }
   
-  // Filter manual: ambil yang bukan completed
-  const filtered = (data || []).filter((d: any) => d.status !== 'completed');
+  // Filter manual: ambil yang bukan completed dan belum stage3_completed (sudah terjual)
+  const filtered = (data || []).filter((d: any) => 
+    d.status !== 'completed' && 
+    String(d.stage3_completed) !== 'true'
+  );
   
   return mapToBoolean(filtered);
 };
@@ -542,49 +545,13 @@ export const verifyResiStage2Bulk = async (
 // STAGE 3: DATA ENTRY & FINALISASI
 // ============================================================================
 
-interface ResiHistoryFilters {
-  status?: string;
-  ecommerce?: string;
-  search?: string;
-  dateFrom?: string;
-  dateTo?: string;
-}
-
-export const getResiHistory = async (
-  store: string | null, 
-  filters?: ResiHistoryFilters
-) => {
+export const getResiHistory = async (store: string | null) => {
   const table = getTableName(store);
-  
-  let query = supabase
+  const { data, error } = await supabase
     .from(table)
     .select('*')
     .order('stage1_scanned_at', { ascending: false })
     .limit(100);
-  
-  // Apply filters jika ada
-  if (filters) {
-    if (filters.status && filters.status !== 'all') {
-      query = query.eq('status', filters.status);
-    }
-    if (filters.ecommerce && filters.ecommerce !== 'all') {
-      query = query.ilike('ecommerce', filters.ecommerce);
-    }
-    if (filters.search) {
-      query = query.or(`resi.ilike.%${filters.search}%,no_pesanan.ilike.%${filters.search}%`);
-    }
-    if (filters.dateFrom) {
-      query = query.gte('stage1_scanned_at', filters.dateFrom);
-    }
-    if (filters.dateTo) {
-      // Add 1 day to include the end date fully
-      const endDate = new Date(filters.dateTo);
-      endDate.setDate(endDate.getDate() + 1);
-      query = query.lt('stage1_scanned_at', endDate.toISOString().split('T')[0]);
-    }
-  }
-  
-  const { data, error } = await query;
     
   if (error) return [];
   return mapToBoolean(data || []);
@@ -983,22 +950,16 @@ export const saveCSVToResiItems = async (
     // Tambahkan status dan part_number untuk cek apakah sudah "Ready"
     const { data: allExistingInDB } = await supabase
       .from(tableName)
-      .select('id, resi, order_id, ecommerce, toko, status, part_number, nama_produk, customer');
+      .select('id, resi, order_id, ecommerce, toko, status, part_number, customer');
     
-    // === MAP 1: Untuk cek ecommerce/toko dari resi yang sudah ada (by resi only) ===
-    // Digunakan untuk mendapatkan info ecommerce jika resi sudah ada
-    const dbResiInfoMap = new Map<string, { ecommerce: string, toko: string }>();
-    
-    // === MAP 2: Untuk cek duplikat exact (resi + customer + product) ===
-    // Key: resi||customer||product - Value: {id, isReady}
-    // Ini untuk mencegah insert item yang BENAR-BENAR sama
-    const dbItemMap = new Map<string, { id: number, ecommerce: string, toko: string, isReady: boolean }>();
+    // Buat map untuk lookup cepat (UPPERCASE untuk case-insensitive)
+    // Map by RESI dan juga by ORDER_ID untuk matching Shopee International
+    const dbResiMap = new Map<string, { id: number, ecommerce: string, toko: string, isReady: boolean }>();
+    const allToMatchUpper = new Set(allToMatch.map(r => r.trim().toUpperCase()));
     
     (allExistingInDB || []).forEach((row: any) => {
       const resiUpper = String(row.resi || '').trim().toUpperCase();
       const orderIdUpper = String(row.order_id || '').trim().toUpperCase();
-      const customerUpper = String(row.customer || '').trim().toUpperCase();
-      const productUpper = String(row.nama_produk || row.part_number || '').trim().toUpperCase();
       
       // Cek apakah sudah "Ready" - memiliki part_number dan customer yang valid
       const hasPartNumber = row.part_number && row.part_number.trim() !== '';
@@ -1012,69 +973,30 @@ export const saveCSVToResiItems = async (
         isReady: isReady
       };
       
-      // Simpan info ecommerce/toko by resi (untuk inherit ecommerce)
-      if (resiUpper) {
-        dbResiInfoMap.set(resiUpper, { ecommerce: row.ecommerce, toko: row.toko });
+      // Simpan ke map jika resi atau order_id ada di list yang kita cari
+      if (resiUpper && allToMatchUpper.has(resiUpper)) {
+        dbResiMap.set(resiUpper, rowData);
       }
-      if (orderIdUpper) {
-        dbResiInfoMap.set(orderIdUpper, { ecommerce: row.ecommerce, toko: row.toko });
-      }
-      
-      // Simpan item dengan key: resi||customer||product untuk cek duplikat exact
-      const itemKey = `${resiUpper}||${customerUpper}||${productUpper}`;
-      dbItemMap.set(itemKey, rowData);
-      
-      // Juga simpan dengan order_id jika ada
-      if (orderIdUpper) {
-        const itemKeyByOrder = `${orderIdUpper}||${customerUpper}||${productUpper}`;
-        dbItemMap.set(itemKeyByOrder, rowData);
+      if (orderIdUpper && allToMatchUpper.has(orderIdUpper)) {
+        dbResiMap.set(orderIdUpper, rowData);
       }
     });
     
-    console.log(`[saveCSVToResiItems] Loaded ${dbItemMap.size} items from resi_items database, checking against ${allToMatch.length} valid CSV items`);
+    console.log(`[saveCSVToResiItems] Found ${dbResiMap.size} existing resi/order_id in resi_items from ${allToMatch.length} valid CSV items`);
 
     let updatedCount = 0;
     let insertedCount = 0;
     let skippedReadyCount = 0;
-    let skippedDuplicateInCsv = 0;
-    
-    // === TRACKING ITEM YANG SUDAH DIPROSES DALAM SESI INI ===
-    // Key: resi||customer||product_name (atau part_number)
-    // Untuk menghindari insert duplikat EXACT SAME ITEM (resi + customer + barang sama)
-    // 1 resi BOLEH punya multiple barang berbeda
-    const processedInThisSession = new Set<string>();
 
     // === LANGKAH 2: Proses setiap item - UPDATE jika sudah ada, INSERT jika baru ===
     for (const item of validItems) {
       const resiUpper = (item.resi || '').trim().toUpperCase();
       const orderIdUpper = (item.order_id || '').trim().toUpperCase();
-      const customerUpper = (item.customer || '').trim().toUpperCase();
-      const productKey = (item.product_name || item.part_number || '').trim().toUpperCase();
       
-      // === CEK DUPLIKAT DALAM SESI INI ===
-      // Duplikat = resi + customer + product SEMUA sama
-      // 1 resi dengan barang berbeda = BUKAN duplikat, harus masuk
-      const dedupeKey = `${resiUpper}||${customerUpper}||${productKey}`;
-      if (processedInThisSession.has(dedupeKey)) {
-        console.log(`[saveCSVToResiItems] ⏭️ Skip - exact duplicate in CSV: ${dedupeKey}`);
-        skippedDuplicateInCsv++;
-        continue;
-      }
-      
-      // === CEK APAKAH ITEM EXACT INI SUDAH ADA DI DATABASE ===
-      // Gunakan dedupeKey (resi+customer+product) untuk cek duplikat exact
-      let existingInDB = dbItemMap.get(dedupeKey);
-      // Juga coba dengan order_id jika tidak ketemu
+      // Coba cari dengan resi, kalau tidak ada coba dengan order_id
+      let existingInDB = dbResiMap.get(resiUpper);
       if (!existingInDB && orderIdUpper) {
-        const orderDedupeKey = `${orderIdUpper}||${customerUpper}||${productKey}`;
-        existingInDB = dbItemMap.get(orderDedupeKey);
-      }
-      
-      // === AMBIL INFO ECOMMERCE/TOKO DARI RESI YANG SUDAH ADA ===
-      // (untuk inherit ecommerce dari item pertama dengan resi yang sama)
-      let resiInfo = dbResiInfoMap.get(resiUpper);
-      if (!resiInfo && orderIdUpper) {
-        resiInfo = dbResiInfoMap.get(orderIdUpper);
+        existingInDB = dbResiMap.get(orderIdUpper);
       }
       
       // Cek juga di existingResiMap (dari UI) untuk mendapatkan ecommerce/toko dari scan
@@ -1083,10 +1005,10 @@ export const saveCSVToResiItems = async (
         scanData = existingResiMap?.get(orderIdUpper);
       }
       
-      console.log(`[saveCSVToResiItems] Processing resi: ${item.resi}, product: ${productKey.substring(0, 30)}..., existingInDB: ${existingInDB ? 'YES (id=' + existingInDB.id + ', isReady=' + existingInDB.isReady + ')' : 'NO'}, resiInfo: ${resiInfo ? 'YES' : 'NO'}`);
+      console.log(`[saveCSVToResiItems] Processing resi: ${item.resi}, order_id: ${item.order_id}, existingInDB: ${existingInDB ? 'YES (id=' + existingInDB.id + ', isReady=' + existingInDB.isReady + ')' : 'NO'}, scanData: ${scanData ? 'YES' : 'NO'}`);
       
       if (existingInDB) {
-        // === ITEM EXACT INI SUDAH ADA DI DATABASE ===
+        // === RESI SUDAH ADA DI DATABASE ===
         
         // SKIP jika sudah Ready (sudah memiliki data lengkap)
         if (existingInDB.isReady) {
@@ -1136,8 +1058,6 @@ export const saveCSVToResiItems = async (
         
         if (!updateErr) {
           updatedCount++;
-          // Tandai item sudah diproses (resi+customer+product) agar tidak diproses lagi dalam sesi ini
-          processedInThisSession.add(dedupeKey);
           // Tambahkan ke list updated items
           updatedItemsList.push({
             resi: item.resi,
@@ -1151,8 +1071,8 @@ export const saveCSVToResiItems = async (
           console.error(`[saveCSVToResiItems] ❌ Failed to update resi ${item.resi}:`, updateErr);
         }
       } else {
-        // === ITEM BELUM ADA DI DATABASE → INSERT BARU ===
-        // Gunakan ecommerce/toko dari scan, atau dari resiInfo (resi yang sama tapi produk lain), atau dari CSV
+        // === RESI BELUM ADA DI DATABASE → INSERT BARU ===
+        // Gunakan ecommerce/toko dari scan (jika ada) atau dari CSV
         let ecommerce = item.ecommerce;
         let toko = (item as any).sub_toko || store?.toUpperCase();
         
@@ -1161,21 +1081,14 @@ export const saveCSVToResiItems = async (
                                 ecommerce.includes('SAMEDAY') || 
                                 ecommerce.includes('KILAT');
         
-        // Prioritas: 1) scanData (dari scan UI), 2) resiInfo (dari item lain dengan resi sama di DB)
         if (scanData) {
           // Ada data dari scan
+          // PENTING: Jika ecommerce CSV punya label khusus, PERTAHANKAN
+          // Hanya ambil toko dari scan, tapi label ecommerce tetap dari CSV
           if (!hasSpecialLabel) {
             ecommerce = scanData.ecommerce;
           }
           toko = scanData.toko;
-        } else if (resiInfo) {
-          // Ada resi yang sama di DB (produk lain), inherit ecommerce/toko
-          if (!hasSpecialLabel && resiInfo.ecommerce) {
-            ecommerce = resiInfo.ecommerce;
-          }
-          if (resiInfo.toko) {
-            toko = resiInfo.toko;
-          }
         }
         
         const insertPayload = {
@@ -1200,8 +1113,6 @@ export const saveCSVToResiItems = async (
         
         if (!insertErr) {
           insertedCount++;
-          // Tandai item sudah diproses (resi+customer+product) agar tidak diproses lagi dalam sesi ini
-          processedInThisSession.add(dedupeKey);
           console.log(`[saveCSVToResiItems] Inserted new resi: ${item.resi}`);
         } else {
           console.error(`[saveCSVToResiItems] Failed to insert resi ${item.resi}:`, insertErr);
@@ -1217,17 +1128,13 @@ export const saveCSVToResiItems = async (
       ? `, ${skippedReadyCount} resi di-skip (sudah Ready)`
       : '';
     
-    const duplicateCsvMsg = skippedDuplicateInCsv > 0
-      ? `, ${skippedDuplicateInCsv} baris duplikat dalam CSV`
-      : '';
-    
     const updateMsg = updatedCount > 0 ? `, ${updatedCount} resi di-update` : '';
 
     return { 
       success: true, 
-      message: `Data CSV berhasil disimpan ke database${updateMsg}${readyMsg}${duplicateCsvMsg}${skippedMsg}`, 
+      message: `Data CSV berhasil disimpan ke database${updateMsg}${readyMsg}${skippedMsg}`, 
       count: insertedCount,
-      skippedCount: skippedItems.length + skippedReadyCount + skippedDuplicateInCsv,
+      skippedCount: skippedItems.length + skippedReadyCount,
       skippedResis,
       updatedCount,
       skippedItems: skippedItemsDetail,

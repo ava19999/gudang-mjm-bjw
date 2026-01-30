@@ -255,13 +255,6 @@ export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh, refre
       setResiInput('');
       await loadResiList();
       if (onRefresh) onRefresh();
-      // Scroll/focus ke input resi agar siap scan berikutnya
-      setTimeout(() => {
-        if (resiInputRef.current) {
-          resiInputRef.current.focus();
-          resiInputRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }
-      }, 100);
     } else {
       showToast(result.message, 'error');
       setResiInput(''); // KOSONGKAN INPUT JIKA DOUBLE/ERROR
@@ -273,15 +266,17 @@ export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh, refre
       } catch (e) {
         console.error('Audio error:', e);
       }
-      // Tetap fokus ke input jika error
-      setTimeout(() => {
-        if (resiInputRef.current) {
-          resiInputRef.current.focus();
-          resiInputRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }
-      }, 100);
     }
+    
     setLoading(false);
+    
+    // Selalu fokus kembali ke input resi setelah scan (sukses atau gagal)
+    // Menggunakan setTimeout untuk memastikan state sudah update
+    setTimeout(() => {
+      if (resiInputRef.current) {
+        resiInputRef.current.focus();
+      }
+    }, 50);
   };
   
   const handleDeleteResi = async (resiId: string, isStage2: boolean = false, isStage3: boolean = false) => {
@@ -589,9 +584,11 @@ export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh, refre
   };
   
   return (
-    <div className="min-h-screen bg-gray-900 text-gray-100 p-4 md:p-6">
+    <div className="h-screen bg-gray-900 text-gray-100 flex flex-col overflow-hidden">
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
       
+      {/* Sticky Header Section */}
+      <div className="flex-shrink-0 p-4 md:p-6 pb-0">
       {/* Header */}
       <div className="mb-6">
         <div className="flex items-center justify-between mb-2">
@@ -726,9 +723,9 @@ export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh, refre
         </form>
       </div>
       
-      {/* Resi List */}
-      <div className="bg-gray-800 rounded-xl shadow-lg border border-gray-700">
-        <div className="p-6 border-b border-gray-700">
+      {/* Resi List Header with Search - Sticky */}
+      <div className="bg-gray-800 rounded-t-xl shadow-lg border border-gray-700 border-b-0">
+        <div className="p-4 md:p-6">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-semibold">Daftar Resi Stage 1</h2>
             <div className="text-sm text-gray-400">
@@ -736,7 +733,7 @@ export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh, refre
             </div>
           </div>
           {/* Filter Bar */}
-          <div className="flex flex-col md:flex-row gap-2 mb-2">
+          <div className="flex flex-col md:flex-row gap-2">
             <input
               type="text"
               value={searchTerm}
@@ -774,6 +771,12 @@ export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh, refre
             </div>
           </div>
         </div>
+      </div>
+      </div>
+      
+      {/* Scrollable Resi List */}
+      <div className="flex-1 overflow-auto px-4 md:px-6 pb-4 md:pb-6">
+      <div className="bg-gray-800 rounded-b-xl shadow-lg border border-gray-700 border-t-0">
         
         {/* Table */}
         <div className="overflow-x-auto">
@@ -864,6 +867,7 @@ export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh, refre
             </tbody>
           </table>
         </div>
+      </div>
       </div>
       
       {/* Reseller Form Modal */}
