@@ -1171,6 +1171,105 @@ export const deleteBarangLog = async (
     }
 };
 
+// INSERT BARANG KELUAR - untuk undo delete / manual insert
+interface InsertBarangKeluarPayload {
+  kode_toko?: string;
+  tempo?: string;
+  ecommerce?: string;
+  customer?: string;
+  part_number: string;
+  name?: string;
+  brand?: string;
+  application?: string;
+  qty_keluar: number;
+  harga_total?: number;
+  resi?: string;
+  tanggal?: string;
+}
+
+export const insertBarangKeluar = async (
+  payload: InsertBarangKeluarPayload,
+  store: string | null
+): Promise<{ success: boolean; msg: string; data?: any }> => {
+  const outTable = getLogTableName('barang_keluar', store);
+  const stockTable = getTableName(store);
+
+  try {
+    // 1. Get current stock to calculate stock_ahir and get item details
+    const { data: stockItem, error: stockError } = await supabase
+      .from(stockTable)
+      .select('*')
+      .eq('part_number', payload.part_number)
+      .single();
+
+    if (stockError || !stockItem) {
+      return { success: false, msg: 'Barang tidak ditemukan di database.' };
+    }
+
+    // 2. Check stock availability
+    if (stockItem.quantity < payload.qty_keluar) {
+      return { success: false, msg: `Stok tidak cukup! (Sisa: ${stockItem.quantity})` };
+    }
+
+    // 3. Calculate new stock
+    const newQty = stockItem.quantity - payload.qty_keluar;
+
+    // 4. Update stock in base table
+    const { error: updateError } = await supabase
+      .from(stockTable)
+      .update({ quantity: newQty })
+      .eq('part_number', payload.part_number);
+
+    if (updateError) {
+      return { success: false, msg: 'Gagal mengupdate stok: ' + updateError.message };
+    }
+
+    // 5. Calculate harga_satuan if not provided
+    const hargaTotal = payload.harga_total || 0;
+    const hargaSatuan = payload.qty_keluar > 0 ? Math.round(hargaTotal / payload.qty_keluar) : 0;
+
+    // 6. Insert into barang_keluar log
+    const logPayload = {
+      kode_toko: payload.kode_toko || '-',
+      tempo: payload.tempo || 'CASH',
+      ecommerce: payload.ecommerce || 'OFFLINE',
+      customer: payload.customer || '-',
+      part_number: payload.part_number,
+      name: payload.name || stockItem.name || '',
+      brand: payload.brand || stockItem.brand || '',
+      application: payload.application || stockItem.application || '',
+      rak: stockItem.shelf || '',
+      stock_ahir: newQty,
+      qty_keluar: payload.qty_keluar,
+      harga_satuan: hargaSatuan,
+      harga_total: hargaTotal,
+      resi: payload.resi || '-',
+      created_at: payload.tanggal || getWIBDate().toISOString()
+    };
+
+    const { data: insertedData, error: insertError } = await supabase
+      .from(outTable)
+      .insert([logPayload])
+      .select()
+      .single();
+
+    if (insertError) {
+      // Rollback stock update on insert failure
+      await supabase
+        .from(stockTable)
+        .update({ quantity: stockItem.quantity })
+        .eq('part_number', payload.part_number);
+      
+      return { success: false, msg: 'Gagal menyimpan log: ' + insertError.message };
+    }
+
+    return { success: true, msg: 'Barang keluar berhasil dicatat.', data: insertedData };
+  } catch (e: any) {
+    console.error('insertBarangKeluar Error:', e);
+    return { success: false, msg: 'Error: ' + (e.message || 'Unknown error') };
+  }
+};
+
 export const fetchHistory = async () => [];
 export const fetchItemHistory = async () => [];
 
