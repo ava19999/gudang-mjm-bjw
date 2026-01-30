@@ -81,7 +81,7 @@ export const InventoryList: React.FC<InventoryListProps> = ({
                 )}
                 
                 <div className="absolute top-2 left-2 flex flex-col gap-1 pointer-events-none">
-                  <span className={`px-2 py-0.5 rounded-md text-[9px] font-bold shadow-sm border ${item.quantity === 0 ? 'bg-red-600 text-white border-red-700' : item.quantity < 4 ? 'bg-yellow-400 text-black border-yellow-500' : 'bg-gray-900/90 text-white backdrop-blur border-gray-700'}`}>
+                  <span className={`px-3 py-1 rounded-md text-sm font-bold shadow-lg border ${item.quantity === 0 ? 'bg-red-600 text-white border-red-700' : item.quantity < 4 ? 'bg-yellow-400 text-black border-yellow-500' : 'bg-gray-900/90 text-white backdrop-blur border-gray-700'}`}>
                     {item.quantity === 0 ? 'HABIS' : `${item.quantity} Unit`}
                   </span>
                 </div>
@@ -98,7 +98,7 @@ export const InventoryList: React.FC<InventoryListProps> = ({
 
               <div className="p-3 flex-1 flex flex-col">
                 <div className="mb-2">
-                  <div className="flex justify-between items-start mb-1"><span className="text-xs font-bold text-white bg-black px-1.5 py-0.5 rounded border border-black">{item.partNumber}</span><span className="text-[9px] font-bold text-gray-500 flex items-center gap-0.5"><MapPin size={8}/> {item.shelf}</span></div>
+                  <div className="flex justify-between items-start mb-1"><span className="text-xs font-bold text-white bg-black px-1.5 py-0.5 rounded border border-black">{item.partNumber}</span>{item.shelf && <span className="text-sm font-bold text-amber-400 flex items-center gap-1 bg-gray-900/80 px-2 py-0.5 rounded border border-amber-500/30"><MapPin size={12}/> {item.shelf}</span>}</div>
                   <h3 className="font-bold text-gray-200 text-xs leading-snug line-clamp-2 min-h-[2.5em]">{item.name}</h3>
                   <div className="flex flex-wrap gap-1 mt-1.5 mb-2">{item.brand && <span className="text-[9px] px-1.5 py-0.5 bg-gray-700 text-gray-300 rounded font-medium border border-gray-600">{item.brand}</span>}{item.application && <span className="text-[9px] px-1.5 py-0.5 bg-blue-900/30 text-blue-300 rounded font-medium border border-blue-900/50">{item.application}</span>}</div>
                 </div>
@@ -124,7 +124,7 @@ export const InventoryList: React.FC<InventoryListProps> = ({
               </div>
               
               <div className="flex-1 min-w-0" onClick={() => onShowHistory(item)}>
-                  <div className="flex items-center gap-2 mb-0.5"><span className="text-xs font-bold text-white bg-black px-1.5 py-0.5 rounded border border-black">{item.partNumber}</span><span className={`text-[9px] font-bold px-1.5 rounded ${item.quantity === 0 ? 'bg-red-900/40 text-red-400 border border-red-900/50' : item.quantity < 4 ? 'bg-yellow-400 text-black border-yellow-500' : 'bg-green-900/30 text-green-400 border border-green-900/50'}`}>{item.quantity} Unit</span></div><h3 className="font-bold text-sm text-gray-200 truncate">{item.name}</h3><div className="flex flex-wrap items-center gap-2 mt-1 text-[10px] text-gray-400">{item.brand && <span className="bg-gray-700 text-gray-300 px-1.5 py-0.5 rounded border border-gray-600 font-medium">{item.brand}</span>}{item.application && <span className="bg-blue-900/30 text-blue-300 px-1.5 py-0.5 rounded border border-blue-900/50 font-medium">{item.application}</span>}<span className="flex items-center gap-1 ml-1"><MapPin size={10}/> Rak: <b>{item.shelf || '-'}</b></span></div>
+                  <div className="flex items-center gap-2 mb-0.5"><span className="text-xs font-bold text-white bg-black px-1.5 py-0.5 rounded border border-black">{item.partNumber}</span><span className={`text-sm font-bold px-2 py-0.5 rounded ${item.quantity === 0 ? 'bg-red-900/40 text-red-400 border border-red-900/50' : item.quantity < 4 ? 'bg-yellow-400 text-black border-yellow-500' : 'bg-green-900/30 text-green-400 border border-green-900/50'}`}>{item.quantity} Unit</span></div><h3 className="font-bold text-sm text-gray-200 truncate">{item.name}</h3><div className="flex flex-wrap items-center gap-2 mt-1 text-xs text-gray-400">{item.brand && <span className="bg-gray-700 text-gray-300 px-1.5 py-0.5 rounded border border-gray-600 font-medium">{item.brand}</span>}{item.application && <span className="bg-blue-900/30 text-blue-300 px-1.5 py-0.5 rounded border border-blue-900/50 font-medium">{item.application}</span>}{item.shelf && <span className="flex items-center gap-1 ml-1 text-amber-400 font-bold"><MapPin size={14}/> Rak: {item.shelf}</span>}</div>
               </div>
               
               <div className="flex flex-col items-end gap-2 pl-2">
