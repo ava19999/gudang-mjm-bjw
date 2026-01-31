@@ -8,6 +8,7 @@ export type ActiveView =
   | 'petty_cash' 
   | 'barang_kosong' 
   | 'closing' 
+  | 'piutang_customer'
   | 'data_agung'
   | 'foto_produk'
   | 'scan_resi_stage1'

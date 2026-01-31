@@ -1,6 +1,6 @@
 // FILE: src/components/finance/FinanceMenu.tsx
 import React, { useState } from 'react';
-import { Wallet, PackageX, ChevronDown, ChevronUp, Calendar } from 'lucide-react';
+import { Wallet, PackageX, ChevronDown, ChevronUp, Calendar, CreditCard } from 'lucide-react';
 import { ActiveView } from '../../types/ui';
 
 interface FinanceMenuProps {
@@ -23,7 +23,7 @@ export const FinanceMenu: React.FC<FinanceMenuProps> = ({
   // Use external state for mobile, internal for desktop
   const isOpen = isMobile && externalIsOpen !== undefined ? externalIsOpen : internalIsOpen;
   
-  const isFinanceActive = activeView === 'petty_cash' || activeView === 'barang_kosong' || activeView === 'closing';
+  const isFinanceActive = activeView === 'petty_cash' || activeView === 'barang_kosong' || activeView === 'closing' || activeView === 'piutang_customer';
 
   const handleMainClick = (e: React.MouseEvent) => {
     if (isMobile && onToggle) {
@@ -89,6 +89,19 @@ export const FinanceMenu: React.FC<FinanceMenuProps> = ({
                 <Calendar size={16} />
               </div>
               <span className="text-sm font-medium">Closing</span>
+            </button>
+            <button
+              onClick={() => {
+                setActiveView('piutang_customer');
+              }}
+              className={`w-full px-3 py-2.5 text-left hover:bg-gray-700/80 transition-all duration-150 flex items-center gap-2.5 border-t border-gray-700/50 active:scale-[0.98] ${
+                activeView === 'piutang_customer' ? 'bg-gradient-to-r from-red-900/30 to-transparent text-red-400 shadow-inner' : 'text-gray-300'
+              }`}
+            >
+              <div className={`p-1 rounded-lg ${activeView === 'piutang_customer' ? 'bg-red-900/40' : 'bg-gray-700/50'}`}>
+                <CreditCard size={16} />
+              </div>
+              <span className="text-sm font-medium">Piutang (Tempo)</span>
             </button>
           </div>
         )}
@@ -164,6 +177,18 @@ export const FinanceMenu: React.FC<FinanceMenuProps> = ({
           >
             <Calendar size={16} />
             <span className="text-sm font-medium">Closing</span>
+          </button>
+          <button
+            onClick={() => {
+              setActiveView('piutang_customer');
+              setInternalIsOpen(false);
+            }}
+            className={`w-full px-4 py-3 text-left hover:bg-gray-700 transition-colors flex items-center gap-2 border-t border-gray-700 ${
+              activeView === 'piutang_customer' ? 'bg-gray-700 text-red-400' : 'text-gray-300'
+            }`}
+          >
+            <CreditCard size={16} />
+            <span className="text-sm font-medium">Piutang (Tempo)</span>
           </button>
         </div>
       )}

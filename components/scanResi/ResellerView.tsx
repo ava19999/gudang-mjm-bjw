@@ -45,6 +45,10 @@ export const ResellerView: React.FC<ResellerViewProps> = ({ onRefresh, refreshTr
   // Store filter for combined data
   const [storeFilter, setStoreFilter] = useState<'all' | 'mjm' | 'bjw'>('all');
   
+  // Main page date filter
+  const [mainDateFrom, setMainDateFrom] = useState<string>('');
+  const [mainDateTo, setMainDateTo] = useState<string>('');
+  
   // Search query for filtering reseller names
   const [searchQuery, setSearchQuery] = useState<string>('');
   
@@ -113,17 +117,26 @@ export const ResellerView: React.FC<ResellerViewProps> = ({ onRefresh, refreshTr
     }
   };
 
-  // Fetch Stats per Reseller - supports 'all', 'mjm', or 'bjw'
+  // Fetch Stats per Reseller - supports 'all', 'mjm', or 'bjw' with date filter
   const fetchStats = async () => {
     try {
       const statsMap: Record<string, ResellerStats> = {};
       
       const fetchFromTable = async (table: string) => {
-        const { data, error } = await supabase
+        let query = supabase
           .from(table)
-          .select('kode_toko, qty_keluar, harga_total')
+          .select('kode_toko, qty_keluar, harga_total, created_at')
           .eq('ecommerce', 'RESELLER');
         
+        // Apply date filters
+        if (mainDateFrom) {
+          query = query.gte('created_at', `${mainDateFrom}T00:00:00`);
+        }
+        if (mainDateTo) {
+          query = query.lte('created_at', `${mainDateTo}T23:59:59`);
+        }
+        
+        const { data, error } = await query;
         if (error) throw error;
         return data || [];
       };
@@ -172,12 +185,12 @@ export const ResellerView: React.FC<ResellerViewProps> = ({ onRefresh, refreshTr
       .finally(() => setLoading(false));
   }, [selectedStore, refreshTrigger]);
 
-  // Refetch when reseller filter or store filter changes
+  // Refetch when reseller filter, store filter, or date filter changes
   useEffect(() => {
     setLoading(true);
     Promise.all([fetchTransactions(), fetchStats()])
       .finally(() => setLoading(false));
-  }, [selectedReseller, storeFilter]);
+  }, [selectedReseller, storeFilter, mainDateFrom, mainDateTo]);
 
   // Toast helper
   const showToast = (message: string, type: 'success' | 'error') => {
@@ -476,6 +489,46 @@ export const ResellerView: React.FC<ResellerViewProps> = ({ onRefresh, refreshTr
               BJW
             </button>
           </div>
+        </div>
+
+        {/* Date Range Filter */}
+        <div className="flex flex-wrap items-center gap-3 mb-4">
+          <span className="text-sm text-gray-400">Periode:</span>
+          <div className="flex items-center gap-2">
+            <div className="relative">
+              <Calendar className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-500" size={16} />
+              <input
+                type="date"
+                value={mainDateFrom}
+                onChange={(e) => setMainDateFrom(e.target.value)}
+                className="bg-gray-800 border border-gray-700 rounded-lg pl-9 pr-3 py-2 text-sm text-white focus:border-pink-500 outline-none w-40"
+              />
+            </div>
+            <span className="text-gray-500">-</span>
+            <div className="relative">
+              <Calendar className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-500" size={16} />
+              <input
+                type="date"
+                value={mainDateTo}
+                onChange={(e) => setMainDateTo(e.target.value)}
+                className="bg-gray-800 border border-gray-700 rounded-lg pl-9 pr-3 py-2 text-sm text-white focus:border-pink-500 outline-none w-40"
+              />
+            </div>
+            {(mainDateFrom || mainDateTo) && (
+              <button
+                onClick={() => { setMainDateFrom(''); setMainDateTo(''); }}
+                className="px-3 py-2 text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-lg flex items-center gap-1"
+              >
+                <X size={14} />
+                Reset
+              </button>
+            )}
+          </div>
+          {(mainDateFrom || mainDateTo) && (
+            <span className="text-xs text-pink-400">
+              (Filter aktif)
+            </span>
+          )}
         </div>
 
         {/* Search Bar */}

@@ -8,17 +8,17 @@ import { Dashboard } from './components/Dashboard';
 import { ItemForm } from './components/ItemForm';
 import { ShopView } from './components/ShopView';
 import { OrderManagement } from './components/OrderManagement';
+import { CustomerOrderView } from './components/CustomerOrderView';
 import { QuickInputView } from './components/QuickInputView';
 import { PettyCashView } from './components/finance/PettyCashView';
 import { BarangKosongView } from './components/finance/BarangKosongView';
 import { ClosingView } from './components/finance/ClosingView';
+import { PiutangCustomerView } from './components/finance/PiutangCustomerView';
 import { DataAgungView } from './components/online/DataAgungView';
-import { FotoProdukView } from './components/online/FotoProdukView';
 import { ScanResiStage1 } from './components/scanResi/ScanResiStage1';
 import { ScanResiStage2 } from './components/scanResi/ScanResiStage2';
 import { ScanResiStage3 } from './components/scanResi/ScanResiStage3';
 import { RiwayatScanResi } from './components/scanResi/RiwayatScanResi';
-import { ResellerView } from './components/scanResi/ResellerView';
 
 // --- NEW SPLIT COMPONENTS ---
 import { Toast } from './components/common/Toast';
@@ -33,7 +33,7 @@ import { ActiveView } from './types/ui';
 import { StoreProvider, useStore } from './context/StoreContext';
 
 // --- TYPES & SERVICES ---
-import { InventoryItem, InventoryFormData, CartItem, StockHistory } from './types';
+import { InventoryItem, InventoryFormData, CartItem, Order, StockHistory, OrderStatus } from './types';
 import { 
   fetchInventory, addInventory, updateInventory, deleteInventory, getItemByPartNumber, 
   fetchHistory, addBarangMasuk, addBarangKeluar,
@@ -92,7 +92,7 @@ const AppContent: React.FC = () => {
         if (bannerItem) setBannerUrl(bannerItem.imageUrl);
         setItems(inventoryData.filter(i => i.partNumber !== BANNER_PART_NUMBER));
 
-        const historyData = await fetchHistory(selectedStore);
+        const historyData = await fetchHistory();
         setHistory(historyData);
         setRefreshTrigger(prev => prev + 1);
 
@@ -388,26 +388,24 @@ const AppContent: React.FC = () => {
           loginName={loginName} 
           onLogout={handleLogout}
           storeConfig={currentStoreConfig}
-          pendingOrdersCount={0}
-          myPendingOrdersCount={0}
         />
       )}
 
       <div className="flex-1 overflow-y-auto bg-gray-900">
-        {activeView === 'shop' && <ShopView items={items} cart={cart} isAdmin={isAdmin} isKingFano={isKingFano} bannerUrl={bannerUrl} onAddToCart={addToCart} onRemoveFromCart={(id) => setCart(prev => prev.filter(c => c.id !== id))} onUpdateCartItem={updateCartItem} onCheckout={doCheckout} onUpdateBanner={handleUpdateBanner} refreshTrigger={refreshTrigger} />}
+        {activeView === 'shop' && <ShopView items={items} cart={cart} isAdmin={isAdmin} isKingFano={isKingFano} bannerUrl={bannerUrl} onAddToCart={addToCart} onRemoveFromCart={(id) => setCart(prev => prev.filter(c => c.id !== id))} onUpdateCartItem={updateCartItem} onCheckout={doCheckout} onUpdateBanner={handleUpdateBanner} />}
         {activeView === 'inventory' && isAdmin && <Dashboard items={items} orders={[]} history={history} refreshTrigger={refreshTrigger} onViewOrders={() => setActiveView('orders')} onAddNew={() => { setEditItem(null); setIsEditing(true); }} onEdit={(item) => { setEditItem(item); setIsEditing(true); }} onDelete={handleDelete} canDelete={['Bryan', 'Ava'].some(name => name.toLowerCase() === userName.toLowerCase())} />}
         {activeView === 'quick_input' && isAdmin && <QuickInputView items={items} onRefresh={refreshData} showToast={showToast} />}
-        {activeView === 'petty_cash' && isAdmin && <PettyCashView refreshTrigger={refreshTrigger} />}
-        {activeView === 'barang_kosong' && isAdmin && <BarangKosongView refreshTrigger={refreshTrigger} />}
-        {activeView === 'closing' && isAdmin && <ClosingView refreshTrigger={refreshTrigger} />}
+        {activeView === 'petty_cash' && isAdmin && <PettyCashView />}
+        {activeView === 'barang_kosong' && isAdmin && <BarangKosongView />}
+        {activeView === 'closing' && isAdmin && <ClosingView />}
+        {activeView === 'piutang_customer' && isAdmin && <PiutangCustomerView />}
         {activeView === 'data_agung' && isAdmin && <DataAgungView items={items} onRefresh={refreshData} showToast={showToast} />}
-        {activeView === 'foto_produk' && isAdmin && <FotoProdukView />}
-        {activeView === 'scan_resi_stage1' && isAdmin && <ScanResiStage1 onRefresh={refreshData} refreshTrigger={refreshTrigger} />}
-        {activeView === 'scan_resi_stage2' && isAdmin && <ScanResiStage2 onRefresh={refreshData} refreshTrigger={refreshTrigger} />}
-        {activeView === 'scan_resi_stage3' && isAdmin && <ScanResiStage3 onRefresh={refreshData} refreshTrigger={refreshTrigger} />}
-        {activeView === 'scan_resi_reseller' && isAdmin && <ResellerView onRefresh={refreshData} refreshTrigger={refreshTrigger} />}
-        {activeView === 'scan_resi_history' && isAdmin && <RiwayatScanResi refreshTrigger={refreshTrigger} />}
-        {activeView === 'orders' && <OrderManagement refreshTrigger={refreshTrigger} />}
+        {activeView === 'scan_resi_stage1' && isAdmin && <ScanResiStage1 onRefresh={refreshData} />}
+        {activeView === 'scan_resi_stage2' && isAdmin && <ScanResiStage2 onRefresh={refreshData} />}
+        {activeView === 'scan_resi_stage3' && isAdmin && <ScanResiStage3 onRefresh={refreshData} />}
+        {activeView === 'scan_resi_history' && isAdmin && <RiwayatScanResi />}
+        {activeView === 'orders' && isAdmin && <OrderManagement />}
+        {activeView === 'orders' && !isAdmin && <CustomerOrderView orders={[]} />}
         
         {isEditing && isAdmin && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm animate-in fade-in">
