@@ -18,7 +18,13 @@ const SubTokoResellerDropdown = ({ value, onChange, suggestions }: { value: stri
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
-  const filtered = suggestions.filter(s => s.toLowerCase().includes(input.toLowerCase()) && s !== input);
+  // Filter: jika input kosong, tampilkan semua. Jika ada input, filter berdasarkan input
+  const filtered = suggestions.filter(s => {
+    if (!input.trim()) return true; // Tampilkan semua jika kosong
+    return s.toLowerCase().includes(input.toLowerCase()) && s.toLowerCase() !== input.toLowerCase();
+  });
+
+  console.log('SubTokoResellerDropdown - suggestions:', suggestions.length, 'filtered:', filtered.length, 'input:', input);
 
   return (
     <div className="relative" ref={ref}>
@@ -27,7 +33,7 @@ const SubTokoResellerDropdown = ({ value, onChange, suggestions }: { value: stri
         value={input}
         onChange={e => { setInput(e.target.value); onChange(e.target.value); setShow(true); }}
         onFocus={() => setShow(true)}
-        placeholder="Nama toko reseller (manual/dropdown)"
+        placeholder="Ketik atau pilih nama reseller..."
         className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
         autoComplete="off"
       />
@@ -44,6 +50,11 @@ const SubTokoResellerDropdown = ({ value, onChange, suggestions }: { value: stri
           ))}
         </div>
       )}
+      {show && filtered.length === 0 && suggestions.length === 0 && (
+        <div className="absolute z-20 mt-1 w-full bg-gray-800 border border-gray-600 rounded-lg shadow-lg p-3 text-gray-400 text-sm">
+          Tidak ada data reseller. Ketik nama baru.
+        </div>
+      )}
     </div>
   );
 };
@@ -57,6 +68,7 @@ import {
   updateResi, 
   getResiStage1List,
   getResellers,
+  getResellerNamesFromBarangKeluar,
   addReseller
 } from '../../services/resiScanService';
 import { 
@@ -125,10 +137,8 @@ export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh, refre
   // State untuk Reseller
   const [showResellerForm, setShowResellerForm] = useState(false);
   const [resellers, setResellers] = useState<any[]>([]);
-  // Untuk subToko suggestion dari data resi yang sudah pernah diinput
-  const resellerTokoList: string[] = Array.from(new Set(resiList.filter(r => r.ecommerce === 'RESELLER').map(r => r.sub_toko)))
-    .filter(Boolean)
-    .map(String);
+  // Daftar nama reseller dari barang_keluar (kode_toko where ecommerce = 'RESELLER')
+  const [resellerNamesList, setResellerNamesList] = useState<string[]>([]);
   const [newResellerName, setNewResellerName] = useState('');
   
   // State untuk Bulk Scan (Scan Masal)
@@ -136,6 +146,7 @@ export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh, refre
   const [bulkEcommerce, setBulkEcommerce] = useState<EcommercePlatform>('SHOPEE');
   const [bulkSubToko, setBulkSubToko] = useState<SubToko>(selectedStore === 'bjw' ? 'BJW' : 'MJM');
   const [bulkNegaraEkspor, setBulkNegaraEkspor] = useState<NegaraEkspor>('PH');
+  const [bulkResellerDari, setBulkResellerDari] = useState<string>(''); // Reseller dari MJM/BJW
   const [bulkResiList, setBulkResiList] = useState<Array<{ id: string; resi: string; isDuplicate: boolean }>>([
     { id: '1', resi: '', isDuplicate: false }
   ]);
@@ -164,6 +175,7 @@ export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh, refre
   useEffect(() => {
     loadResiList();
     loadResellers();
+    loadResellerNames();
   }, [selectedStore, refreshTrigger]);
 
   // Update subToko dan bulkSubToko ketika selectedStore berubah
@@ -226,6 +238,12 @@ export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh, refre
     setResellers(data);
   };
   
+  // Load nama reseller dari barang_keluar (kode_toko where ecommerce = 'RESELLER')
+  const loadResellerNames = async () => {
+    const names = await getResellerNamesFromBarangKeluar(selectedStore);
+    setResellerNamesList(names);
+  };
+  
   const handleScanResi = async (e: React.FormEvent) => {
     e.preventDefault();
     
@@ -245,7 +263,7 @@ export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh, refre
       negara_ekspor: ecommerce === 'EKSPOR' ? negaraEkspor : undefined,
       scanned_by: userName || 'Admin',
       tanggal: now,
-      reseller: selectedReseller || null,
+      resellerdari: ecommerce === 'RESELLER' ? (selectedReseller || null) : null, // Reseller dari MJM/BJW
     };
     
     const result = await scanResiStage1(payload, selectedStore);
@@ -481,7 +499,8 @@ export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh, refre
       ecommerce: bulkEcommerce === 'EKSPOR' ? `EKSPOR - ${bulkNegaraEkspor}` : bulkEcommerce,
       sub_toko: bulkSubToko,
       negara_ekspor: bulkEcommerce === 'EKSPOR' ? bulkNegaraEkspor : undefined,
-      scanned_by: userName || 'Admin'
+      scanned_by: userName || 'Admin',
+      resellerdari: bulkEcommerce === 'RESELLER' ? (bulkResellerDari || null) : null // Reseller dari MJM/BJW
     }));
 
     const result = await scanResiStage1Bulk(items, selectedStore);
@@ -645,14 +664,14 @@ export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh, refre
                 <option value="EKSPOR">Ekspor</option>
               </select>
             </div>
-            {/* Sub Toko: jika RESELLER, input manual + dropdown suggestion, jika bukan, dropdown biasa */}
+            {/* Sub Toko: jika RESELLER, input manual + dropdown suggestion untuk Nama Reseller */}
             <div>
-              <label className="block text-sm font-medium mb-2">Sub Toko</label>
+              <label className="block text-sm font-medium mb-2">{ecommerce === 'RESELLER' ? 'Nama Reseller' : 'Sub Toko'}</label>
               {ecommerce === 'RESELLER' ? (
                 <SubTokoResellerDropdown
                   value={subToko}
                   onChange={(v) => setSubToko(v as SubToko)}
-                  suggestions={resellerTokoList}
+                  suggestions={resellerNamesList}
                 />
               ) : (
                 <select
@@ -683,17 +702,19 @@ export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh, refre
                 </select>
               </div>
             )}
-            {/* Input reseller hanya jika ecommerce RESELLER */}
+            {/* RESELLER DARI: dropdown MJM/BJW - hanya jika ecommerce RESELLER */}
             {ecommerce === 'RESELLER' && (
               <div>
-                <label className="block text-sm font-medium mb-2">Reseller</label>
-                <input
-                  type="text"
+                <label className="block text-sm font-medium mb-2">Reseller Dari</label>
+                <select
                   value={selectedReseller}
                   onChange={e => setSelectedReseller(e.target.value)}
-                  placeholder="Nama reseller (opsional)"
                   className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                />
+                >
+                  <option value="">Pilih toko asal...</option>
+                  <option value="MJM">MJM</option>
+                  <option value="BJW">BJW</option>
+                </select>
               </div>
             )}
           </div>
@@ -960,12 +981,12 @@ export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh, refre
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium mb-1 text-gray-300">Sub Toko</label>
+                  <label className="block text-sm font-medium mb-1 text-gray-300">{bulkEcommerce === 'RESELLER' ? 'Nama Reseller' : 'Sub Toko'}</label>
                   {bulkEcommerce === 'RESELLER' ? (
                     <SubTokoResellerDropdown
                       value={bulkSubToko}
                       onChange={(v) => setBulkSubToko(v as SubToko)}
-                      suggestions={resellerTokoList}
+                      suggestions={resellerNamesList}
                     />
                   ) : (
                     <select
@@ -992,6 +1013,20 @@ export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh, refre
                       <option value="MY">Malaysia (MY)</option>
                       <option value="SG">Singapore (SG)</option>
                       <option value="HK">Hong Kong (HK)</option>
+                    </select>
+                  </div>
+                )}
+                {bulkEcommerce === 'RESELLER' && (
+                  <div>
+                    <label className="block text-sm font-medium mb-1 text-gray-300">Reseller Dari</label>
+                    <select
+                      value={bulkResellerDari}
+                      onChange={(e) => setBulkResellerDari(e.target.value)}
+                      className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent text-sm"
+                    >
+                      <option value="">Pilih toko asal...</option>
+                      <option value="MJM">MJM</option>
+                      <option value="BJW">BJW</option>
                     </select>
                   </div>
                 )}

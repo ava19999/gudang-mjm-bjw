@@ -160,6 +160,7 @@ export const scanResiStage1 = async (
       ecommerce: data.ecommerce,
       sub_toko: data.sub_toko,
       negara_ekspor: data.negara_ekspor || null,
+      resellerdari: data.resellerdari || null, // Reseller dari MJM/BJW
       // [UBAH] Gunakan getWIBDate()
       tanggal: getWIBDate().toISOString(),
       stage1_scanned: 'true', 
@@ -195,6 +196,7 @@ export const scanResiStage1Bulk = async (
     sub_toko: string;
     negara_ekspor?: string;
     scanned_by: string;
+    resellerdari?: string; // Reseller dari MJM/BJW
   }>,
   store: string | null
 ): Promise<{ success: boolean; message: string; count?: number; duplicates?: string[]; alreadySold?: string[] }> => {
@@ -247,6 +249,7 @@ export const scanResiStage1Bulk = async (
       ecommerce: item.ecommerce,
       sub_toko: item.sub_toko,
       negara_ekspor: item.negara_ekspor || null,
+      resellerdari: item.resellerdari || null, // Reseller dari MJM/BJW
       tanggal: getWIBDate().toISOString(),
       stage1_scanned: 'true',
       stage1_scanned_at: getWIBDate().toISOString(),
@@ -392,6 +395,57 @@ export const getResellers = async (): Promise<ResellerMaster[]> => {
     .order('nama_reseller', { ascending: true });
   if (error) return [];
   return data || [];
+};
+
+// Ambil daftar nama reseller (kode_toko) dari barang_keluar yang ecommerce = 'RESELLER'
+// Sekarang mengambil dari KEDUA tabel (barang_keluar_mjm dan barang_keluar_bjw)
+export const getResellerNamesFromBarangKeluar = async (store: string | null): Promise<string[]> => {
+  try {
+    console.log('=== getResellerNamesFromBarangKeluar ===');
+    console.log('Store:', store, '-> Fetching from BOTH tables');
+    
+    // Fetch dari kedua tabel
+    const [mjmResult, bjwResult] = await Promise.all([
+      supabase
+        .from('barang_keluar_mjm')
+        .select('kode_toko')
+        .ilike('ecommerce', '%RESELLER%')
+        .not('kode_toko', 'is', null),
+      supabase
+        .from('barang_keluar_bjw')
+        .select('kode_toko')
+        .ilike('ecommerce', '%RESELLER%')
+        .not('kode_toko', 'is', null)
+    ]);
+    
+    if (mjmResult.error) {
+      console.error('MJM Query error:', mjmResult.error);
+    }
+    if (bjwResult.error) {
+      console.error('BJW Query error:', bjwResult.error);
+    }
+    
+    const mjmData = mjmResult.data || [];
+    const bjwData = bjwResult.data || [];
+    
+    console.log('MJM reseller rows:', mjmData.length);
+    console.log('BJW reseller rows:', bjwData.length);
+    
+    // Combine dan get unique kode_toko values, filter empty, uppercase, dan sort
+    const allData = [...mjmData, ...bjwData];
+    const uniqueNames = Array.from(new Set(
+      allData
+        .map(r => (r.kode_toko || '').toString().trim().toUpperCase())
+        .filter(name => name.length > 0)
+    )).sort();
+    
+    console.log('Total unique reseller names:', uniqueNames.length, uniqueNames);
+    
+    return uniqueNames;
+  } catch (err) {
+    console.error('Error fetching reseller names from barang_keluar:', err);
+    return [];
+  }
 };
 
 export const addReseller = async (nama: string): Promise<{ success: boolean; message: string }> => {
@@ -935,7 +989,8 @@ export const saveCSVToResiItems = async (
         skippedCount: skippedItems.length + skippedNotScanned.length,
         skippedResis: [...skippedResis, ...skippedNotScannedResis],
         updatedCount: 0,
-        skippedItems: skippedItemsDetail
+        skippedItems: skippedItemsDetail,
+        updatedItems: []
       };
     }
 

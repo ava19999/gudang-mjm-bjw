@@ -258,6 +258,7 @@ export interface ResiScanStage {
   ecommerce: EcommercePlatform;
   sub_toko: SubToko;
   negara_ekspor?: NegaraEkspor;
+  resellerdari?: 'MJM' | 'BJW'; // Reseller dari toko mana (khusus ecommerce RESELLER)
   
   // Stage 1
   stage1_scanned: boolean;
