@@ -1,8 +1,8 @@
 // FILE: components/scanResi/ResellerView.tsx
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useStore } from '../../context/StoreContext';
 import { 
-  Users, ChevronLeft, ChevronRight, Loader2, X, Search, Calendar, FileText, Download
+  Users, ChevronLeft, ChevronRight, Loader2, X, Search, Calendar, FileText, AlertTriangle
 } from 'lucide-react';
 import { supabase } from '../../services/supabaseClient';
 import { formatCompactNumber } from '../../utils/dashboardHelpers';
@@ -40,7 +40,8 @@ export const ResellerView: React.FC<ResellerViewProps> = ({ onRefresh, refreshTr
   // State
   const [transactions, setTransactions] = useState<ResellerTransaction[]>([]);
   const [stats, setStats] = useState<ResellerStats[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   
   // Store filter for combined data
   const [storeFilter, setStoreFilter] = useState<'all' | 'mjm' | 'bjw'>('all');
@@ -79,22 +80,39 @@ export const ResellerView: React.FC<ResellerViewProps> = ({ onRefresh, refreshTr
     try {
       let allTransactions: ResellerTransaction[] = [];
       
-      const fetchFromTable = async (table: string, storeName: string) => {
-        let query = supabase
-          .from(table)
-          .select('*')
-          .eq('ecommerce', 'RESELLER')
-          .order('created_at', { ascending: false });
-        
-        if (selectedReseller) {
-          query = query.ilike('kode_toko', `%${selectedReseller}%`);
+      const fetchFromTable = async (table: string, storeName: string): Promise<ResellerTransaction[]> => {
+        try {
+          const { data, error } = await supabase
+            .from(table)
+            .select('id, created_at, customer, part_number, name, qty_keluar, harga_satuan, harga_total, resi, ecommerce, kode_toko')
+            .eq('ecommerce', 'RESELLER')
+            .order('created_at', { ascending: false })
+            .limit(500);
+          
+          if (error) {
+            console.error(`Error fetching from ${table}:`, error);
+            return [];
+          }
+          
+          // Add store indicator to each transaction with safe mapping
+          return (data || []).map(t => ({
+            id: t.id || '',
+            created_at: t.created_at || '',
+            customer: t.customer || '',
+            part_number: t.part_number || '',
+            name: t.name || '',
+            qty_keluar: t.qty_keluar || 0,
+            harga_satuan: t.harga_satuan || 0,
+            harga_total: t.harga_total || 0,
+            resi: t.resi || '',
+            ecommerce: t.ecommerce || '',
+            kode_toko: t.kode_toko || '',
+            source_store: storeName
+          }));
+        } catch (err) {
+          console.error(`Exception fetching from ${table}:`, err);
+          return [];
         }
-        
-        const { data, error } = await query.limit(500);
-        if (error) throw error;
-        
-        // Add store indicator to each transaction
-        return (data || []).map(t => ({ ...t, source_store: storeName }));
       };
       
       if (storeFilter === 'all') {
@@ -112,8 +130,9 @@ export const ResellerView: React.FC<ResellerViewProps> = ({ onRefresh, refreshTr
       }
       
       setTransactions(allTransactions);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Fetch transactions error:', err);
+      setError(err?.message || 'Gagal mengambil data transaksi');
     }
   };
 
@@ -122,23 +141,31 @@ export const ResellerView: React.FC<ResellerViewProps> = ({ onRefresh, refreshTr
     try {
       const statsMap: Record<string, ResellerStats> = {};
       
-      const fetchFromTable = async (table: string) => {
-        let query = supabase
-          .from(table)
-          .select('kode_toko, qty_keluar, harga_total, created_at')
-          .eq('ecommerce', 'RESELLER');
-        
-        // Apply date filters
-        if (mainDateFrom) {
-          query = query.gte('created_at', `${mainDateFrom}T00:00:00`);
+      const fetchFromTable = async (table: string): Promise<any[]> => {
+        try {
+          let query = supabase
+            .from(table)
+            .select('kode_toko, qty_keluar, harga_total, created_at')
+            .eq('ecommerce', 'RESELLER');
+          
+          // Apply date filters
+          if (mainDateFrom) {
+            query = query.gte('created_at', `${mainDateFrom}T00:00:00`);
+          }
+          if (mainDateTo) {
+            query = query.lte('created_at', `${mainDateTo}T23:59:59`);
+          }
+          
+          const { data, error } = await query;
+          if (error) {
+            console.error(`Error fetching stats from ${table}:`, error);
+            return [];
+          }
+          return data || [];
+        } catch (err) {
+          console.error(`Exception fetching stats from ${table}:`, err);
+          return [];
         }
-        if (mainDateTo) {
-          query = query.lte('created_at', `${mainDateTo}T23:59:59`);
-        }
-        
-        const { data, error } = await query;
-        if (error) throw error;
-        return data || [];
       };
       
       let allData: any[] = [];
@@ -157,7 +184,10 @@ export const ResellerView: React.FC<ResellerViewProps> = ({ onRefresh, refreshTr
       
       // Group by kode_toko (reseller name)
       allData.forEach(row => {
-        const resellerName = (row.kode_toko || 'Unknown').toUpperCase();
+        if (!row) return;
+        const resellerName = (row.kode_toko || 'Unknown').toUpperCase().trim();
+        if (!resellerName) return;
+        
         if (!statsMap[resellerName]) {
           statsMap[resellerName] = {
             nama_reseller: resellerName,
@@ -167,30 +197,34 @@ export const ResellerView: React.FC<ResellerViewProps> = ({ onRefresh, refreshTr
           };
         }
         statsMap[resellerName].total_transaksi++;
-        statsMap[resellerName].total_qty += row.qty_keluar || 0;
-        statsMap[resellerName].total_nilai += row.harga_total || 0;
+        statsMap[resellerName].total_qty += Number(row.qty_keluar) || 0;
+        statsMap[resellerName].total_nilai += Number(row.harga_total) || 0;
       });
       
       const statsArray = Object.values(statsMap).sort((a, b) => b.total_nilai - a.total_nilai);
       setStats(statsArray);
-    } catch (err) {
+      setError(null);
+    } catch (err: any) {
       console.error('Fetch stats error:', err);
+      setError(err?.message || 'Gagal mengambil statistik reseller');
     }
   };
 
   // Initial load
   useEffect(() => {
     setLoading(true);
+    setError(null);
     Promise.all([fetchTransactions(), fetchStats()])
       .finally(() => setLoading(false));
   }, [selectedStore, refreshTrigger]);
 
-  // Refetch when reseller filter, store filter, or date filter changes
+  // Refetch when store filter or date filter changes
   useEffect(() => {
     setLoading(true);
+    setError(null);
     Promise.all([fetchTransactions(), fetchStats()])
       .finally(() => setLoading(false));
-  }, [selectedReseller, storeFilter, mainDateFrom, mainDateTo]);
+  }, [storeFilter, mainDateFrom, mainDateTo]);
 
   // Toast helper
   const showToast = (message: string, type: 'success' | 'error') => {
@@ -206,9 +240,16 @@ export const ResellerView: React.FC<ResellerViewProps> = ({ onRefresh, refreshTr
     );
   }, [stats, searchQuery]);
 
-  // Filtered transactions for modal (with date range and resi search)
+  // Filtered transactions for modal (with date range, resi search, and selected reseller)
   const filteredTransactions = useMemo(() => {
     let filtered = transactions;
+    
+    // Filter by selected reseller (for modal)
+    if (selectedReseller) {
+      filtered = filtered.filter(t => 
+        (t.kode_toko || '').toUpperCase() === selectedReseller.toUpperCase()
+      );
+    }
     
     // Filter by date range
     if (dateFrom) {
@@ -232,7 +273,7 @@ export const ResellerView: React.FC<ResellerViewProps> = ({ onRefresh, refreshTr
     }
     
     return filtered;
-  }, [transactions, dateFrom, dateTo, resiSearch]);
+  }, [transactions, selectedReseller, dateFrom, dateTo, resiSearch]);
 
   // Paginated transactions (using filtered)
   const paginatedTransactions = useMemo(() => {
@@ -401,6 +442,7 @@ export const ResellerView: React.FC<ResellerViewProps> = ({ onRefresh, refreshTr
   // Reset filters when modal closes
   const handleCloseModal = () => {
     setShowHistoryModal(false);
+    setSelectedReseller('');
     setDateFrom('');
     setDateTo('');
     setResiSearch('');
@@ -558,6 +600,22 @@ export const ResellerView: React.FC<ResellerViewProps> = ({ onRefresh, refreshTr
           {loading ? (
             <div className="flex justify-center py-12">
               <Loader2 className="animate-spin text-pink-400" size={32} />
+            </div>
+          ) : error ? (
+            <div className="flex flex-col items-center justify-center py-12">
+              <div className="text-red-400 text-lg mb-2">⚠️ Terjadi Kesalahan</div>
+              <div className="text-gray-400 text-sm mb-4">{error}</div>
+              <button
+                onClick={() => {
+                  setLoading(true);
+                  setError(null);
+                  Promise.all([fetchTransactions(), fetchStats()])
+                    .finally(() => setLoading(false));
+                }}
+                className="px-4 py-2 bg-pink-600 hover:bg-pink-700 text-white rounded-lg text-sm"
+              >
+                Coba Lagi
+              </button>
             </div>
           ) : (
             <div className="p-4">

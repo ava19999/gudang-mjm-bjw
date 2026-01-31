@@ -14,11 +14,14 @@ import { PettyCashView } from './components/finance/PettyCashView';
 import { BarangKosongView } from './components/finance/BarangKosongView';
 import { ClosingView } from './components/finance/ClosingView';
 import { PiutangCustomerView } from './components/finance/PiutangCustomerView';
+import { TagihanTokoView } from './components/finance/TagihanTokoView';
+import { RekapBulananView } from './components/finance/RekapBulananView';
 import { DataAgungView } from './components/online/DataAgungView';
 import { ScanResiStage1 } from './components/scanResi/ScanResiStage1';
 import { ScanResiStage2 } from './components/scanResi/ScanResiStage2';
 import { ScanResiStage3 } from './components/scanResi/ScanResiStage3';
 import { RiwayatScanResi } from './components/scanResi/RiwayatScanResi';
+import { ResellerView } from './components/scanResi/ResellerView';
 
 // --- NEW SPLIT COMPONENTS ---
 import { Toast } from './components/common/Toast';
@@ -399,10 +402,13 @@ const AppContent: React.FC = () => {
         {activeView === 'barang_kosong' && isAdmin && <BarangKosongView />}
         {activeView === 'closing' && isAdmin && <ClosingView />}
         {activeView === 'piutang_customer' && isAdmin && <PiutangCustomerView />}
+        {activeView === 'tagihan_toko' && isAdmin && <TagihanTokoView />}
+        {activeView === 'rekap_bulanan' && isAdmin && <RekapBulananView />}
         {activeView === 'data_agung' && isAdmin && <DataAgungView items={items} onRefresh={refreshData} showToast={showToast} />}
         {activeView === 'scan_resi_stage1' && isAdmin && <ScanResiStage1 onRefresh={refreshData} />}
         {activeView === 'scan_resi_stage2' && isAdmin && <ScanResiStage2 onRefresh={refreshData} />}
         {activeView === 'scan_resi_stage3' && isAdmin && <ScanResiStage3 onRefresh={refreshData} />}
+        {activeView === 'scan_resi_reseller' && isAdmin && <ResellerView onRefresh={refreshData} refreshTrigger={refreshTrigger} />}
         {activeView === 'scan_resi_history' && isAdmin && <RiwayatScanResi />}
         {activeView === 'orders' && isAdmin && <OrderManagement />}
         {activeView === 'orders' && !isAdmin && <CustomerOrderView orders={[]} />}

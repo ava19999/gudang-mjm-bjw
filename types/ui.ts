@@ -9,6 +9,8 @@ export type ActiveView =
   | 'barang_kosong' 
   | 'closing' 
   | 'piutang_customer'
+  | 'tagihan_toko'
+  | 'rekap_bulanan'
   | 'data_agung'
   | 'foto_produk'
   | 'scan_resi_stage1'
