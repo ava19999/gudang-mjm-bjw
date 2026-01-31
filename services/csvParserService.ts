@@ -261,8 +261,18 @@ export const parseShopeeCSV = (text: string): ParsedCSVItem[] => {
     // Label ditaruh di kolom ecommerce
     // Prioritas: cek "kilat" dulu karena "kilat instan" mengandung kedua kata
     const isKilat = shippingOptionLower.includes('kilat');
-    const isSameday = shippingOptionLower.includes('same day') || shippingOptionLower.includes('sameday');
-    const isInstant = (shippingOptionLower.includes('instant') || shippingOptionLower.includes('instan')) && !isKilat;
+    
+    // ANTER AJA SAMEDAY dan PIXEL SAMEDAY dianggap INSTAN (bukan sameday biasa)
+    const isAnterAjaSameday = shippingOptionLower.includes('anter aja') && shippingOptionLower.includes('sameday');
+    const isPixelSameday = shippingOptionLower.includes('pixel') && shippingOptionLower.includes('sameday');
+    
+    // Sameday biasa (bukan Anter Aja atau Pixel)
+    const isSameday = (shippingOptionLower.includes('same day') || shippingOptionLower.includes('sameday')) 
+                      && !isAnterAjaSameday && !isPixelSameday;
+    
+    // Instant termasuk Anter Aja Sameday dan Pixel Sameday
+    const isInstant = ((shippingOptionLower.includes('instant') || shippingOptionLower.includes('instan')) && !isKilat)
+                      || isAnterAjaSameday || isPixelSameday;
     
     let ecommerceLabel = 'SHOPEE';
     if (isKilat) {
@@ -274,7 +284,7 @@ export const parseShopeeCSV = (text: string): ParsedCSVItem[] => {
       if (orderId) resi = orderId;
       ecommerceLabel = 'SHOPEE SAMEDAY';
     } else if (isInstant) {
-      // Instant - gunakan No. Pesanan
+      // Instant - gunakan No. Pesanan (termasuk Anter Aja Sameday, Pixel Sameday)
       if (orderId) resi = orderId;
       ecommerceLabel = 'SHOPEE INSTAN';
     }

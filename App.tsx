@@ -18,6 +18,7 @@ import { ScanResiStage1 } from './components/scanResi/ScanResiStage1';
 import { ScanResiStage2 } from './components/scanResi/ScanResiStage2';
 import { ScanResiStage3 } from './components/scanResi/ScanResiStage3';
 import { RiwayatScanResi } from './components/scanResi/RiwayatScanResi';
+import { ResellerView } from './components/scanResi/ResellerView';
 
 // --- NEW SPLIT COMPONENTS ---
 import { Toast } from './components/common/Toast';
@@ -404,6 +405,7 @@ const AppContent: React.FC = () => {
         {activeView === 'scan_resi_stage1' && isAdmin && <ScanResiStage1 onRefresh={refreshData} refreshTrigger={refreshTrigger} />}
         {activeView === 'scan_resi_stage2' && isAdmin && <ScanResiStage2 onRefresh={refreshData} refreshTrigger={refreshTrigger} />}
         {activeView === 'scan_resi_stage3' && isAdmin && <ScanResiStage3 onRefresh={refreshData} refreshTrigger={refreshTrigger} />}
+        {activeView === 'scan_resi_reseller' && isAdmin && <ResellerView onRefresh={refreshData} refreshTrigger={refreshTrigger} />}
         {activeView === 'scan_resi_history' && isAdmin && <RiwayatScanResi refreshTrigger={refreshTrigger} />}
         {activeView === 'orders' && <OrderManagement refreshTrigger={refreshTrigger} />}
         

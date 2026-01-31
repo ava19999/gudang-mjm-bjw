@@ -1,6 +1,6 @@
 // FILE: components/scanResi/ScanResiMenu.tsx
 import React, { useState } from 'react';
-import { Scan, ChevronDown, ChevronUp, Camera, FileEdit, History } from 'lucide-react';
+import { Scan, ChevronDown, ChevronUp, Camera, FileEdit, History, Users } from 'lucide-react';
 import { ActiveView } from '../../types/ui';
 
 interface ScanResiMenuProps {
@@ -23,7 +23,7 @@ export const ScanResiMenu: React.FC<ScanResiMenuProps> = ({
   // Use external state for mobile, internal for desktop
   const isOpen = isMobile && externalIsOpen !== undefined ? externalIsOpen : internalIsOpen;
   
-  const isScanResiActive = ['scan_resi_stage1', 'scan_resi_stage2', 'scan_resi_stage3', 'scan_resi_history'].includes(activeView);
+  const isScanResiActive = ['scan_resi_stage1', 'scan_resi_stage2', 'scan_resi_stage3', 'scan_resi_reseller', 'scan_resi_history'].includes(activeView);
 
   const handleMainClick = (e: React.MouseEvent) => {
     if (isMobile && onToggle) {
@@ -91,6 +91,20 @@ export const ScanResiMenu: React.FC<ScanResiMenuProps> = ({
                 <FileEdit size={16} />
               </div>
               <span className="text-sm font-medium">Stage 3: Data Entry</span>
+            </button>
+            
+            <button
+              onClick={() => {
+                setActiveView('scan_resi_reseller');
+              }}
+              className={`w-full px-3 py-2.5 text-left hover:bg-gray-700/80 transition-all duration-150 flex items-center gap-2.5 active:scale-[0.98] ${
+                activeView === 'scan_resi_reseller' ? 'bg-gradient-to-r from-green-900/30 to-transparent text-green-400 shadow-inner' : 'text-gray-300'
+              }`}
+            >
+              <div className={`p-1 rounded-lg ${activeView === 'scan_resi_reseller' ? 'bg-green-900/40' : 'bg-gray-700/50'}`}>
+                <Users size={16} />
+              </div>
+              <span className="text-sm font-medium">Reseller</span>
             </button>
             
             <button
@@ -182,6 +196,19 @@ export const ScanResiMenu: React.FC<ScanResiMenuProps> = ({
           >
             <FileEdit size={16} />
             <span className="text-sm font-medium">Stage 3: Data Entry</span>
+          </button>
+          
+          <button
+            onClick={() => {
+              setActiveView('scan_resi_reseller');
+              setInternalIsOpen(false);
+            }}
+            className={`w-full px-4 py-3 text-left hover:bg-gray-700 transition-colors flex items-center gap-2 ${
+              activeView === 'scan_resi_reseller' ? 'bg-gray-700 text-green-400' : 'text-gray-300'
+            }`}
+          >
+            <Users size={16} />
+            <span className="text-sm font-medium">Reseller</span>
           </button>
           
           <button
