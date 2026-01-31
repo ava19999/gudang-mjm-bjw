@@ -1403,7 +1403,138 @@ export const insertBarangKeluar = async (
 };
 
 export const fetchHistory = async () => [];
-export const fetchItemHistory = async () => [];
+
+// FETCH ITEM HISTORY - Riwayat transaksi per item (part_number)
+export const fetchItemHistory = async (partNumber: string, store?: string | null): Promise<any[]> => {
+  if (!partNumber) return [];
+  
+  const effectiveStore = store || 'mjm';
+  const masukTable = getLogTableName('barang_masuk', effectiveStore);
+  const keluarTable = getLogTableName('barang_keluar', effectiveStore);
+  const stockTable = getTableName(effectiveStore);
+  
+  try {
+    // Fetch barang masuk
+    const { data: masukData, error: masukError } = await supabase
+      .from(masukTable)
+      .select('*')
+      .eq('part_number', partNumber)
+      .order('created_at', { ascending: false });
+    
+    if (masukError) {
+      console.error('fetchItemHistory masuk error:', masukError);
+    }
+    
+    // Fetch barang keluar
+    const { data: keluarData, error: keluarError } = await supabase
+      .from(keluarTable)
+      .select('*')
+      .eq('part_number', partNumber)
+      .order('created_at', { ascending: false });
+    
+    if (keluarError) {
+      console.error('fetchItemHistory keluar error:', keluarError);
+    }
+    
+    // Get current stock
+    const { data: stockData } = await supabase
+      .from(stockTable)
+      .select('quantity')
+      .eq('part_number', partNumber)
+      .single();
+    
+    const currentQty = stockData?.quantity ?? 0;
+    
+    // Map barang masuk to StockHistory format
+    const masukHistory = (masukData || []).map((row: any) => {
+      const ecommerce = row.ecommerce || '-';
+      const customer = row.customer || '-';
+      const resi = row.resi || '-';
+      const toko = row.kode_toko || row.toko || '-';
+      
+      let reasonParts: string[] = [];
+      if (customer !== '-') reasonParts.push(customer);
+      if (resi !== '-') reasonParts.push(`(Resi: ${resi})`);
+      if (ecommerce !== '-') reasonParts.push(`(Via: ${ecommerce})`);
+      if (row.tempo === 'RETUR') reasonParts.push('(RETUR)');
+      const reason = reasonParts.join(' ') || 'Restock';
+      
+      let tempoVal = row.tempo || '-';
+      if (resi !== '-' && toko !== '-') {
+        tempoVal = `${resi}/${toko}`;
+      }
+      
+      return {
+        id: row.id?.toString() || '',
+        itemId: row.part_number || '',
+        partNumber: row.part_number || '',
+        name: row.nama_barang || '',
+        type: 'in' as const,
+        quantity: row.qty_masuk || 0,
+        previousStock: 0,
+        currentStock: row.stok_akhir || 0,
+        currentQty: currentQty,
+        price: row.harga_satuan || 0,
+        totalPrice: row.harga_total || 0,
+        timestamp: row.created_at ? new Date(row.created_at).getTime() : null,
+        reason: reason,
+        resi: resi,
+        tempo: tempoVal,
+        customer: customer
+      };
+    });
+    
+    // Map barang keluar to StockHistory format
+    const keluarHistory = (keluarData || []).map((row: any) => {
+      const ecommerce = row.ecommerce || '-';
+      const customer = row.customer || '-';
+      const resi = row.resi || '-';
+      const toko = row.kode_toko || row.toko || '-';
+      
+      let reasonParts: string[] = [];
+      if (customer !== '-') reasonParts.push(customer);
+      if (resi !== '-') reasonParts.push(`(Resi: ${resi})`);
+      if (ecommerce !== '-') reasonParts.push(`(Via: ${ecommerce})`);
+      const reason = reasonParts.join(' ') || 'Penjualan';
+      
+      let tempoVal = row.tempo || '-';
+      if (resi !== '-' && toko !== '-') {
+        tempoVal = `${resi}/${toko}`;
+      }
+      
+      return {
+        id: row.id?.toString() || '',
+        itemId: row.part_number || '',
+        partNumber: row.part_number || '',
+        name: row.name || '',
+        type: 'out' as const,
+        quantity: row.qty_keluar || 0,
+        previousStock: 0,
+        currentStock: row.stock_ahir || 0,
+        currentQty: currentQty,
+        price: row.harga_satuan || 0,
+        totalPrice: row.harga_total || 0,
+        timestamp: row.created_at ? new Date(row.created_at).getTime() : null,
+        reason: reason,
+        resi: resi,
+        tempo: tempoVal,
+        customer: customer
+      };
+    });
+    
+    // Combine and sort by timestamp descending
+    const allHistory = [...masukHistory, ...keluarHistory].sort((a, b) => {
+      const timeA = a.timestamp ?? 0;
+      const timeB = b.timestamp ?? 0;
+      return timeB - timeA;
+    });
+    
+    return allHistory;
+  } catch (e: any) {
+    console.error('fetchItemHistory Exception:', e);
+    return [];
+  }
+};
 
 // FETCH HISTORY LOGS PAGINATED - untuk modal detail Masuk/Keluar di Dashboard
 export const fetchHistoryLogsPaginated = async (

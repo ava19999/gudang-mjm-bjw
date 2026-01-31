@@ -25,14 +25,14 @@ export const ItemHistoryModal: React.FC<ItemHistoryModalProps> = ({ item, onClos
   const [showCompare, setShowCompare] = useState(false);
 
   useEffect(() => {
-    if (item.partNumber) {
+    if (item.partNumber && selectedStore) {
         setLoading(true);
-        fetchItemHistory(item.partNumber).then((res) => {
+        fetchItemHistory(item.partNumber, selectedStore).then((res) => {
             setData(res);
             setLoading(false);
         }).catch(() => setLoading(false));
     }
-  }, [item]);
+  }, [item, selectedStore]);
 
   // Client-side filtering & pagination (karena API fetchItemHistory mengambil semua log item tersebut)
   const filteredData = useMemo(() => {
@@ -53,14 +53,16 @@ export const ItemHistoryModal: React.FC<ItemHistoryModalProps> = ({ item, onClos
 
   useEffect(() => setPage(1), [search]);
 
-  // Fungsi untuk fetch data perbandingan dari toko lain (hanya BJW -> MJM untuk saat ini)
+  // Fungsi untuk fetch data perbandingan dari toko lain
   const handleCompareStock = async () => {
-    if (selectedStore !== 'bjw') return; // Hanya untuk BJW dulu
+    if (!selectedStore) return;
     
     setCompareLoading(true);
     setShowCompare(true);
     try {
-      const otherStoreItem = await getItemByPartNumber(item.partNumber, 'mjm');
+      // Tentukan toko lawan
+      const otherStore = selectedStore === 'bjw' ? 'mjm' : 'bjw';
+      const otherStoreItem = await getItemByPartNumber(item.partNumber, otherStore);
       setCompareData(otherStoreItem);
     } catch (err) {
       console.error('Gagal fetch data perbandingan:', err);
@@ -72,6 +74,7 @@ export const ItemHistoryModal: React.FC<ItemHistoryModalProps> = ({ item, onClos
 
   // Tentukan toko lawan untuk perbandingan
   const otherStoreName = selectedStore === 'bjw' ? 'MJM' : 'BJW';
+  const currentStoreName = selectedStore === 'bjw' ? 'BJW' : 'MJM';
 
   return (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm animate-in fade-in">
@@ -82,8 +85,8 @@ export const ItemHistoryModal: React.FC<ItemHistoryModalProps> = ({ item, onClos
                       <p className="text-xs text-gray-400 truncate max-w-[300px]">{item.name}</p>
                     </div>
                     <div className="flex items-center gap-2">
-                      {/* Tombol Bandingkan Stock - Hanya tampil di BJW */}
-                      {selectedStore === 'bjw' && (
+                      {/* Tombol Bandingkan Stock - Tampil di BJW dan MJM */}
+                      {selectedStore && (
                         <button 
                           onClick={handleCompareStock}
                           disabled={compareLoading}
@@ -98,7 +101,7 @@ export const ItemHistoryModal: React.FC<ItemHistoryModalProps> = ({ item, onClos
                 </div>
 
                 {/* Panel Perbandingan Stock */}
-                {showCompare && selectedStore === 'bjw' && (
+                {showCompare && selectedStore && (
                   <div className="p-3 bg-purple-900/20 border-b border-purple-900/30">
                     <div className="flex items-center justify-between">
                       <h4 className="text-xs font-bold text-purple-300 flex items-center gap-2">
@@ -118,9 +121,9 @@ export const ItemHistoryModal: React.FC<ItemHistoryModalProps> = ({ item, onClos
                       </div>
                     ) : compareData ? (
                       <div className="mt-3 grid grid-cols-2 gap-4">
-                        {/* Stock BJW (Current) */}
+                        {/* Stock Current Store */}
                         <div className="bg-gray-800 rounded-lg p-3 border border-gray-700">
-                          <div className="text-xs text-gray-400 mb-1">Stock BJW (Saat Ini)</div>
+                          <div className="text-xs text-gray-400 mb-1">Stock {currentStoreName} (Saat Ini)</div>
                           <div className="flex items-center gap-2">
                             <Package size={20} className="text-blue-400" />
                             <span className={`text-2xl font-bold ${item.quantity === 0 ? 'text-red-400' : item.quantity < 4 ? 'text-yellow-400' : 'text-green-400'}`}>
@@ -131,7 +134,7 @@ export const ItemHistoryModal: React.FC<ItemHistoryModalProps> = ({ item, onClos
                           <div className="text-xs text-gray-500 mt-1">Harga: {formatCompactNumber(item.price)}</div>
                         </div>
                         
-                        {/* Stock MJM */}
+                        {/* Stock Other Store */}
                         <div className="bg-gray-800 rounded-lg p-3 border border-purple-900/50">
                           <div className="text-xs text-purple-400 mb-1">Stock {otherStoreName}</div>
                           <div className="flex items-center gap-2">
