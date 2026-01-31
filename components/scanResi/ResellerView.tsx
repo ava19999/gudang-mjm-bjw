@@ -381,7 +381,6 @@ export const ResellerView: React.FC<ResellerViewProps> = ({ onRefresh, refreshTr
                 <th>Tanggal</th>
                 <th>Customer</th>
                 <th>Part Number</th>
-                <th>Nama Barang</th>
                 <th class="text-center">Qty</th>
                 <th class="text-right">Harga</th>
                 <th class="text-right">Total</th>
@@ -389,13 +388,12 @@ export const ResellerView: React.FC<ResellerViewProps> = ({ onRefresh, refreshTr
               </tr>
             </thead>
             <tbody>
-              ${filteredTransactions.map((t, i) => `
+              ${[...filteredTransactions].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()).map((t, i) => `
                 <tr>
                   <td class="text-center">${i + 1}</td>
                   <td>${new Date(t.created_at).toLocaleDateString('id-ID')}</td>
                   <td>${t.customer || '-'}</td>
                   <td>${t.part_number || '-'}</td>
-                  <td>${t.name || '-'}</td>
                   <td class="text-center">${t.qty_keluar}</td>
                   <td class="text-right">Rp ${(t.harga_satuan || 0).toLocaleString('id-ID')}</td>
                   <td class="text-right">Rp ${(t.harga_total || 0).toLocaleString('id-ID')}</td>
@@ -403,7 +401,7 @@ export const ResellerView: React.FC<ResellerViewProps> = ({ onRefresh, refreshTr
                 </tr>
               `).join('')}
               <tr class="total-row">
-                <td colspan="5" class="text-right">TOTAL</td>
+                <td colspan="4" class="text-right">TOTAL</td>
                 <td class="text-center">${filteredTransactions.reduce((sum, t) => sum + (t.qty_keluar || 0), 0)}</td>
                 <td></td>
                 <td class="text-right">Rp ${filteredTotalValue.toLocaleString('id-ID')}</td>
