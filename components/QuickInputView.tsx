@@ -265,8 +265,9 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
 
     try {
       // Mode 'out' tidak lagi langsung mengubah stok, akan diproses via saveOfflineOrder
+      // Validasi stok dilakukan saat ACC pesanan, bukan saat input
       if (mode === 'out') {
-        // Validasi item exists
+        // Validasi item exists saja, stok akan dicek saat ACC pesanan
         const existingItem = await getItemByPartNumber(row.partNumber, selectedStore);
         if (!existingItem) {
           updateRow(row.id, 'error', `Item tidak ditemukan`);
@@ -274,12 +275,10 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
           return false;
         }
         
-        // Validasi stok (hanya check, tidak kurangi)
-        if (existingItem.quantity < row.qtyKeluar) {
-          updateRow(row.id, 'error', `Stok kurang! Sisa: ${existingItem.quantity}`);
-          updateRow(row.id, 'isLoading', false);
-          return false;
-        }
+        // TIDAK PERLU validasi stok di sini
+        // Stok akan dicek saat ACC pesanan di OrderManagement (processOfflineOrderItem)
+        // Jika stok kosong/kurang, pesanan tetap bisa masuk ke offline order
+        // Nanti saat ACC pesanan baru akan dicek stoknya
         
         // Return true untuk ditandai berhasil validasi, penyimpanan akan dilakukan di saveAllRows
         updateRow(row.id, 'isLoading', false);
