@@ -1066,6 +1066,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
   const [uploadEcommerce, setUploadEcommerce] = useState<EcommercePlatform>('SHOPEE');
   const [uploadSubToko, setUploadSubToko] = useState<SubToko>(selectedStore === 'bjw' ? 'BJW' : 'MJM');
   const [uploadNegara, setUploadNegara] = useState<NegaraEkspor>('PH');
+  const [overrideStage1, setOverrideStage1] = useState<boolean>(false);
 
   // RESI SEARCH STATE
   const [stage1ResiList, setStage1ResiList] = useState<Array<{resi: string, no_pesanan?: string, ecommerce: string, sub_toko: string, stage2_verified: boolean}>>([]);
@@ -1648,38 +1649,51 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                                 ecommerceFromParser.includes('SAMEDAY') ||
                                 ecommerceFromParser.includes('KILAT');
         
-        if (s1Data) {
-          // Ada di Stage 1, gunakan ecommerce dari sana
-          let ecomFromS1 = s1Data.ecommerce || '';
-          
-          // Jika hanya "EKSPOR" tapi ada negara_ekspor, gabungkan
-          if (ecomFromS1 === 'EKSPOR' && s1Data.negara_ekspor) {
-            item.ecommerce = `EKSPOR - ${s1Data.negara_ekspor}`;
-            negaraForConversion = s1Data.negara_ekspor;
-          } else if (ecomFromS1.startsWith('EKSPOR')) {
-            // Sudah format lengkap atau tidak ada negara
-            item.ecommerce = ecomFromS1;
-            // Extract negara dari ecommerce (misal "EKSPOR - PH" -> "PH")
-            const parts = ecomFromS1.split(' - ');
-            if (parts.length > 1) {
-              negaraForConversion = parts[1].trim();
-            }
-          } else {
-            // Bukan ekspor, gunakan dari Stage 1
-            item.ecommerce = ecomFromS1 || uploadEcommerce;
-          }
-        } else {
-          // Tidak ada di Stage 1
-          // PENTING: Jika ecommerce dari parser punya label khusus, PERTAHANKAN
-          if (hasSpecialLabel) {
-            // Pertahankan label khusus dari parser (misal: TIKTOK INSTAN, SHOPEE SAMEDAY, dll)
-            item.ecommerce = ecommerceFromParser;
-          } else if (uploadEcommerce === 'EKSPOR') {
+        if (overrideStage1) {
+          // Override: always use Upload Config settings, ignore Stage 1 data
+          if (uploadEcommerce === 'EKSPOR') {
             item.ecommerce = `EKSPOR - ${uploadNegara}`;
             negaraForConversion = uploadNegara;
           } else {
             item.ecommerce = uploadEcommerce;
           }
+          item.sub_toko = uploadSubToko;
+        } else {
+          // Keep existing logic for Stage 1 lookup
+          if (s1Data) {
+            // Ada di Stage 1, gunakan ecommerce dari sana
+            let ecomFromS1 = s1Data.ecommerce || '';
+            
+            // Jika hanya "EKSPOR" tapi ada negara_ekspor, gabungkan
+            if (ecomFromS1 === 'EKSPOR' && s1Data.negara_ekspor) {
+              item.ecommerce = `EKSPOR - ${s1Data.negara_ekspor}`;
+              negaraForConversion = s1Data.negara_ekspor;
+            } else if (ecomFromS1.startsWith('EKSPOR')) {
+              // Sudah format lengkap atau tidak ada negara
+              item.ecommerce = ecomFromS1;
+              // Extract negara dari ecommerce (misal "EKSPOR - PH" -> "PH")
+              const parts = ecomFromS1.split(' - ');
+              if (parts.length > 1) {
+                negaraForConversion = parts[1].trim();
+              }
+            } else {
+              // Bukan ekspor, gunakan dari Stage 1
+              item.ecommerce = ecomFromS1 || uploadEcommerce;
+            }
+          } else {
+            // Tidak ada di Stage 1
+            // PENTING: Jika ecommerce dari parser punya label khusus, PERTAHANKAN
+            if (hasSpecialLabel) {
+              // Pertahankan label khusus dari parser (misal: TIKTOK INSTAN, SHOPEE SAMEDAY, dll)
+              item.ecommerce = ecommerceFromParser;
+            } else if (uploadEcommerce === 'EKSPOR') {
+              item.ecommerce = `EKSPOR - ${uploadNegara}`;
+              negaraForConversion = uploadNegara;
+            } else {
+              item.ecommerce = uploadEcommerce;
+            }
+          }
+          item.sub_toko = uploadSubToko;
         }
         
         // === SIMPAN MATA UANG UNTUK EKSPOR (TANPA KONVERSI) ===
@@ -1693,8 +1707,6 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
           // Simpan mata uang untuk ditampilkan di UI
           (item as any).mata_uang = countryForRate;
         }
-        
-        item.sub_toko = uploadSubToko;
 
         return item;
       });
@@ -2539,6 +2551,24 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                         <option value="HK">HK</option>
                     </select>
                 )}
+
+                {/* CHECKBOX OVERRIDE STAGE 1 */}
+                <label className="flex items-center gap-1.5 cursor-pointer ml-2 group">
+                    <input 
+                        type="checkbox"
+                        checked={overrideStage1}
+                        onChange={(e) => setOverrideStage1(e.target.checked)}
+                        className="w-4 h-4 rounded border-gray-600 bg-gray-700 text-orange-500 focus:ring-orange-500 focus:ring-offset-gray-800 cursor-pointer"
+                    />
+                    <span className={`text-[10px] md:text-xs font-medium transition-colors ${overrideStage1 ? 'text-orange-400' : 'text-gray-400 group-hover:text-gray-300'}`}>
+                        Override Stage 1
+                    </span>
+                    {overrideStage1 && (
+                        <span className="text-[9px] text-orange-300 bg-orange-900/30 px-1.5 py-0.5 rounded">
+                            Paksa: {uploadEcommerce} / {uploadSubToko}
+                        </span>
+                    )}
+                </label>
                 
                 <div className="hidden md:block h-4 w-px bg-gray-600 mx-1"></div>
 
