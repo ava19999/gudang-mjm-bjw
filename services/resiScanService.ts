@@ -326,6 +326,34 @@ export const addReseller = async (nama: string): Promise<{ success: boolean; mes
   }
 };
 
+/**
+ * Get unique reseller names from barang_keluar table
+ */
+export const getResellerNamesFromBarangKeluar = async (store: string | null): Promise<string[]> => {
+  const table = store === 'mjm' ? 'barang_keluar_mjm' : (store === 'bjw' ? 'barang_keluar_bjw' : null);
+  if (!table) return [];
+
+  try {
+    const { data, error } = await supabase
+      .from(table)
+      .select('customer')
+      .eq('ecommerce', 'RESELLER')
+      .not('customer', 'is', null);
+
+    if (error) {
+      console.error('Error fetching reseller names:', error);
+      return [];
+    }
+
+    // Get unique names
+    const uniqueNames = [...new Set((data || []).map((d: any) => d.customer).filter(Boolean))];
+    return uniqueNames.sort();
+  } catch (err) {
+    console.error('Exception fetching reseller names:', err);
+    return [];
+  }
+};
+
 // ============================================================================
 // STAGE 2: PACKING VERIFICATION
 // ============================================================================
@@ -1028,5 +1056,66 @@ export const deleteResiItemById = async (
   } catch (err: any) {
     console.error('Delete resi item exception:', err);
     return { success: false, message: err.message || 'Gagal menghapus item' };
+  }
+};
+
+/**
+ * Hapus satu item dari scan_resi berdasarkan ID (Stage 1)
+ */
+export const deleteScanResiById = async (
+  store: string | null,
+  id: string | number
+): Promise<{ success: boolean; message: string }> => {
+  const table = store === 'mjm' ? 'scan_resi_mjm' : (store === 'bjw' ? 'scan_resi_bjw' : null);
+  if (!table) return { success: false, message: 'Toko tidak valid' };
+
+  try {
+    // ID dari Stage 1 biasanya format "s1-123", perlu extract angkanya
+    const dbId = String(id).startsWith('s1-') ? String(id).replace('s1-', '') : String(id);
+    
+    const { error } = await supabase
+      .from(table)
+      .delete()
+      .eq('id', dbId);
+
+    if (error) {
+      console.error('Delete scan resi by ID gagal:', error);
+      return { success: false, message: error.message };
+    }
+
+    return { success: true, message: 'Item berhasil dihapus dari Stage 1' };
+  } catch (err: any) {
+    console.error('Delete scan resi exception:', err);
+    return { success: false, message: err.message || 'Gagal menghapus item' };
+  }
+};
+
+/**
+ * Hapus multiple items dari scan_resi berdasarkan resi numbers (setelah proses ke barang_keluar)
+ */
+export const deleteProcessedScanResi = async (
+  store: string | null,
+  resiList: string[]
+): Promise<{ success: boolean; deleted: number }> => {
+  const table = store === 'mjm' ? 'scan_resi_mjm' : (store === 'bjw' ? 'scan_resi_bjw' : null);
+  if (!table) return { success: false, deleted: 0 };
+  if (!resiList || resiList.length === 0) return { success: true, deleted: 0 };
+
+  try {
+    const { data, error } = await supabase
+      .from(table)
+      .delete()
+      .in('resi', resiList)
+      .select('id');
+
+    if (error) {
+      console.error('Delete processed scan resi gagal:', error);
+      return { success: false, deleted: 0 };
+    }
+
+    return { success: true, deleted: data?.length || 0 };
+  } catch (err: any) {
+    console.error('Delete processed scan resi exception:', err);
+    return { success: false, deleted: 0 };
   }
 };

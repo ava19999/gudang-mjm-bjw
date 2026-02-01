@@ -15,9 +15,9 @@ import {
   getBulkPartNumberInfo,
   insertProductAlias,
   deleteProcessedResiItems,
-  deleteProcessedScanResi,
   deleteResiItemById,
   deleteScanResiById,
+  deleteProcessedScanResi,
   checkResiOrOrderStatus,
   checkExistingInBarangKeluar,
   getStage1ResiList,
@@ -26,10 +26,7 @@ import {
 import { 
   parseShopeeCSV, 
   parseTikTokCSV, 
-  parseShopeeIntlCSV,
-  detectCSVPlatform,
-  convertToIDR,
-  CURRENCY_RATES
+  detectCSVPlatform
 } from '../../services/csvParserService';
 import { 
   Upload, Save, Trash2, Plus, DownloadCloud, RefreshCw, Filter, CheckCircle, Loader2, Settings, Search, X, AlertTriangle, Package
@@ -1494,14 +1491,13 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
       const csvText = XLSX.utils.sheet_to_csv(worksheet, { rawNumbers: true });
 
       const platform = detectCSVPlatform(csvText);
-      addLog('info', 'SISTEM', `Format terdeteksi: ${platform === 'shopee' ? 'Shopee Indonesia' : platform === 'tiktok' ? 'TikTok' : platform === 'shopee-intl' ? 'Shopee International' : 'Unknown'}`);
+      addLog('info', 'SISTEM', `Format terdeteksi: ${platform === 'shopee' ? 'Shopee' : platform === 'tiktok' ? 'TikTok' : 'Unknown'}`);
       
       let parsedItems: any[] = [];
       
-      // Parsing berdasarkan deteksi format file (Shopee/TikTok/Shopee International)
+      // Parsing berdasarkan deteksi format file (Shopee/TikTok)
       // Namun attribute ecommerce/toko akan kita override dengan pilihan user
       if (platform === 'shopee') parsedItems = parseShopeeCSV(csvText);
-      else if (platform === 'shopee-intl') parsedItems = parseShopeeIntlCSV(csvText);
       else if (platform === 'tiktok') parsedItems = parseTikTokCSV(csvText);
       else { 
         // Fallback coba parse Shopee standar jika tidak terdeteksi
@@ -1698,7 +1694,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
         
         // === SIMPAN MATA UANG UNTUK EKSPOR (TANPA KONVERSI) ===
         // Jika ini adalah item Ekspor, simpan kode negara/mata uang tapi JANGAN konversi harga
-        if (negaraForConversion && (platform === 'shopee-intl' || item.ecommerce.startsWith('EKSPOR'))) {
+        if (negaraForConversion && item.ecommerce.startsWith('EKSPOR')) {
           // Gunakan negara dari detected_country jika ada, atau dari setting
           const countryForRate = (item as any).detected_country || negaraForConversion;
           
