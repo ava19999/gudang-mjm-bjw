@@ -748,18 +748,54 @@ export const saveCSVToResiItems = async (
     const allOrderIds = items.map(i => i.order_id).filter(Boolean);
     const allToCheck = [...new Set([...allResis, ...allOrderIds])];
     
+    // === CEK STAGE 1: Resi harus sudah di-scan di Stage 1 ===
+    const scanTable = store === 'mjm' ? 'scan_resi_mjm' : (store === 'bjw' ? 'scan_resi_bjw' : null);
+    const scannedResiSet = new Set<string>();
+    
+    if (scanTable) {
+      const { data: scannedData } = await supabase
+        .from(scanTable)
+        .select('resi, no_pesanan')
+        .in('resi', allToCheck);
+      
+      // Cek juga dengan no_pesanan untuk instant/sameday
+      const { data: scannedByOrder } = await supabase
+        .from(scanTable)
+        .select('resi, no_pesanan')
+        .in('no_pesanan', allToCheck);
+      
+      // Kumpulkan semua resi yang sudah di-scan (uppercase untuk matching)
+      (scannedData || []).forEach((s: any) => {
+        if (s.resi) scannedResiSet.add(String(s.resi).trim().toUpperCase());
+        if (s.no_pesanan) scannedResiSet.add(String(s.no_pesanan).trim().toUpperCase());
+      });
+      (scannedByOrder || []).forEach((s: any) => {
+        if (s.resi) scannedResiSet.add(String(s.resi).trim().toUpperCase());
+        if (s.no_pesanan) scannedResiSet.add(String(s.no_pesanan).trim().toUpperCase());
+      });
+    }
+    
     // Cek apakah sudah ada di barang_keluar (sudah terjual/keluar)
     const existingInBarangKeluar = await checkExistingInBarangKeluar(allToCheck, store);
     
-    // Filter items yang tidak ada di barang_keluar
+    // Filter items: harus sudah di-scan Stage 1 DAN tidak ada di barang_keluar
     const skippedItems: ParsedCSVItem[] = [];
     const validItems = items.filter(item => {
       const resiUpper = (item.resi || '').trim().toUpperCase();
       const orderIdUpper = (item.order_id || '').trim().toUpperCase();
       
+      // Cek apakah resi sudah di-scan di Stage 1
+      const isScannedStage1 = scannedResiSet.has(resiUpper) || scannedResiSet.has(orderIdUpper);
+      
+      // Skip jika belum di-scan Stage 1
+      if (!isScannedStage1) {
+        skippedItems.push({ ...item, skipReason: 'Resi belum di-scan di Stage 1' });
+        return false;
+      }
+      
       // Jika resi atau order_id ada di barang_keluar, skip
       if (existingInBarangKeluar.has(resiUpper) || existingInBarangKeluar.has(orderIdUpper)) {
-        skippedItems.push(item);
+        skippedItems.push({ ...item, skipReason: 'Sudah ada di Barang Keluar' });
         return false;
       }
       return true;
@@ -767,15 +803,32 @@ export const saveCSVToResiItems = async (
     
     const skippedResis = [...new Set(skippedItems.map(i => i.resi))];
     
+    // Generate skipped items result with proper reason
+    const skippedItemsResult = skippedItems.map(item => ({
+      resi: item.resi,
+      order_id: item.order_id,
+      customer: item.customer,
+      product_name: item.product_name,
+      reason: (item as any).skipReason || 'Unknown'
+    }));
+    
     if (validItems.length === 0) {
+      // Count berapa yang skip karena Stage 1 vs Barang Keluar
+      const stage1Count = skippedItems.filter(i => (i as any).skipReason?.includes('Stage 1')).length;
+      const barangKeluarCount = skippedItems.filter(i => (i as any).skipReason?.includes('Barang Keluar')).length;
+      
+      let message = `Semua ${items.length} resi di-skip. `;
+      if (stage1Count > 0) message += `${stage1Count} belum di-scan Stage 1. `;
+      if (barangKeluarCount > 0) message += `${barangKeluarCount} sudah di Barang Keluar.`;
+      
       return { 
         success: false, 
-        message: `Semua ${items.length} resi sudah ada di Barang Keluar (sudah terjual/keluar)!`, 
+        message, 
         count: 0, 
         skippedCount: skippedItems.length,
         skippedResis,
         updatedCount: 0,
-        skippedItems: [],
+        skippedItems: skippedItemsResult,
         updatedItems: []
       };
     }
@@ -784,7 +837,6 @@ export const saveCSVToResiItems = async (
     
     let updatedCount = 0;
     const updatedItems: any[] = [];
-    const skippedItemsResult: any[] = [];
     const itemsToInsert: ParsedCSVItem[] = [];
     
     // === JIKA OVERRIDE AKTIF: Update data existing terlebih dahulu ===
@@ -886,9 +938,18 @@ export const saveCSVToResiItems = async (
       }
     }
 
-    const skippedMsg = skippedResis.length > 0 
-      ? ` (${skippedResis.length} resi di-skip karena sudah ada di Barang Keluar)`
-      : '';
+    // Generate skip message yang lebih detail
+    let skippedMsg = '';
+    if (skippedResis.length > 0) {
+      const stage1Count = skippedItems.filter(i => (i as any).skipReason?.includes('Stage 1')).length;
+      const barangKeluarCount = skippedItems.filter(i => (i as any).skipReason?.includes('Barang Keluar')).length;
+      
+      const parts: string[] = [];
+      if (stage1Count > 0) parts.push(`${stage1Count} belum scan Stage 1`);
+      if (barangKeluarCount > 0) parts.push(`${barangKeluarCount} di Barang Keluar`);
+      
+      skippedMsg = parts.length > 0 ? ` (Skip: ${parts.join(', ')})` : '';
+    }
     
     const updateMsg = updatedCount > 0 ? ` (${updatedCount} diupdate)` : '';
 

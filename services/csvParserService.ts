@@ -471,8 +471,9 @@ export const parseShopeeIntlCSV = (text: string): ParsedCSVItem[] => {
 // Data: Mulai Baris 3
 // Filter: Skip "Dibatalkan" dan "Belum dibayar"
 // RESI LOGIC:
-//   - Default: Gunakan Tracking ID sebagai resi
-//   - Instan/Same Day: Gunakan Order ID sebagai resi, label "TIKTOK INSTAN"
+//   - Instant/On-demand/Express: Gunakan Order ID sebagai resi, label "TIKTOK INSTAN"
+//   - Same Day: Gunakan Tracking ID sebagai resi, label "TIKTOK INSTAN"
+//   - Regular: Gunakan Tracking ID sebagai resi, label "TIKTOK"
 // Dedupe: Sama resi + customer + nama_produk = skip
 // ============================================================================
 export const parseTikTokCSV = (text: string): ParsedCSVItem[] => {
@@ -553,11 +554,12 @@ export const parseTikTokCSV = (text: string): ParsedCSVItem[] => {
     }
     
     // LOGIC RESI TIKTOK:
-    // Cek kolom "Delivery Option" untuk kata instant/instan/sameday/same day/on-demand
-    // - Jika Instan/Same Day/On-Demand: Gunakan Order ID sebagai resi, label "TIKTOK INSTAN"
-    // - Jika Regular: Gunakan Tracking ID sebagai resi, label "TIKTOK"
+    // Cek kolom "Delivery Option" untuk menentukan jenis pengiriman:
+    // - Instant/On-demand/Express: Gunakan Order ID sebagai resi, label "TIKTOK INSTAN"
+    // - Same Day: Gunakan Tracking ID sebagai resi, label "TIKTOK INSTAN"
+    // - Regular: Gunakan Tracking ID sebagai resi, label "TIKTOK"
     
-    // Tambahkan variasi penulisan yang mungkin ada di TikTok CSV
+    // Deteksi jenis pengiriman
     const isInstant = deliveryOptionLower.includes('instant') || 
                       deliveryOptionLower.includes('instan') ||
                       deliveryOptionLower.includes('on-demand') ||
@@ -566,16 +568,20 @@ export const parseTikTokCSV = (text: string): ParsedCSVItem[] => {
     const isSameday = deliveryOptionLower.includes('same day') || 
                       deliveryOptionLower.includes('sameday') ||
                       deliveryOptionLower.includes('same-day');
-    const isInstantOrSameday = isInstant || isSameday;
     
     let resi = '';
     let ecommerceLabel = 'TIKTOK';
     
-    if (isInstantOrSameday) {
-      // Instan/Same Day: Gunakan Order ID sebagai resi
+    if (isInstant) {
+      // Instant/On-demand/Express: Gunakan Order ID sebagai resi
       resi = orderId;
       ecommerceLabel = 'TIKTOK INSTAN';
-      console.log('[TikTok CSV] DETECTED INSTANT/SAMEDAY:', deliveryOption, '-> Label:', ecommerceLabel);
+      console.log('[TikTok CSV] DETECTED INSTANT:', deliveryOption, '-> Use Order ID as resi');
+    } else if (isSameday) {
+      // Same Day: Gunakan Tracking ID sebagai resi
+      resi = trackingId;
+      ecommerceLabel = 'TIKTOK INSTAN';
+      console.log('[TikTok CSV] DETECTED SAMEDAY:', deliveryOption, '-> Use Tracking ID as resi');
     } else {
       // Regular: Gunakan Tracking ID sebagai resi
       resi = trackingId;
