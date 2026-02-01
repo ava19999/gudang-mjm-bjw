@@ -1712,33 +1712,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
       });
 
       if (correctedItems.length > 0) {
-          // === FITUR BARU: Buat map resi yang sudah ada di Stage 3 untuk di-UPDATE/INSERT ===
-          // Hanya untuk SHOPEE - jika resi sudah ada, data CSV akan mengisi/update baris yang ada
-          // TANPA mengubah kolom ecommerce dan toko (tetap dari scan aplikasi)
-          // 
-          // Ada 2 kasus:
-          // 1. ID format "db-XXX" -> sudah ada di resi_items, bisa di-UPDATE
-          // 2. ID format "s1-XXX" -> hanya ada di scan_resi, perlu INSERT baru tapi pakai ecommerce/toko dari scan
-          const existingResiMap = new Map<string, { id: string, ecommerce: string, toko: string, isFromDB: boolean }>();
-          
-          if (platform === 'shopee') {
-            // Buat map dari resi yang sudah ada di rows (Stage 3)
-            for (const row of rows) {
-              const resiUpper = (row.resi || '').trim().toUpperCase();
-              if (resiUpper) {
-                // Cek apakah row ini dari database (db-XXX) atau dari Stage 1 scan (s1-XXX)
-                const isFromDB = row.id.startsWith('db-');
-                existingResiMap.set(resiUpper, {
-                  id: row.id,
-                  ecommerce: row.ecommerce,
-                  toko: row.sub_toko,
-                  isFromDB: isFromDB
-                });
-              }
-            }
-          }
-          
-          addLog('info', 'SISTEM', `Menyimpan ${correctedItems.length} item ke database...`);
+          addLog('info', 'SISTEM', `Menyimpan ${correctedItems.length} item ke database...${overrideStage1 ? ' (Mode Override aktif)' : ''}`);
           
           // Log setiap item yang akan disimpan
           for (const item of correctedItems) {
@@ -1746,7 +1720,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
             addLog('success', resiDisplay, `Memproses - ${item.customer || 'Customer'}`);
           }
           
-          const result = await saveCSVToResiItems(correctedItems, selectedStore, existingResiMap);
+          const result = await saveCSVToResiItems(correctedItems, selectedStore, overrideStage1);
           
           // Tambahkan skipped items dari saveCSVToResiItems (belum scan Stage 1, sudah Ready, dll)
           if (result.skippedItems && result.skippedItems.length > 0) {
