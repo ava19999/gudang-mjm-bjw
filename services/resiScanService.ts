@@ -109,7 +109,7 @@ export const scanResiStage1 = async (
     const insertData = {
       id: (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : Math.random().toString(36).slice(2),
       resi: data.resi,
-      no_pesanan: data.resi, // Simpan juga sebagai no_pesanan untuk deteksi INSTANT
+      no_pesanan: null, // Tidak set default - INSTANT hanya muncul jika no_pesanan di-set dari CSV/Stage2
       ecommerce: data.ecommerce,
       sub_toko: data.sub_toko,
       negara_ekspor: data.negara_ekspor || null,
@@ -197,7 +197,7 @@ export const scanResiStage1Bulk = async (
     const insertData = newItems.map(item => ({
       id: (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : Math.random().toString(36).slice(2),
       resi: item.resi,
-      no_pesanan: item.resi, // Simpan juga sebagai no_pesanan untuk deteksi INSTANT
+      no_pesanan: null, // Tidak set default - INSTANT hanya muncul jika no_pesanan di-set dari CSV/Stage2
       ecommerce: item.ecommerce,
       sub_toko: item.sub_toko,
       negara_ekspor: item.negara_ekspor || null,

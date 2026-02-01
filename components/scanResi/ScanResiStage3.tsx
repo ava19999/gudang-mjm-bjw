@@ -1586,13 +1586,36 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
       addLog('info', 'SISTEM', 'Membaca file CSV/Excel...');
       
       const data = await file.arrayBuffer();
-      // Tambahkan opsi cellText: true dan cellDates: true untuk mempertahankan format asli
-      const workbook = XLSX.read(data, { type: 'array', cellText: true, cellDates: true });
+      // [FIX] Gunakan cellText: false agar cell numeric tidak dikonversi ke number
+      // Ini membantu mempertahankan format asli seperti leading zeros
+      const workbook = XLSX.read(data, { type: 'array', cellDates: false, cellNF: true });
       const sheetName = workbook.SheetNames[0];
       const worksheet = workbook.Sheets[sheetName];
       
-      // Konversi ke CSV dengan rawNumbers: true agar angka panjang tidak jadi scientific notation
-      const csvText = XLSX.utils.sheet_to_csv(worksheet, { rawNumbers: true });
+      // [FIX] Sebelum konversi ke CSV, format ulang cell yang berupa number dengan leading zeros
+      // atau harga dengan format Indonesia (450.000)
+      // Kita perlu iterasi cell dan konversi ke format text yang benar
+      const range = XLSX.utils.decode_range(worksheet['!ref'] || 'A1');
+      for (let R = range.s.r; R <= range.e.r; ++R) {
+        for (let C = range.s.c; C <= range.e.c; ++C) {
+          const cellAddress = XLSX.utils.encode_cell({ r: R, c: C });
+          const cell = worksheet[cellAddress];
+          if (cell) {
+            // Jika cell punya format text asli (w property), gunakan itu
+            // Jika tidak, gunakan value (v) sebagai string
+            if (cell.w !== undefined && cell.w !== null) {
+              // Sudah ada formatted text, biarkan
+            } else if (cell.v !== undefined && cell.v !== null) {
+              // Force ke string untuk mempertahankan format
+              cell.t = 's'; // set type ke string
+              cell.v = String(cell.v);
+            }
+          }
+        }
+      }
+      
+      // Konversi ke CSV - sekarang semua cell sudah string
+      const csvText = XLSX.utils.sheet_to_csv(worksheet, { rawNumbers: false, blankrows: false });
 
       const platform = detectCSVPlatform(csvText);
       addLog('info', 'SISTEM', `Format terdeteksi: ${platform === 'shopee' ? 'Shopee' : platform === 'tiktok' ? 'TikTok' : 'Unknown'}`);
