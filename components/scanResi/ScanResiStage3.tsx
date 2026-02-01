@@ -66,6 +66,110 @@ interface SkippedItem {
   reason: string;
 }
 
+// --- KOMPONEN DROPDOWN E-COMMERCE UNTUK CELL TABEL (COMPACT) ---
+const EcommerceCellDropdown = ({ value, onChange, onSave }: { value: string, onChange: (v: string) => void, onSave: () => void }) => {
+  const [show, setShow] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  const ecommerceOptions = ['SHOPEE', 'SHOPEE INSTAN', 'TIKTOK', 'TIKTOK INSTAN', 'KILAT', 'RESELLER', 'EKSPOR', 'EKSPOR - PH', 'EKSPOR - MY', 'EKSPOR - SG', 'EKSPOR - HK'];
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setShow(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const handleSelect = (val: string) => {
+    onChange(val);
+    setShow(false);
+    setTimeout(() => onSave(), 100);
+  };
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setShow(!show)}
+        className="w-full px-1 py-0.5 text-[11px] text-left hover:bg-gray-700 rounded transition-colors flex items-center justify-between gap-1"
+      >
+        <span className="truncate">{value || '-'}</span>
+        <svg className="w-3 h-3 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+      {show && (
+        <div className="absolute z-50 mt-1 left-0 min-w-[120px] bg-gray-800 border border-gray-600 rounded shadow-lg max-h-48 overflow-auto animate-in fade-in slide-in-from-top-2">
+          {ecommerceOptions.map((s) => (
+            <div
+              key={s}
+              className={`px-2 py-1.5 cursor-pointer hover:bg-blue-600 hover:text-white transition-colors text-[11px] whitespace-nowrap ${s === value ? 'bg-blue-600 text-white' : ''}`}
+              onMouseDown={() => handleSelect(s)}
+            >
+              {s}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// --- KOMPONEN DROPDOWN TOKO UNTUK CELL TABEL (COMPACT) ---
+const TokoCellDropdown = ({ value, onChange, onSave }: { value: string, onChange: (v: string) => void, onSave: () => void }) => {
+  const [show, setShow] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  const tokoOptions = ['MJM', 'BJW', 'LARIS'];
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setShow(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const handleSelect = (val: string) => {
+    onChange(val);
+    setShow(false);
+    setTimeout(() => onSave(), 100);
+  };
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setShow(!show)}
+        className="w-full px-1 py-0.5 text-[11px] text-left hover:bg-gray-700 rounded transition-colors flex items-center justify-between gap-1"
+      >
+        <span>{value || '-'}</span>
+        <svg className="w-3 h-3 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+      {show && (
+        <div className="absolute z-50 mt-1 left-0 min-w-[60px] bg-gray-800 border border-gray-600 rounded shadow-lg max-h-48 overflow-auto animate-in fade-in slide-in-from-top-2">
+          {tokoOptions.map((s) => (
+            <div
+              key={s}
+              className={`px-2 py-1.5 cursor-pointer hover:bg-blue-600 hover:text-white transition-colors text-[11px] ${s === value ? 'bg-blue-600 text-white' : ''}`}
+              onMouseDown={() => handleSelect(s)}
+            >
+              {s}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
 // --- KOMPONEN DROPDOWN E-COMMERCE (SEARCHABLE) ---
 const EcommerceDropdown = ({ value, onChange }: { value: string, onChange: (v: string) => void }) => {
   const [show, setShow] = useState(false);
@@ -2987,10 +3091,14 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                     {row.resi}
                   </td>
 
-                  {/* ECOMM & TOKO (FROM UPLOAD/DB) */}
-                  <td className="border border-gray-600 px-1 text-center text-[11px]">
+                  {/* ECOMM (EDITABLE DROPDOWN) */}
+                  <td className="border border-gray-600 px-0.5 text-center text-[11px]">
                     <div className="flex flex-col items-center gap-0.5">
-                      <span>{row.ecommerce}</span>
+                      <EcommerceCellDropdown
+                        value={row.ecommerce}
+                        onChange={(v) => updateRow(row.id, 'ecommerce', v)}
+                        onSave={() => handleSaveRow(row)}
+                      />
                       {/* Badge INSTANT: untuk SHOPEE (jika resi === no_pesanan) ATAU TikTok (jika label INSTAN) */}
                       {((row.resi && row.no_pesanan && row.resi === row.no_pesanan && row.ecommerce?.toUpperCase().includes('SHOPEE')) ||
                         row.ecommerce?.toUpperCase().includes('INSTAN')) && (
@@ -2998,7 +3106,15 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                       )}
                     </div>
                   </td>
-                  <td className="border border-gray-600 px-1 text-center text-[11px]">{row.sub_toko}</td>
+                  
+                  {/* TOKO (EDITABLE DROPDOWN) */}
+                  <td className="border border-gray-600 px-0.5 text-center text-[11px]">
+                    <TokoCellDropdown
+                      value={row.sub_toko}
+                      onChange={(v) => updateRow(row.id, 'sub_toko', v)}
+                      onSave={() => handleSaveRow(row)}
+                    />
+                  </td>
 
                   {/* CUSTOMER (INPUT) */}
                   <td className="border border-gray-600 p-0">
