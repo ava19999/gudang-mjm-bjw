@@ -2323,6 +2323,24 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
       return;
     }
     
+    // VALIDASI: Cek apakah ada resi yang memiliki item dengan stok kurang
+    // Semua item dalam satu resi harus ready sebelum bisa diproses
+    const resiWithStockIssues: string[] = [];
+    selectedResis.forEach(resi => {
+      const itemsInResi = rows.filter(r => r.resi === resi);
+      const hasStockIssue = itemsInResi.some(r => !r.is_stock_valid || r.stock_saat_ini < r.qty_keluar);
+      if (hasStockIssue) {
+        resiWithStockIssues.push(resi);
+      }
+    });
+    
+    if (resiWithStockIssues.length > 0) {
+      const resiListText = resiWithStockIssues.slice(0, 5).join('\n• ');
+      const moreText = resiWithStockIssues.length > 5 ? `\n... dan ${resiWithStockIssues.length - 5} resi lainnya` : '';
+      alert(`Tidak bisa memproses! Resi berikut memiliki item dengan stok kurang/kosong:\n\n• ${resiListText}${moreText}\n\nSemua item dalam satu resi harus memiliki stok cukup sebelum bisa diproses.`);
+      return;
+    }
+    
     // Filter rows yang resinya dipilih dan statusnya ready
     const selectedRows = rows.filter(r => {
       if (!selectedResis.has(r.resi)) return false;
@@ -2932,9 +2950,28 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
       {selectedResis.size > 0 && (
         <div className="bg-blue-900/95 backdrop-blur-sm border border-blue-600 rounded-lg p-2 mb-2 flex items-center justify-between shadow-lg flex-shrink-0">
           <div className="flex items-center gap-3">
-            <span className="text-blue-200 font-bold text-sm">
-              {selectedResis.size} resi dipilih ({rows.filter(r => selectedResis.has(r.resi)).length} item)
-            </span>
+            {(() => {
+              // Hitung resi yang siap vs tidak siap
+              const selectedResiArray = Array.from(selectedResis);
+              const resiWithStockIssues = selectedResiArray.filter(resi => {
+                const itemsInResi = rows.filter(r => r.resi === resi);
+                return itemsInResi.some(r => !r.is_stock_valid || r.stock_saat_ini < r.qty_keluar);
+              });
+              const readyResiCount = selectedResiArray.length - resiWithStockIssues.length;
+              
+              return (
+                <>
+                  <span className="text-blue-200 font-bold text-sm">
+                    {selectedResis.size} resi dipilih ({rows.filter(r => selectedResis.has(r.resi)).length} item)
+                  </span>
+                  {resiWithStockIssues.length > 0 && (
+                    <span className="text-red-400 text-xs">
+                      ⚠️ {resiWithStockIssues.length} resi tidak bisa diproses (stok kurang)
+                    </span>
+                  )}
+                </>
+              );
+            })()}
             <button 
               onClick={() => setSelectedResis(new Set())}
               className="text-xs text-blue-300 hover:text-white underline"
@@ -3030,6 +3067,9 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                 const firstItem = resiItems[0];
                 const totalQty = resiItems.reduce((sum, r) => sum + r.qty_keluar, 0);
                 const totalHarga = resiItems.reduce((sum, r) => sum + r.harga_total, 0);
+                // Cek apakah ada item dengan stok kurang dalam resi ini
+                const hasStockIssue = resiItems.some(r => !r.is_stock_valid || r.stock_saat_ini < r.qty_keluar);
+                const canProcess = groupStatus.status === 'Ready';
                 
                 return resiItems.map((row, itemIdx) => {
                   const isFirstOfGroup = itemIdx === 0;
@@ -3040,16 +3080,22 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                       
                       {/* CHECKBOX - hanya tampil di baris pertama grup */}
                       {isFirstOfGroup ? (
-                        <td rowSpan={resiItems.length} className={`border border-gray-600 p-0 text-center align-middle ${isSelected ? 'bg-blue-900/30' : 'bg-gray-800'}`}>
+                        <td rowSpan={resiItems.length} className={`border border-gray-600 p-0 text-center align-middle ${isSelected ? 'bg-blue-900/30' : hasStockIssue ? 'bg-red-900/20' : 'bg-gray-800'}`}>
                           <div className="flex flex-col items-center gap-1 py-1">
                             <input 
                               type="checkbox"
                               checked={isSelected}
                               onChange={() => toggleSelectResi(resiKey)}
-                              className="w-5 h-5 accent-green-500 cursor-pointer"
+                              className={`w-5 h-5 cursor-pointer ${hasStockIssue ? 'accent-red-500' : 'accent-green-500'}`}
+                              title={hasStockIssue ? 'Ada item dengan stok kurang - tidak bisa diproses' : (canProcess ? 'Siap diproses' : 'Belum siap diproses')}
                             />
                             {resiItems.length > 1 && (
-                              <span className="text-[9px] text-gray-400">{resiItems.length} item</span>
+                              <span className={`text-[9px] ${hasStockIssue ? 'text-red-400' : 'text-gray-400'}`}>
+                                {resiItems.length} item{hasStockIssue ? ' ⚠️' : ''}
+                              </span>
+                            )}
+                            {hasStockIssue && resiItems.length === 1 && (
+                              <span className="text-[9px] text-red-400">⚠️</span>
                             )}
                           </div>
                         </td>
