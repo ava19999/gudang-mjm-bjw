@@ -72,21 +72,21 @@ export const HistoryTable: React.FC<HistoryTableProps> = ({ data, sortConfig, on
                       </div>
                     </th>
                     <th 
-                      className="px-3 py-2 border-r border-gray-700 text-right w-16 cursor-pointer hover:bg-gray-700 transition-colors select-none"
-                      onClick={() => handleHeaderClick('quantity')}
-                    >
-                      <div className="flex items-center justify-end">
-                        Qty
-                        <SortIcon columnKey="quantity" sortConfig={sortConfig} />
-                      </div>
-                    </th>
-                    <th 
                       className="px-3 py-2 border-r border-gray-700 text-right w-20 cursor-pointer hover:bg-gray-700 transition-colors select-none"
                       onClick={() => handleHeaderClick('currentQty')}
                     >
                       <div className="flex items-center justify-end">
                         Stok
                         <SortIcon columnKey="currentQty" sortConfig={sortConfig} />
+                      </div>
+                    </th>
+                    <th 
+                      className="px-3 py-2 border-r border-gray-700 text-right w-16 cursor-pointer hover:bg-gray-700 transition-colors select-none"
+                      onClick={() => handleHeaderClick('quantity')}
+                    >
+                      <div className="flex items-center justify-end">
+                        Qty
+                        <SortIcon columnKey="quantity" sortConfig={sortConfig} />
                       </div>
                     </th>
                     <th 
@@ -153,11 +153,11 @@ export const HistoryTable: React.FC<HistoryTableProps> = ({ data, sortConfig, on
                             <td className="px-3 py-2 align-top border-r border-gray-700">
                                 <div className="font-bold text-gray-200 text-xs">{h.name}</div>
                             </td>
-                            <td className={`px-3 py-2 align-top border-r border-gray-700 text-right font-bold ${h.type === 'in' ? 'text-green-400' : 'text-red-400'}`}>
-                                {h.type === 'in' ? '+' : '-'}{h.quantity}
-                            </td>
                             <td className="px-3 py-2 align-top border-r border-gray-700 text-right font-bold text-cyan-400">
                                 {(h as any).currentQty ?? 0}
+                            </td>
+                            <td className={`px-3 py-2 align-top border-r border-gray-700 text-right font-bold ${h.type === 'in' ? 'text-green-400' : 'text-red-400'}`}>
+                                {h.type === 'in' ? '+' : '-'}{h.quantity}
                             </td>
                             <td className="px-3 py-2 align-top border-r border-gray-700 text-right font-mono text-[10px] text-gray-400">
                                 {formatRupiah(h.price)}

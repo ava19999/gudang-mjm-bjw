@@ -1,9 +1,9 @@
 // FILE: src/components/GlobalHistoryModal.tsx
 import React, { useState, useEffect, useMemo } from 'react';
 import { StockHistory } from '../types';
-import { fetchHistoryLogsPaginated, fetchDistinctEcommerce } from '../services/supabaseService';
+import { fetchHistoryLogsPaginated } from '../services/supabaseService';
 import { HistoryTable, SortConfig } from './HistoryTable';
-import { Loader2, X, ChevronLeft, ChevronRight, TrendingUp, TrendingDown, User, Hash, ShoppingBag } from 'lucide-react';
+import { Loader2, X, ChevronLeft, ChevronRight, TrendingUp, TrendingDown, User, Hash } from 'lucide-react';
 import { useStore } from '../context/StoreContext';
 
 interface GlobalHistoryModalProps {
@@ -11,116 +11,105 @@ interface GlobalHistoryModalProps {
   onClose: () => void;
 }
 
+const ITEMS_PER_PAGE = 50;
+
 export const GlobalHistoryModal: React.FC<GlobalHistoryModalProps> = ({ type, onClose }) => {
   const { selectedStore } = useStore();
-  const [data, setData] = useState<StockHistory[]>([]);
+  const [allData, setAllData] = useState<StockHistory[]>([]); // All data from server
   const [page, setPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
-  const [totalCount, setTotalCount] = useState(0);
-  const [customerSearch, setCustomerSearch] = useState('');
-  const [partNumberSearch, setPartNumberSearch] = useState('');
-  const [tokoFilter, setTokoFilter] = useState('all');
   const [loading, setLoading] = useState(false);
-  const [sortConfig, setSortConfig] = useState<SortConfig>({ key: null, direction: 'asc' });
-  const [ecommerceOptions, setEcommerceOptions] = useState<string[]>([]);
+  
+  // Filter states
+  const [filterCustomer, setFilterCustomer] = useState('');
+  const [filterPartNumber, setFilterPartNumber] = useState('');
+  
+  // Sort state
+  const [sortConfig, setSortConfig] = useState<SortConfig>({ key: 'timestamp', direction: 'desc' });
 
-  // Load ecommerce options from database
+  // Load ALL data once (use large limit to get everything)
   useEffect(() => {
-    const loadEcommerceOptions = async () => {
-      const options = await fetchDistinctEcommerce(selectedStore);
-      setEcommerceOptions(options);
+    setLoading(true);
+    const loadAllData = async () => {
+      const { data: result } = await fetchHistoryLogsPaginated(type, 1, 50000, {}, selectedStore);
+      setAllData(result);
+      setLoading(false);
     };
-    loadEcommerceOptions();
-  }, [selectedStore]);
-
-  // Debounce search
-  const [debouncedCustomer, setDebouncedCustomer] = useState('');
-  const [debouncedPartNumber, setDebouncedPartNumber] = useState('');
-
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setDebouncedCustomer(customerSearch);
-      setDebouncedPartNumber(partNumberSearch);
-    }, 500);
-    return () => clearTimeout(timer);
-  }, [customerSearch, partNumberSearch]);
+    loadAllData();
+  }, [type, selectedStore]);
 
   // Reset page when filters change
   useEffect(() => {
     setPage(1);
-  }, [debouncedCustomer, debouncedPartNumber, tokoFilter]);
+  }, [filterCustomer, filterPartNumber, sortConfig]);
 
-  useEffect(() => {
-    const loadData = async () => {
-      setLoading(true);
-      const filters = {
-        customer: debouncedCustomer,
-        partNumber: debouncedPartNumber,
-        ecommerce: tokoFilter !== 'all' ? tokoFilter : ''
-      };
-      const { data: result, count } = await fetchHistoryLogsPaginated(type, page, 50, filters, selectedStore);
-      setData(result);
-      setTotalCount(count);
-      setTotalPages(Math.ceil(count / 50));
-      setLoading(false);
-    };
-    loadData();
-  }, [type, page, debouncedCustomer, debouncedPartNumber, tokoFilter, selectedStore]);
-
-  // Sort data
-  const sortedData = useMemo(() => {
-    if (!sortConfig.key) return data;
+  // Client-side filtering
+  const filteredData = useMemo(() => {
+    let result = [...allData];
     
-    return [...data].sort((a, b) => {
-      let aVal: any, bVal: any;
+    // Filter by customer/supplier
+    if (filterCustomer.trim()) {
+      const search = filterCustomer.toLowerCase();
+      result = result.filter(item => 
+        (item.reason || '').toLowerCase().includes(search) ||
+        ((item as any).customer || '').toLowerCase().includes(search)
+      );
+    }
+    
+    // Filter by part number
+    if (filterPartNumber.trim()) {
+      const search = filterPartNumber.toLowerCase();
+      result = result.filter(item => 
+        (item.partNumber || '').toLowerCase().includes(search) ||
+        (item.name || '').toLowerCase().includes(search)
+      );
+    }
+    
+    return result;
+  }, [allData, filterCustomer, filterPartNumber]);
+
+  // Client-side sorting
+  const sortedData = useMemo(() => {
+    if (!sortConfig.key) return filteredData;
+    
+    return [...filteredData].sort((a, b) => {
+      let aVal: any = (a as any)[sortConfig.key!];
+      let bVal: any = (b as any)[sortConfig.key!];
       
-      switch (sortConfig.key) {
-        case 'timestamp':
-          aVal = new Date(a.timestamp || 0).getTime();
-          bVal = new Date(b.timestamp || 0).getTime();
-          break;
-        case 'customer':
-          aVal = (a.reason?.match(/customer:([^|]+)/)?.[1] || '').toLowerCase();
-          bVal = (b.reason?.match(/customer:([^|]+)/)?.[1] || '').toLowerCase();
-          break;
-        case 'partNumber':
-          aVal = (a.partNumber || '').toLowerCase();
-          bVal = (b.partNumber || '').toLowerCase();
-          break;
-        case 'name':
-          aVal = (a.name || '').toLowerCase();
-          bVal = (b.name || '').toLowerCase();
-          break;
-        case 'quantity':
-          aVal = a.quantity || 0;
-          bVal = b.quantity || 0;
-          break;
-        case 'currentQty':
-          aVal = (a as any).currentQty || 0;
-          bVal = (b as any).currentQty || 0;
-          break;
-        case 'price':
-          aVal = a.price || 0;
-          bVal = b.price || 0;
-          break;
-        case 'totalPrice':
-          aVal = a.totalPrice || (a.price || 0) * a.quantity;
-          bVal = b.totalPrice || (b.price || 0) * b.quantity;
-          break;
-        default:
-          return 0;
+      // Handle special cases
+      if (sortConfig.key === 'customer') {
+        aVal = (a.reason || '').toLowerCase();
+        bVal = (b.reason || '').toLowerCase();
       }
+      
+      // Handle numeric values
+      if (typeof aVal === 'number' && typeof bVal === 'number') {
+        return sortConfig.direction === 'asc' ? aVal - bVal : bVal - aVal;
+      }
+      
+      // Handle string values
+      aVal = String(aVal || '').toLowerCase();
+      bVal = String(bVal || '').toLowerCase();
       
       if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
       if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1;
       return 0;
     });
-  }, [data, sortConfig]);
+  }, [filteredData, sortConfig]);
 
+  // Client-side pagination
+  const paginatedData = useMemo(() => {
+    const start = (page - 1) * ITEMS_PER_PAGE;
+    return sortedData.slice(start, start + ITEMS_PER_PAGE);
+  }, [sortedData, page]);
+
+  const totalPages = Math.ceil(sortedData.length / ITEMS_PER_PAGE);
+  const totalCount = sortedData.length;
+
+  // Handle sort
   const handleSort = (key: string) => {
     setSortConfig(prev => ({
       key,
-      direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc'
+      direction: prev.key === key && prev.direction === 'desc' ? 'asc' : 'desc'
     }));
   };
 
@@ -132,62 +121,42 @@ export const GlobalHistoryModal: React.FC<GlobalHistoryModalProps> = ({ type, on
                 <button onClick={onClose} className="p-1 hover:bg-gray-700 rounded-full"><X size={20}/></button>
             </div>
             
-            {/* Search Filters */}
-            <div className="p-3 border-b border-gray-700 bg-gray-800 space-y-2">
-                <div className="grid grid-cols-3 gap-2">
-                    {/* Customer Search */}
-                    <div className="relative">
-                        <User className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={14} />
-                        <input 
-                            type="text" 
-                            placeholder="Cari Pelanggan..." 
-                            className="w-full pl-9 pr-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-sm text-gray-200 focus:border-blue-500 outline-none" 
-                            value={customerSearch} 
-                            onChange={(e) => setCustomerSearch(e.target.value)} 
-                        />
-                    </div>
-                    
-                    {/* Part Number Search */}
-                    <div className="relative">
-                        <Hash className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={14} />
-                        <input 
-                            type="text" 
-                            placeholder="Cari Part Number..." 
-                            className="w-full pl-9 pr-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-sm text-gray-200 focus:border-blue-500 outline-none" 
-                            value={partNumberSearch} 
-                            onChange={(e) => setPartNumberSearch(e.target.value)} 
-                        />
-                    </div>
-                    
-                    {/* Ecommerce Dropdown */}
-                    <div className="relative">
-                        <ShoppingBag className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={14} />
-                        <select 
-                            className="w-full pl-9 pr-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-sm text-gray-200 focus:border-blue-500 outline-none appearance-none cursor-pointer"
-                            value={tokoFilter}
-                            onChange={(e) => setTokoFilter(e.target.value)}
-                        >
-                            <option value="all">Semua Sumber</option>
-                            {ecommerceOptions.map(ecom => (
-                                <option key={ecom} value={ecom}>{ecom}</option>
-                            ))}
-                        </select>
-                    </div>
+            {/* Filter Bar */}
+            <div className="p-3 border-b border-gray-700 bg-gray-800 grid grid-cols-1 md:grid-cols-2 gap-2">
+                <div className="relative">
+                    <User size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+                    <input 
+                        type="text" 
+                        placeholder="Cari Pelanggan..." 
+                        className="w-full bg-gray-900 border border-gray-700 rounded-lg pl-9 pr-3 py-2 text-sm text-gray-200 focus:border-blue-500 outline-none" 
+                        value={filterCustomer} 
+                        onChange={(e) => setFilterCustomer(e.target.value)} 
+                    />
+                </div>
+                <div className="relative">
+                    <Hash size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+                    <input 
+                        type="text" 
+                        placeholder="Cari Part Number..." 
+                        className="w-full bg-gray-900 border border-gray-700 rounded-lg pl-9 pr-3 py-2 text-sm text-gray-200 focus:border-blue-500 outline-none" 
+                        value={filterPartNumber} 
+                        onChange={(e) => setFilterPartNumber(e.target.value)} 
+                    />
                 </div>
             </div>
             
             <div className="flex-1 overflow-auto bg-gray-900/30 p-2">
-                {loading ? ( <div className="flex justify-center py-10"><Loader2 className="animate-spin text-blue-500" size={30}/></div> ) : data.length === 0 ? ( <div className="text-center py-10 text-gray-500">Tidak ada data history</div> ) : (
-                    <HistoryTable data={sortedData} sortConfig={sortConfig} onSort={handleSort} />
+                {loading ? ( <div className="flex justify-center py-10"><Loader2 className="animate-spin text-blue-500" size={30}/></div> ) : paginatedData.length === 0 ? ( <div className="text-center py-10 text-gray-500">Tidak ada data history</div> ) : (
+                    <HistoryTable data={paginatedData} sortConfig={sortConfig} onSort={handleSort} />
                 )}
             </div>
             <div className="p-3 border-t border-gray-700 flex justify-between items-center bg-gray-800 rounded-b-2xl">
-                <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} className="p-1 bg-gray-700 rounded disabled:opacity-30"><ChevronLeft size={18}/></button>
+                <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} className="p-2 bg-gray-700 rounded disabled:opacity-30 hover:bg-gray-600 transition-colors"><ChevronLeft size={18}/></button>
                 <div className="text-center">
-                  <span className="text-xs text-gray-400">Hal {page} / {totalPages}</span>
+                  <span className="text-xs text-gray-400">Hal {page} / {totalPages || 1}</span>
                   <span className="text-[10px] text-gray-500 ml-2">({totalCount} item)</span>
                 </div>
-                <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages || totalPages === 0} className="p-1 bg-gray-700 rounded disabled:opacity-30"><ChevronRight size={18}/></button>
+                <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages || totalPages === 0} className="p-2 bg-gray-700 rounded disabled:opacity-30 hover:bg-gray-600 transition-colors"><ChevronRight size={18}/></button>
             </div>
         </div>
     </div>

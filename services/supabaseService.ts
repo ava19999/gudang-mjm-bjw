@@ -1600,16 +1600,20 @@ export const fetchHistoryLogsPaginated = async (
     let stockMap: Record<string, number> = {};
     
     if (partNumbers.length > 0) {
-      const { data: stockData } = await supabase
-        .from(stockTable)
-        .select('part_number, quantity')
-        .in('part_number', partNumbers);
-      
-      if (stockData) {
-        stockMap = stockData.reduce((acc, item) => {
-          acc[item.part_number] = item.quantity;
-          return acc;
-        }, {} as Record<string, number>);
+      // Batch fetch in chunks of 100 to avoid Supabase query limits
+      const BATCH_SIZE = 100;
+      for (let i = 0; i < partNumbers.length; i += BATCH_SIZE) {
+        const batch = partNumbers.slice(i, i + BATCH_SIZE);
+        const { data: stockData } = await supabase
+          .from(stockTable)
+          .select('part_number, quantity')
+          .in('part_number', batch);
+        
+        if (stockData) {
+          stockData.forEach(item => {
+            stockMap[item.part_number] = item.quantity;
+          });
+        }
       }
     }
     
