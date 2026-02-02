@@ -32,45 +32,75 @@ const mapToBoolean = (data: any[]) => {
 
 /**
  * Cek apakah resi atau order_id sudah ada di barang_keluar
- * Return Set of resi yang sudah ada
+ * Return Set of resi yang sudah ada (UPPERCASE)
  */
 export const checkExistingInBarangKeluar = async (
   resiOrOrders: string[],
   store: string | null
 ): Promise<Set<string>> => {
-  const table = getBarangKeluarTable(store);
   if (!resiOrOrders || resiOrOrders.length === 0) return new Set();
   
   try {
-    // Normalize: uppercase dan trim
-    const normalized = resiOrOrders.map(r => r.trim().toUpperCase());
+    // Normalize: uppercase dan trim, filter yang kosong
+    const normalized = resiOrOrders
+      .map(r => (r || '').trim().toUpperCase())
+      .filter(r => r !== '' && r !== '-');
     
-    // Query semua resi dari barang_keluar
-    const { data, error } = await supabase
-      .from(table)
-      .select('resi')
-      .limit(5000);
+    if (normalized.length === 0) return new Set();
     
-    if (error) {
-      console.error('checkExistingInBarangKeluar error:', error);
-      return new Set();
-    }
-    
-    // Buat set dari resi yang ada di barang_keluar (UPPERCASE)
-    const existingSet = new Set<string>(
-      (data || [])
-        .map((d: any) => (d.resi || '').trim().toUpperCase())
-        .filter((r: string) => r !== '' && r !== '-')
-    );
-    
-    // Return resi yang ada di kedua set (intersection)
     const foundSet = new Set<string>();
-    for (const resi of normalized) {
-      if (existingSet.has(resi)) {
-        foundSet.add(resi);
+    
+    // Query KEDUA tabel barang_keluar (mjm dan bjw) untuk memastikan
+    // karena data bisa ada di salah satu atau kedua tabel
+    const tables = ['barang_keluar_mjm', 'barang_keluar_bjw'];
+    
+    for (const table of tables) {
+      // Query dengan .in() untuk matching langsung - lebih efisien
+      // Gunakan ilike untuk case-insensitive matching
+      const { data, error } = await supabase
+        .from(table)
+        .select('resi')
+        .in('resi', normalized);
+      
+      if (!error && data) {
+        data.forEach((d: any) => {
+          if (d.resi) {
+            foundSet.add(d.resi.trim().toUpperCase());
+          }
+        });
+      }
+      
+      // Juga cek dengan lowercase version (case-insensitive)
+      const lowerNormalized = normalized.map(r => r.toLowerCase());
+      const { data: dataLower, error: errorLower } = await supabase
+        .from(table)
+        .select('resi')
+        .in('resi', lowerNormalized);
+      
+      if (!errorLower && dataLower) {
+        dataLower.forEach((d: any) => {
+          if (d.resi) {
+            foundSet.add(d.resi.trim().toUpperCase());
+          }
+        });
+      }
+      
+      // Cek juga dengan original case
+      const { data: dataOrig, error: errorOrig } = await supabase
+        .from(table)
+        .select('resi')
+        .in('resi', resiOrOrders.map(r => (r || '').trim()).filter(r => r !== ''));
+      
+      if (!errorOrig && dataOrig) {
+        dataOrig.forEach((d: any) => {
+          if (d.resi) {
+            foundSet.add(d.resi.trim().toUpperCase());
+          }
+        });
       }
     }
     
+    console.log(`[checkExistingInBarangKeluar] Checked ${normalized.length} resi, found ${foundSet.size} in barang_keluar`);
     return foundSet;
   } catch (err) {
     console.error('checkExistingInBarangKeluar exception:', err);
@@ -251,7 +281,46 @@ export const getAllPendingStage1Resi = async (store: string | null) => {
     .limit(500);
 
   if (error) return [];
-  return mapToBoolean(data || []);
+  
+  const mappedData = mapToBoolean(data || []);
+  if (mappedData.length === 0) return [];
+  
+  // ===== FILTER: Buang resi yang sudah ada di barang_keluar (sudah terjual) =====
+  const allResis = mappedData.map((d: any) => d.resi).filter(Boolean);
+  const allNoPesanan = mappedData.map((d: any) => d.no_pesanan).filter(Boolean);
+  const allToCheck = [...new Set([...allResis, ...allNoPesanan])];
+  
+  const existingInBarangKeluar = await checkExistingInBarangKeluar(allToCheck, store);
+  
+  // Jika ada resi yang sudah terjual, update status menjadi 'completed'
+  const soldResiIds: string[] = [];
+  const filteredData = mappedData.filter((item: any) => {
+    const resiUpper = (item.resi || '').trim().toUpperCase();
+    const noPesananUpper = (item.no_pesanan || '').trim().toUpperCase();
+    
+    if (existingInBarangKeluar.has(resiUpper) || existingInBarangKeluar.has(noPesananUpper)) {
+      soldResiIds.push(item.id);
+      return false; // Exclude dari hasil
+    }
+    return true;
+  });
+  
+  // Update status resi yang sudah terjual ke 'completed' - AWAIT agar selesai
+  if (soldResiIds.length > 0) {
+    console.log(`[getAllPendingStage1Resi] Auto-marking ${soldResiIds.length} resi as completed (already in barang_keluar):`, soldResiIds);
+    const { error: updateErr } = await supabase
+      .from(table)
+      .update({ status: 'completed' })
+      .in('id', soldResiIds);
+    
+    if (updateErr) {
+      console.error('Error auto-updating sold resi status:', updateErr);
+    } else {
+      console.log(`[getAllPendingStage1Resi] Successfully marked ${soldResiIds.length} resi as completed`);
+    }
+  }
+  
+  return filteredData;
 };
 
 export const deleteResiStage1 = async (id: string, store: string | null) => {
@@ -649,7 +718,45 @@ export const fetchPendingCSVItems = async (store: string | null) => {
     console.error("Gagal ambil pending CSV:", error);
     return [];
   }
-  return data || [];
+  
+  if (!data || data.length === 0) return [];
+  
+  // ===== FILTER: Buang resi yang sudah ada di barang_keluar (sudah terjual) =====
+  const allResis = data.map((d: any) => d.resi).filter(Boolean);
+  const allOrderIds = data.map((d: any) => d.order_id).filter(Boolean);
+  const allToCheck = [...new Set([...allResis, ...allOrderIds])];
+  
+  const existingInBarangKeluar = await checkExistingInBarangKeluar(allToCheck, store);
+  
+  // Jika ada resi yang sudah terjual, update status menjadi 'processed' - AWAIT agar selesai
+  const soldResis: string[] = [];
+  const filteredData = data.filter((item: any) => {
+    const resiUpper = (item.resi || '').trim().toUpperCase();
+    const orderIdUpper = (item.order_id || '').trim().toUpperCase();
+    
+    if (existingInBarangKeluar.has(resiUpper) || existingInBarangKeluar.has(orderIdUpper)) {
+      soldResis.push(item.resi);
+      return false; // Exclude dari hasil
+    }
+    return true;
+  });
+  
+  // Update status resi yang sudah terjual ke 'processed' - AWAIT agar selesai
+  if (soldResis.length > 0) {
+    console.log(`[fetchPendingCSVItems] Auto-marking ${soldResis.length} resi as processed (already in barang_keluar):`, soldResis);
+    const { error: updateErr } = await supabase
+      .from(table)
+      .update({ status: 'processed' })
+      .in('resi', soldResis);
+    
+    if (updateErr) {
+      console.error('Error auto-updating sold resi status:', updateErr);
+    } else {
+      console.log(`[fetchPendingCSVItems] Successfully marked ${soldResis.length} resi as processed`);
+    }
+  }
+  
+  return filteredData;
 };
 
 export const processBarangKeluarBatch = async (items: any[], store: string | null) => {
