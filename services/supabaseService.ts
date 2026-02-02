@@ -427,6 +427,445 @@ const savePhotosToTable = async (partNumber: string, images: string[]) => {
   } catch (e) { console.error('Error saving photos:', e); }
 };
 
+// ============================================================================
+// FOTO PRODUK TYPES & FUNCTIONS
+// ============================================================================
+
+export interface FotoProdukRow {
+  id?: number;
+  part_number: string;
+  foto_1?: string;
+  foto_2?: string;
+  foto_3?: string;
+  foto_4?: string;
+  foto_5?: string;
+  foto_6?: string;
+  foto_7?: string;
+  foto_8?: string;
+  foto_9?: string;
+  foto_10?: string;
+  created_at?: string;
+}
+
+export interface FotoLinkRow {
+  nama_csv: string;
+  sku?: string | null;  // Optional - kolom mungkin belum ada di tabel
+  foto_1?: string | null;
+  foto_2?: string | null;
+  foto_3?: string | null;
+  foto_4?: string | null;
+  foto_5?: string | null;
+  foto_6?: string | null;
+  foto_7?: string | null;
+  foto_8?: string | null;
+  foto_9?: string | null;
+  foto_10?: string | null;
+}
+
+// Fetch foto produk dari tabel foto
+export const fetchFotoProduk = async (searchTerm?: string): Promise<FotoProdukRow[]> => {
+  try {
+    let query = supabase
+      .from('foto')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (searchTerm && searchTerm.trim()) {
+      query = query.ilike('part_number', `%${searchTerm}%`);
+    }
+
+    const { data, error } = await query.limit(500);
+
+    if (error) {
+      // Check if table doesn't exist
+      if (error.code === '42P01' || error.message?.includes('does not exist')) {
+        console.warn('Table foto does not exist');
+        return [];
+      }
+      console.error('fetchFotoProduk Error:', error);
+      return [];
+    }
+
+    return data || [];
+  } catch (err) {
+    console.error('fetchFotoProduk Exception:', err);
+    return [];
+  }
+};
+
+// Fetch all foto_link entries
+export const fetchFotoLink = async (searchTerm?: string): Promise<FotoLinkRow[]> => {
+  try {
+    // Select semua kolom - sku mungkin tidak ada di tabel
+    let query = supabase
+      .from('foto_link')
+      .select('*')
+      .order('nama_csv', { ascending: true });
+
+    if (searchTerm && searchTerm.trim()) {
+      // Search in nama_csv only (sku mungkin tidak ada)
+      query = query.ilike('nama_csv', `%${searchTerm}%`);
+    }
+
+    // Fetch semua data tanpa limit (untuk 3388+ rows)
+    const { data, error } = await query;
+
+    if (error) {
+      // Check if table doesn't exist
+      if (error.code === '42P01' || error.message?.includes('does not exist')) {
+        console.warn('Table foto_link does not exist');
+        return [];
+      }
+      console.error('fetchFotoLink Error:', error);
+      return [];
+    }
+
+    return data || [];
+  } catch (err) {
+    console.error('fetchFotoLink Exception:', err);
+    return [];
+  }
+};
+
+// Fetch foto_link entries that don't have SKU yet
+// Note: Jika kolom sku belum ada, ini akan return semua data
+export const fetchFotoLinkWithoutSku = async (): Promise<FotoLinkRow[]> => {
+  try {
+    // Coba fetch semua dulu, filter di client side jika sku column tidak ada
+    const { data, error } = await supabase
+      .from('foto_link')
+      .select('*')
+      .order('nama_csv', { ascending: true })
+      .limit(500);
+
+    if (error) {
+      console.error('fetchFotoLinkWithoutSku Error:', error);
+      return [];
+    }
+
+    // Filter di client side - items tanpa sku
+    const filtered = (data || []).filter(d => !d.sku || d.sku.trim() === '');
+    return filtered;
+  } catch (err) {
+    console.error('fetchFotoLinkWithoutSku Exception:', err);
+    return [];
+  }
+};
+
+// Check existing part numbers in foto table
+export const checkExistingFotoPartNumbers = async (partNumbers: string[]): Promise<Set<string>> => {
+  if (!partNumbers || partNumbers.length === 0) return new Set();
+  
+  try {
+    const { data, error } = await supabase
+      .from('foto')
+      .select('part_number')
+      .in('part_number', partNumbers);
+
+    if (error) {
+      console.error('checkExistingFotoPartNumbers Error:', error);
+      return new Set();
+    }
+
+    return new Set((data || []).map(d => d.part_number));
+  } catch (err) {
+    console.error('checkExistingFotoPartNumbers Exception:', err);
+    return new Set();
+  }
+};
+
+// Fetch all part numbers from MJM store (for autocomplete)
+export const fetchAllPartNumbersMJM = async (): Promise<Array<{ part_number: string; name: string }>> => {
+  try {
+    const { data, error } = await supabase
+      .from('base_mjm')
+      .select('part_number, name')
+      .not('part_number', 'is', null)
+      .order('part_number', { ascending: true });
+
+    if (error) {
+      console.error('fetchAllPartNumbersMJM Error:', error);
+      return [];
+    }
+
+    return (data || []).map(d => ({
+      part_number: d.part_number || '',
+      name: d.name || ''
+    }));
+  } catch (err) {
+    console.error('fetchAllPartNumbersMJM Exception:', err);
+    return [];
+  }
+};
+
+// Insert batch to foto table
+export const insertFotoBatch = async (
+  rows: FotoProdukRow[]
+): Promise<{ success: boolean; error?: string; inserted?: number }> => {
+  if (!rows || rows.length === 0) {
+    return { success: false, error: 'No data to insert' };
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('foto')
+      .upsert(rows, { onConflict: 'part_number' })
+      .select();
+
+    if (error) {
+      console.error('insertFotoBatch Error:', error);
+      return { success: false, error: error.message };
+    }
+
+    return { success: true, inserted: data?.length || 0 };
+  } catch (err: any) {
+    console.error('insertFotoBatch Exception:', err);
+    return { success: false, error: err.message };
+  }
+};
+
+// Insert batch to foto_link table
+export const insertFotoLinkBatch = async (
+  rows: FotoLinkRow[]
+): Promise<{ success: boolean; error?: string; inserted?: number }> => {
+  if (!rows || rows.length === 0) {
+    return { success: false, error: 'No data to insert' };
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('foto_link')
+      .upsert(rows, { onConflict: 'nama_csv' })
+      .select();
+
+    if (error) {
+      console.error('insertFotoLinkBatch Error:', error);
+      return { success: false, error: error.message };
+    }
+
+    return { success: true, inserted: data?.length || 0 };
+  } catch (err: any) {
+    console.error('insertFotoLinkBatch Exception:', err);
+    return { success: false, error: err.message };
+  }
+};
+
+// Update SKU in foto_link and sync to foto + product_alias + base_mjm image_url
+export const updateFotoLinkSku = async (
+  namaCsv: string,
+  sku: string
+): Promise<{ success: boolean; error?: string; warning?: string }> => {
+  if (!namaCsv || !sku) {
+    return { success: false, error: 'nama_csv and sku are required' };
+  }
+
+  try {
+    // 0. Check if SKU exists in base_mjm or base_bjw
+    const { data: mjmItem } = await supabase
+      .from('base_mjm')
+      .select('part_number')
+      .eq('part_number', sku)
+      .maybeSingle();
+    
+    const { data: bjwItem } = await supabase
+      .from('base_bjw')
+      .select('part_number')
+      .eq('part_number', sku)
+      .maybeSingle();
+
+    const skuExistsInInventory = !!(mjmItem || bjwItem);
+
+    // 1. Get the foto_link row to get foto URLs
+    const { data: linkData, error: fetchError } = await supabase
+      .from('foto_link')
+      .select('*')
+      .eq('nama_csv', namaCsv)
+      .single();
+
+    if (fetchError || !linkData) {
+      return { success: false, error: 'foto_link entry not found: ' + (fetchError?.message || 'unknown') };
+    }
+
+    // 2. Update the sku in foto_link
+    // Note: Jika kolom sku belum ada, ini akan error - user perlu menambahkan kolom dulu
+    const { error: updateError } = await supabase
+      .from('foto_link')
+      .update({ sku })
+      .eq('nama_csv', namaCsv);
+
+    if (updateError) {
+      // Check if error is because column doesn't exist
+      if (updateError.message?.includes('column') || updateError.code === '42703') {
+        return { 
+          success: false, 
+          error: 'Kolom "sku" belum ada di tabel foto_link. Silakan tambahkan kolom "sku" (text) ke tabel foto_link di Supabase.' 
+        };
+      }
+      return { success: false, error: updateError.message };
+    }
+
+    // Get first foto URL for base_mjm update
+    const firstFoto = linkData.foto_1 || linkData.foto_2 || linkData.foto_3 || '';
+
+    // 3. Insert/upsert to foto table with the photos
+    const fotoPayload: any = {
+      part_number: sku,
+    };
+    // Only add foto fields that have values
+    if (linkData.foto_1) fotoPayload.foto_1 = linkData.foto_1;
+    if (linkData.foto_2) fotoPayload.foto_2 = linkData.foto_2;
+    if (linkData.foto_3) fotoPayload.foto_3 = linkData.foto_3;
+    if (linkData.foto_4) fotoPayload.foto_4 = linkData.foto_4;
+    if (linkData.foto_5) fotoPayload.foto_5 = linkData.foto_5;
+    if (linkData.foto_6) fotoPayload.foto_6 = linkData.foto_6;
+    if (linkData.foto_7) fotoPayload.foto_7 = linkData.foto_7;
+    if (linkData.foto_8) fotoPayload.foto_8 = linkData.foto_8;
+    if (linkData.foto_9) fotoPayload.foto_9 = linkData.foto_9;
+    if (linkData.foto_10) fotoPayload.foto_10 = linkData.foto_10;
+
+    // Try upsert first, if fails try delete then insert
+    let { error: fotoError } = await supabase
+      .from('foto')
+      .upsert(fotoPayload, { onConflict: 'part_number' });
+
+    if (fotoError) {
+      console.warn('Upsert to foto failed, trying delete+insert:', fotoError.message);
+      // Delete existing and insert new
+      await supabase.from('foto').delete().eq('part_number', sku);
+      const { error: insertError } = await supabase.from('foto').insert(fotoPayload);
+      if (insertError) {
+        console.warn('Insert to foto also failed:', insertError.message);
+      } else {
+        console.log('Successfully inserted foto for:', sku);
+      }
+    } else {
+      console.log('Successfully upserted foto for:', sku);
+    }
+
+    // 4. Update image_url in base_mjm directly (so foto appears immediately)
+    if (firstFoto) {
+      const { error: mjmError } = await supabase
+        .from('base_mjm')
+        .update({ image_url: firstFoto })
+        .eq('part_number', sku);
+      
+      if (mjmError) {
+        console.warn('Warning: Update base_mjm image_url failed:', mjmError.message);
+      }
+
+      // Also try base_bjw
+      const { error: bjwError } = await supabase
+        .from('base_bjw')
+        .update({ image_url: firstFoto })
+        .eq('part_number', sku);
+      
+      if (bjwError) {
+        console.warn('Warning: Update base_bjw image_url failed:', bjwError.message);
+      }
+    }
+
+    // 5. Insert to product_alias for search capability
+    // First check if alias already exists
+    const { data: existingAlias } = await supabase
+      .from('product_alias')
+      .select('id')
+      .eq('part_number', sku)
+      .eq('alias_name', namaCsv)
+      .maybeSingle();
+
+    if (!existingAlias) {
+      const { error: aliasError } = await supabase
+        .from('product_alias')
+        .insert({
+          part_number: sku,
+          alias_name: namaCsv,
+          source: 'foto_link'
+        });
+
+      if (aliasError) {
+        console.warn('Warning: Insert to product_alias failed:', aliasError.message);
+        // Continue anyway
+      }
+    }
+
+    // Return with warning if SKU not found in inventory
+    if (!skuExistsInInventory) {
+      return { 
+        success: true, 
+        warning: `SKU "${sku}" tidak ditemukan di inventory. Foto tersimpan tapi tidak akan muncul di Beranda/Gudang.` 
+      };
+    }
+
+    return { success: true };
+  } catch (err: any) {
+    console.error('updateFotoLinkSku Exception:', err);
+    return { success: false, error: err.message };
+  }
+};
+
+// Search inventory with product_alias support
+export const searchInventoryWithAlias = async (
+  store: string | null,
+  searchTerm: string
+): Promise<InventoryItem[]> => {
+  if (!searchTerm || searchTerm.trim().length < 2) return [];
+  
+  const table = getTableName(store);
+  const searchLower = searchTerm.toLowerCase().trim();
+
+  try {
+    // First search directly in inventory
+    let { data: directResults } = await supabase
+      .from(table)
+      .select('*')
+      .or(`part_number.ilike.%${searchLower}%,name.ilike.%${searchLower}%`)
+      .limit(50);
+
+    // Then search via product_alias
+    const { data: aliasResults } = await supabase
+      .from('product_alias')
+      .select('part_number')
+      .ilike('alias_name', `%${searchLower}%`)
+      .limit(20);
+
+    const aliasPartNumbers = (aliasResults || []).map(a => a.part_number).filter(Boolean);
+    
+    let aliasItems: any[] = [];
+    if (aliasPartNumbers.length > 0) {
+      const { data } = await supabase
+        .from(table)
+        .select('*')
+        .in('part_number', aliasPartNumbers);
+      aliasItems = data || [];
+    }
+
+    // Merge results (avoid duplicates)
+    const allItems = [...(directResults || [])];
+    const existingPNs = new Set(allItems.map(i => i.part_number));
+    aliasItems.forEach(item => {
+      if (!existingPNs.has(item.part_number)) {
+        allItems.push(item);
+      }
+    });
+
+    if (allItems.length === 0) return [];
+
+    // Fetch photos and prices
+    const photoMap = await fetchPhotosForItems(allItems);
+    const priceMap = await fetchLatestPricesForItems(allItems, store);
+
+    return allItems.map(item => {
+      const mapped = mapItemFromDB(item, photoMap[item.part_number]);
+      const lookupKey = (item.part_number || '').trim();
+      if (priceMap[lookupKey]) mapped.price = priceMap[lookupKey].harga;
+      return mapped;
+    });
+  } catch (err) {
+    console.error('searchInventoryWithAlias Exception:', err);
+    return [];
+  }
+};
+
 // --- INVENTORY FUNCTIONS ---
 
 export const fetchInventory = async (store?: string | null): Promise<InventoryItem[]> => {

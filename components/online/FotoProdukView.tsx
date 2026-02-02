@@ -1,10 +1,14 @@
 // FILE: components/online/FotoProdukView.tsx
 import React, { useState, useEffect } from 'react';
-import { Camera, Search, ChevronLeft, ChevronRight, Image, Loader2, RefreshCw, Upload, Download } from 'lucide-react';
+import { Camera, Search, ChevronLeft, ChevronRight, Image, Loader2, RefreshCw, Upload, Download, Link2, Database } from 'lucide-react';
 import { fetchFotoProduk, FotoProdukRow } from '../../services/supabaseService';
 import { FotoUploadModal } from './FotoUploadModal';
+import { FotoLinkManager } from './FotoLinkManager';
+
+type TabType = 'foto' | 'foto_link';
 
 export const FotoProdukView: React.FC = () => {
+  const [activeTab, setActiveTab] = useState<TabType>('foto_link');
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [data, setData] = useState<FotoProdukRow[]>([]);
@@ -14,8 +18,9 @@ export const FotoProdukView: React.FC = () => {
   
   const itemsPerPage = 50;
   
-  // Load data saat pertama kali atau saat refresh
+  // Load data saat pertama kali atau saat refresh - hanya untuk tab foto
   const loadData = async (searchTerm?: string) => {
+    if (activeTab !== 'foto') return; // Skip loading if not on foto tab
     setLoading(true);
     setError(null);
     try {
@@ -30,18 +35,22 @@ export const FotoProdukView: React.FC = () => {
     }
   };
   
+  // Load data when tab changes to foto
   useEffect(() => {
-    loadData();
-  }, []);
+    if (activeTab === 'foto') {
+      loadData();
+    }
+  }, [activeTab]);
   
-  // Debounce search
+  // Debounce search - only for foto tab
   useEffect(() => {
+    if (activeTab !== 'foto') return;
     const timer = setTimeout(() => {
       loadData(search);
       setPage(1);
     }, 300);
     return () => clearTimeout(timer);
-  }, [search]);
+  }, [search, activeTab]);
   
   const totalPages = Math.ceil((data?.length || 0) / itemsPerPage) || 1;
   
@@ -74,6 +83,7 @@ export const FotoProdukView: React.FC = () => {
 
   return (
     <div className="p-4">
+      {/* Header dengan Tabs */}
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
           <div className="p-2 bg-cyan-900/30 rounded-lg">
@@ -84,41 +94,74 @@ export const FotoProdukView: React.FC = () => {
             <p className="text-xs text-gray-400">Kelola foto produk untuk online shop</p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          {/* Tombol Upload */}
-          <button
-            onClick={() => setShowUploadModal(true)}
-            className="flex items-center gap-1.5 px-3 py-2 bg-green-900/30 hover:bg-green-900/50 text-green-400 rounded-lg transition-colors text-xs font-medium border border-green-900/50"
-            title="Upload CSV/Excel"
-          >
-            <Upload size={16} />
-            <span className="hidden sm:inline">Upload</span>
-          </button>
-          
-          {/* Tombol Export */}
-          <button
-            onClick={() => {
-              // TODO: Implementasi export
-              console.log('Export clicked');
-            }}
-            className="flex items-center gap-1.5 px-3 py-2 bg-blue-900/30 hover:bg-blue-900/50 text-blue-400 rounded-lg transition-colors text-xs font-medium border border-blue-900/50"
-            title="Export CSV/Excel"
-          >
-            <Download size={16} />
-            <span className="hidden sm:inline">Export</span>
-          </button>
-          
-          {/* Tombol Refresh */}
-          <button
-            onClick={() => loadData(search)}
-            disabled={loading}
-            className="p-2 bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors disabled:opacity-50"
-            title="Refresh Data"
-          >
-            <RefreshCw size={18} className={loading ? 'animate-spin text-cyan-400' : 'text-gray-300'} />
-          </button>
-        </div>
       </div>
+
+      {/* Tab Navigation */}
+      <div className="flex items-center gap-2 mb-6 border-b border-gray-700">
+        <button
+          onClick={() => setActiveTab('foto_link')}
+          className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors border-b-2 -mb-px ${
+            activeTab === 'foto_link'
+              ? 'text-purple-400 border-purple-400'
+              : 'text-gray-400 border-transparent hover:text-gray-200'
+          }`}
+        >
+          <Link2 size={16} />
+          Foto Link Manager
+        </button>
+        <button
+          onClick={() => setActiveTab('foto')}
+          className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors border-b-2 -mb-px ${
+            activeTab === 'foto'
+              ? 'text-cyan-400 border-cyan-400'
+              : 'text-gray-400 border-transparent hover:text-gray-200'
+          }`}
+        >
+          <Database size={16} />
+          Database Foto (SKU)
+        </button>
+      </div>
+
+      {/* Tab Content */}
+      {activeTab === 'foto_link' ? (
+        <FotoLinkManager />
+      ) : (
+        <div>
+          {/* Foto Table Controls */}
+          <div className="flex items-center justify-end gap-2 mb-4">
+            {/* Tombol Upload */}
+            <button
+              onClick={() => setShowUploadModal(true)}
+              className="flex items-center gap-1.5 px-3 py-2 bg-green-900/30 hover:bg-green-900/50 text-green-400 rounded-lg transition-colors text-xs font-medium border border-green-900/50"
+              title="Upload CSV/Excel"
+            >
+              <Upload size={16} />
+              <span className="hidden sm:inline">Upload</span>
+            </button>
+            
+            {/* Tombol Export */}
+            <button
+              onClick={() => {
+                // TODO: Implementasi export
+                console.log('Export clicked');
+              }}
+              className="flex items-center gap-1.5 px-3 py-2 bg-blue-900/30 hover:bg-blue-900/50 text-blue-400 rounded-lg transition-colors text-xs font-medium border border-blue-900/50"
+              title="Export CSV/Excel"
+            >
+              <Download size={16} />
+              <span className="hidden sm:inline">Export</span>
+            </button>
+            
+            {/* Tombol Refresh */}
+            <button
+              onClick={() => loadData(search)}
+              disabled={loading}
+              className="p-2 bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors disabled:opacity-50"
+              title="Refresh Data"
+            >
+              <RefreshCw size={18} className={loading ? 'animate-spin text-cyan-400' : 'text-gray-300'} />
+            </button>
+          </div>
 
       {/* Search Bar */}
       <div className="mb-4">
@@ -225,6 +268,8 @@ export const FotoProdukView: React.FC = () => {
         onClose={() => setShowUploadModal(false)}
         onSuccess={() => loadData(search)}
       />
+        </div>
+      )}
     </div>
   );
 };

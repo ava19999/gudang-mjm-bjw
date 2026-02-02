@@ -290,14 +290,16 @@ export const DataAgungView: React.FC<DataAgungViewProps> = ({ items, onRefresh, 
     }
   }, [selectedRow, activeTable, getCurrentTableData]);
 
-  // Handle add product to online
-  const handleAddOnlineProduct = async () => {
-    if (!selectedPartNumber) {
+  // Handle add product to online - accepts optional partNumber parameter for direct keyboard selection
+  const handleAddOnlineProduct = async (directPartNumber?: string) => {
+    const partNumberToUse = directPartNumber || selectedPartNumber;
+    
+    if (!partNumberToUse) {
       showToast('Pilih produk terlebih dahulu', 'error');
       return;
     }
 
-    const item = items.find(i => i.partNumber === selectedPartNumber);
+    const item = items.find(i => i.partNumber === partNumberToUse);
     if (!item) {
       showToast('Produk tidak ditemukan', 'error');
       return;
@@ -1033,11 +1035,23 @@ export const DataAgungView: React.FC<DataAgungViewProps> = ({ items, onRefresh, 
                   Pilih Produk dari Data Pusat (Base Warehouse)
                 </label>
                 <Autocomplete
-                  options={baseWarehouseItems}
+                  options={baseWarehouseItems.filter(item => 
+                    // Exclude items already in onlineProducts
+                    !onlineProducts.some(op => op.partNumber.toLowerCase() === item.partNumber.toLowerCase())
+                  )}
                   getOptionLabel={(option) => option.partNumber ? `${option.partNumber} - ${option.name}` : ''}
                   value={baseWarehouseItems.find(item => item.partNumber === selectedPartNumber) || null}
-                  onChange={(_, newValue) => {
-                    setSelectedPartNumber(newValue?.partNumber || '');
+                  onChange={(_, newValue, reason) => {
+                    if (newValue) {
+                      setSelectedPartNumber(newValue.partNumber || '');
+                      // Auto-add on selection (Enter or click)
+                      if (reason === 'selectOption') {
+                        // Pass partNumber directly to avoid race condition with state
+                        handleAddOnlineProduct(newValue.partNumber);
+                      }
+                    } else {
+                      setSelectedPartNumber('');
+                    }
                   }}
                   filterOptions={(options, { inputValue }) => {
                     const searchLower = inputValue.toLowerCase();
@@ -1046,21 +1060,32 @@ export const DataAgungView: React.FC<DataAgungViewProps> = ({ items, onRefresh, 
                       (option.name || '').toLowerCase().includes(searchLower)
                     ).slice(0, 50);
                   }}
-                  renderOption={(props, option) => (
-                    <li {...props} key={option.id} className="px-3 py-2 hover:bg-gray-700 cursor-pointer border-b border-gray-700">
-                      <div>
-                        <div className="font-semibold text-gray-100">{option.partNumber}</div>
-                        <div className="text-xs text-gray-400">{option.name}</div>
-                        <div className="text-xs text-gray-500">Qty: <span className={option.quantity === 0 ? 'text-red-400' : 'text-green-400'}>{option.quantity}</span></div>
-                      </div>
-                    </li>
-                  )}
+                  getOptionDisabled={(option) => 
+                    // Double check: disable if already exists
+                    onlineProducts.some(op => op.partNumber.toLowerCase() === option.partNumber.toLowerCase())
+                  }
+                  renderOption={(props, option) => {
+                    const isAlreadyAdded = onlineProducts.some(op => op.partNumber.toLowerCase() === option.partNumber.toLowerCase());
+                    return (
+                      <li {...props} key={option.id} className={`px-3 py-2 cursor-pointer border-b border-gray-700 ${isAlreadyAdded ? 'opacity-50 bg-gray-800' : 'hover:bg-gray-700'}`}>
+                        <div>
+                          <div className="font-semibold text-gray-100 flex items-center gap-2">
+                            {option.partNumber}
+                            {isAlreadyAdded && <span className="text-xs text-yellow-400 bg-yellow-900/30 px-1.5 py-0.5 rounded">Sudah ada</span>}
+                          </div>
+                          <div className="text-xs text-gray-400">{option.name}</div>
+                          <div className="text-xs text-gray-500">Qty: <span className={option.quantity === 0 ? 'text-red-400' : 'text-green-400'}>{option.quantity}</span></div>
+                        </div>
+                      </li>
+                    );
+                  }}
                   renderInput={(params) => (
                     <TextField
                       {...params}
                       placeholder="Ketik untuk mencari produk..."
                       variant="outlined"
                       size="small"
+                      autoFocus
                       sx={{
                         '& .MuiOutlinedInput-root': {
                           backgroundColor: '#111827',
@@ -1076,6 +1101,13 @@ export const DataAgungView: React.FC<DataAgungViewProps> = ({ items, onRefresh, 
                       }}
                     />
                   )}
+                  openOnFocus
+                  autoHighlight
+                  selectOnFocus
+                  clearOnBlur={false}
+                  handleHomeEndKeys
+                  disableCloseOnSelect={false}
+                  blurOnSelect={false}
                   componentsProps={{
                     paper: {
                       sx: {
@@ -1089,6 +1121,7 @@ export const DataAgungView: React.FC<DataAgungViewProps> = ({ items, onRefresh, 
                             padding: 0,
                             '&:hover': { backgroundColor: '#374151' },
                             '&[aria-selected="true"]': { backgroundColor: '#374151' },
+                            '&.Mui-focused': { backgroundColor: '#374151' },
                           },
                         },
                       },
@@ -1098,7 +1131,10 @@ export const DataAgungView: React.FC<DataAgungViewProps> = ({ items, onRefresh, 
                   fullWidth
                 />
                 <p className="text-xs text-gray-500 mt-2">
-                  * Hanya menampilkan produk dari Base Warehouse (Qty = 0)
+                  * Hanya menampilkan produk dari Base Warehouse (Qty = 0) yang belum ada di Produk Online
+                </p>
+                <p className="text-xs text-green-500 mt-1">
+                  💡 Tekan Enter setelah memilih untuk langsung menambahkan
                 </p>
               </div>
               <div className="flex gap-3">
