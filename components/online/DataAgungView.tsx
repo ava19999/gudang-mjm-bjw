@@ -1,6 +1,6 @@
 // FILE: src/components/online/DataAgungView.tsx
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
-import { Package, Plus, X, Search, Keyboard, RefreshCw, CloudOff, Cloud } from 'lucide-react';
+import { Package, Plus, X, Search, Keyboard, RefreshCw, CloudOff, Cloud, Trash2 } from 'lucide-react';
 import { InventoryItem, OnlineProduct, ProdukKosong, TableMasuk, BaseWarehouseItem } from '../../types';
 import Autocomplete from '@mui/material/Autocomplete';
 import TextField from '@mui/material/TextField';
@@ -441,6 +441,54 @@ export const DataAgungView: React.FC<DataAgungViewProps> = ({ items, onRefresh, 
     setIsLoading(false);
   };
 
+  // Handle delete online product
+  const handleDeleteOnlineProduct = async (id: string) => {
+    if (!confirm('Hapus produk ini dari Produk Online?')) return;
+    
+    setIsLoading(true);
+    const result = await deleteOnlineProduct(selectedStore, id);
+    
+    if (result.success) {
+      setOnlineProducts(prev => prev.filter(p => p.id !== id));
+      showToast('Produk berhasil dihapus');
+    } else {
+      showToast(result.message || 'Gagal menghapus produk', 'error');
+    }
+    setIsLoading(false);
+  };
+
+  // Handle delete produk kosong
+  const handleDeleteProdukKosong = async (id: string) => {
+    if (!confirm('Hapus produk ini dari Produk Kosong?')) return;
+    
+    setIsLoading(true);
+    const result = await deleteProdukKosong(selectedStore, id);
+    
+    if (result.success) {
+      setProdukKosong(prev => prev.filter(p => p.id !== id));
+      showToast('Produk berhasil dihapus');
+    } else {
+      showToast(result.message || 'Gagal menghapus produk', 'error');
+    }
+    setIsLoading(false);
+  };
+
+  // Handle delete table masuk
+  const handleDeleteTableMasuk = async (id: string) => {
+    if (!confirm('Hapus produk ini dari Table Masuk?')) return;
+    
+    setIsLoading(true);
+    const result = await deleteTableMasuk(selectedStore, id);
+    
+    if (result.success) {
+      setTableMasuk(prev => prev.filter(p => p.id !== id));
+      showToast('Produk berhasil dihapus');
+    } else {
+      showToast(result.message || 'Gagal menghapus produk', 'error');
+    }
+    setIsLoading(false);
+  };
+
   // Auto-sync: Check for quantity changes
   useEffect(() => {
     const itemsToMoveToMasuk: TableMasuk[] = [];
@@ -769,7 +817,7 @@ export const DataAgungView: React.FC<DataAgungViewProps> = ({ items, onRefresh, 
                         <p className="text-xs text-gray-400 mt-1">{product.name}</p>
                         <p className="text-xs text-gray-500 mt-1">{product.brand}</p>
                       </div>
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-2">
                         <span className={`font-bold ${getQtyColorClass(product.quantity)}`}>
                           {product.quantity}
                         </span>
@@ -785,6 +833,13 @@ export const DataAgungView: React.FC<DataAgungViewProps> = ({ items, onRefresh, 
                               product.isActive ? 'translate-x-6' : 'translate-x-1'
                             }`}
                           />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteOnlineProduct(product.id)}
+                          className="p-1.5 text-gray-500 hover:text-red-400 hover:bg-red-900/30 rounded-lg transition-colors"
+                          title="Hapus produk"
+                        >
+                          <Trash2 size={16} />
                         </button>
                       </div>
                     </div>
@@ -842,7 +897,7 @@ export const DataAgungView: React.FC<DataAgungViewProps> = ({ items, onRefresh, 
                         <p className="text-xs text-gray-400 mt-1">{product.name}</p>
                         <p className="text-xs text-gray-500 mt-1">{product.brand}</p>
                       </div>
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-2">
                         <span className={`font-bold ${getQtyColorClass(product.quantity)}`}>
                           {product.quantity}
                         </span>
@@ -858,6 +913,13 @@ export const DataAgungView: React.FC<DataAgungViewProps> = ({ items, onRefresh, 
                               product.isOnlineActive ? 'translate-x-6' : 'translate-x-1'
                             }`}
                           />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteProdukKosong(product.id)}
+                          className="p-1.5 text-gray-500 hover:text-red-400 hover:bg-red-900/30 rounded-lg transition-colors"
+                          title="Hapus produk"
+                        >
+                          <Trash2 size={16} />
                         </button>
                       </div>
                     </div>
@@ -915,7 +977,7 @@ export const DataAgungView: React.FC<DataAgungViewProps> = ({ items, onRefresh, 
                         <p className="text-xs text-gray-400 mt-1">{product.name}</p>
                         <p className="text-xs text-gray-500 mt-1">{product.brand}</p>
                       </div>
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-2">
                         <span className={`font-bold ${getQtyColorClass(product.quantity)}`}>
                           {product.quantity}
                         </span>
@@ -931,6 +993,13 @@ export const DataAgungView: React.FC<DataAgungViewProps> = ({ items, onRefresh, 
                               product.isActive ? 'translate-x-6' : 'translate-x-1'
                             }`}
                           />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteTableMasuk(product.id)}
+                          className="p-1.5 text-gray-500 hover:text-red-400 hover:bg-red-900/30 rounded-lg transition-colors"
+                          title="Hapus produk"
+                        >
+                          <Trash2 size={16} />
                         </button>
                       </div>
                     </div>

@@ -33,137 +33,6 @@ const parseDateToNumber = (dateVal: any): number => {
   return isNaN(parsed) ? Date.now() : parsed;
 };
 
-// --- FETCH FOTO PRODUK ---
-export interface FotoProdukRow {
-  id?: number;
-  part_number: string;
-  foto_1?: string;
-  foto_2?: string;
-  foto_3?: string;
-  foto_4?: string;
-  foto_5?: string;
-  foto_6?: string;
-  foto_7?: string;
-  foto_8?: string;
-  foto_9?: string;
-  foto_10?: string;
-}
-
-export interface FotoLinkRow {
-  id?: number;
-  sku: string;
-  nama_csv: string;
-}
-
-export const fetchFotoProduk = async (search?: string): Promise<FotoProdukRow[]> => {
-  try {
-    let query = supabase
-      .from('foto')
-      .select('*')
-      .order('part_number', { ascending: true });
-    
-    if (search && search.trim()) {
-      query = query.ilike('part_number', `%${search.trim()}%`);
-    }
-    
-    const { data, error } = await query;
-    
-    if (error) {
-      console.error('Fetch Foto Produk Error:', error);
-      return [];
-    }
-    
-    return data || [];
-  } catch (err) {
-    console.error('Fetch Foto Produk Exception:', err);
-    return [];
-  }
-};
-
-// Fetch all part numbers from base_mjm for dropdown autocomplete
-export const fetchAllPartNumbersMJM = async (): Promise<{ part_number: string; name: string }[]> => {
-  try {
-    const { data, error } = await supabase
-      .from('base_mjm')
-      .select('part_number, name')
-      .order('part_number', { ascending: true });
-    
-    if (error) {
-      console.error('Fetch Part Numbers MJM Error:', error);
-      return [];
-    }
-    
-    return data || [];
-  } catch (err) {
-    console.error('Fetch Part Numbers MJM Exception:', err);
-    return [];
-  }
-};
-
-// Check existing part_numbers di tabel foto
-export const checkExistingFotoPartNumbers = async (partNumbers: string[]): Promise<Set<string>> => {
-  try {
-    const { data, error } = await supabase
-      .from('foto')
-      .select('part_number')
-      .in('part_number', partNumbers);
-    
-    if (error) {
-      console.error('Check Existing Foto Error:', error);
-      return new Set();
-    }
-    
-    return new Set((data || []).map(d => d.part_number));
-  } catch (err) {
-    console.error('Check Existing Foto Exception:', err);
-    return new Set();
-  }
-};
-
-// Insert batch ke tabel foto
-export const insertFotoBatch = async (rows: FotoProdukRow[]): Promise<{ success: boolean; inserted: number; error?: string }> => {
-  try {
-    if (rows.length === 0) return { success: true, inserted: 0 };
-    
-    const { data, error } = await supabase
-      .from('foto')
-      .insert(rows)
-      .select();
-    
-    if (error) {
-      console.error('Insert Foto Batch Error:', error);
-      return { success: false, inserted: 0, error: error.message };
-    }
-    
-    return { success: true, inserted: data?.length || 0 };
-  } catch (err: any) {
-    console.error('Insert Foto Batch Exception:', err);
-    return { success: false, inserted: 0, error: err.message };
-  }
-};
-
-// Insert batch ke tabel foto_link
-export const insertFotoLinkBatch = async (rows: FotoLinkRow[]): Promise<{ success: boolean; inserted: number; error?: string }> => {
-  try {
-    if (rows.length === 0) return { success: true, inserted: 0 };
-    
-    const { data, error } = await supabase
-      .from('foto_link')
-      .insert(rows)
-      .select();
-    
-    if (error) {
-      console.error('Insert FotoLink Batch Error:', error);
-      return { success: false, inserted: 0, error: error.message };
-    }
-    
-    return { success: true, inserted: data?.length || 0 };
-  } catch (err: any) {
-    console.error('Insert FotoLink Batch Exception:', err);
-    return { success: false, inserted: 0, error: err.message };
-  }
-};
-
 // --- FETCH DISTINCT ECOMMERCE VALUES ---
 export const fetchDistinctEcommerce = async (store: string | null): Promise<string[]> => {
   const table = store === 'mjm' ? 'barang_keluar_mjm' : (store === 'bjw' ? 'barang_keluar_bjw' : null);
@@ -1403,135 +1272,43 @@ export const insertBarangKeluar = async (
 };
 
 export const fetchHistory = async () => [];
+export const fetchItemHistory = async () => [];
 
-// FETCH ITEM HISTORY - Riwayat transaksi per item (part_number)
-export const fetchItemHistory = async (partNumber: string, store?: string | null): Promise<any[]> => {
-  if (!partNumber) return [];
-  
+// GET UNIQUE ECOMMERCE LIST - untuk dropdown filter di modal
+export const getUniqueEcommerceList = async (
+  type: 'in' | 'out',
+  store?: string | null
+): Promise<string[]> => {
   const effectiveStore = store || 'mjm';
-  const masukTable = getLogTableName('barang_masuk', effectiveStore);
-  const keluarTable = getLogTableName('barang_keluar', effectiveStore);
-  const stockTable = getTableName(effectiveStore);
+  const tableName = type === 'in' 
+    ? getLogTableName('barang_masuk', effectiveStore)
+    : getLogTableName('barang_keluar', effectiveStore);
   
   try {
-    // Fetch barang masuk
-    const { data: masukData, error: masukError } = await supabase
-      .from(masukTable)
-      .select('*')
-      .eq('part_number', partNumber)
-      .order('created_at', { ascending: false });
+    const { data, error } = await supabase
+      .from(tableName)
+      .select('ecommerce')
+      .not('ecommerce', 'is', null)
+      .not('ecommerce', 'eq', '')
+      .not('ecommerce', 'eq', '-');
     
-    if (masukError) {
-      console.error('fetchItemHistory masuk error:', masukError);
+    if (error) {
+      console.error('getUniqueEcommerceList Error:', error);
+      return [];
     }
     
-    // Fetch barang keluar
-    const { data: keluarData, error: keluarError } = await supabase
-      .from(keluarTable)
-      .select('*')
-      .eq('part_number', partNumber)
-      .order('created_at', { ascending: false });
-    
-    if (keluarError) {
-      console.error('fetchItemHistory keluar error:', keluarError);
-    }
-    
-    // Get current stock
-    const { data: stockData } = await supabase
-      .from(stockTable)
-      .select('quantity')
-      .eq('part_number', partNumber)
-      .single();
-    
-    const currentQty = stockData?.quantity ?? 0;
-    
-    // Map barang masuk to StockHistory format
-    const masukHistory = (masukData || []).map((row: any) => {
-      const ecommerce = row.ecommerce || '-';
-      const customer = row.customer || '-';
-      const resi = row.resi || '-';
-      const toko = row.kode_toko || row.toko || '-';
-      
-      let reasonParts: string[] = [];
-      if (customer !== '-') reasonParts.push(customer);
-      if (resi !== '-') reasonParts.push(`(Resi: ${resi})`);
-      if (ecommerce !== '-') reasonParts.push(`(Via: ${ecommerce})`);
-      if (row.tempo === 'RETUR') reasonParts.push('(RETUR)');
-      const reason = reasonParts.join(' ') || 'Restock';
-      
-      let tempoVal = row.tempo || '-';
-      if (resi !== '-' && toko !== '-') {
-        tempoVal = `${resi}/${toko}`;
+    // Extract unique values
+    const uniqueSet = new Set<string>();
+    (data || []).forEach((row: any) => {
+      if (row.ecommerce && row.ecommerce.trim()) {
+        uniqueSet.add(row.ecommerce.trim().toUpperCase());
       }
-      
-      return {
-        id: row.id?.toString() || '',
-        itemId: row.part_number || '',
-        partNumber: row.part_number || '',
-        name: row.nama_barang || '',
-        type: 'in' as const,
-        quantity: row.qty_masuk || 0,
-        previousStock: 0,
-        currentStock: row.stok_akhir || 0,
-        currentQty: currentQty,
-        price: row.harga_satuan || 0,
-        totalPrice: row.harga_total || 0,
-        timestamp: row.created_at ? new Date(row.created_at).getTime() : null,
-        reason: reason,
-        resi: resi,
-        tempo: tempoVal,
-        customer: customer
-      };
     });
     
-    // Map barang keluar to StockHistory format
-    const keluarHistory = (keluarData || []).map((row: any) => {
-      const ecommerce = row.ecommerce || '-';
-      const customer = row.customer || '-';
-      const resi = row.resi || '-';
-      const toko = row.kode_toko || row.toko || '-';
-      
-      let reasonParts: string[] = [];
-      if (customer !== '-') reasonParts.push(customer);
-      if (resi !== '-') reasonParts.push(`(Resi: ${resi})`);
-      if (ecommerce !== '-') reasonParts.push(`(Via: ${ecommerce})`);
-      const reason = reasonParts.join(' ') || 'Penjualan';
-      
-      let tempoVal = row.tempo || '-';
-      if (resi !== '-' && toko !== '-') {
-        tempoVal = `${resi}/${toko}`;
-      }
-      
-      return {
-        id: row.id?.toString() || '',
-        itemId: row.part_number || '',
-        partNumber: row.part_number || '',
-        name: row.name || '',
-        type: 'out' as const,
-        quantity: row.qty_keluar || 0,
-        previousStock: 0,
-        currentStock: row.stock_ahir || 0,
-        currentQty: currentQty,
-        price: row.harga_satuan || 0,
-        totalPrice: row.harga_total || 0,
-        timestamp: row.created_at ? new Date(row.created_at).getTime() : null,
-        reason: reason,
-        resi: resi,
-        tempo: tempoVal,
-        customer: customer
-      };
-    });
-    
-    // Combine and sort by timestamp descending
-    const allHistory = [...masukHistory, ...keluarHistory].sort((a, b) => {
-      const timeA = a.timestamp ?? 0;
-      const timeB = b.timestamp ?? 0;
-      return timeB - timeA;
-    });
-    
-    return allHistory;
-  } catch (e: any) {
-    console.error('fetchItemHistory Exception:', e);
+    // Sort alphabetically
+    return Array.from(uniqueSet).sort();
+  } catch (e) {
+    console.error('getUniqueEcommerceList Exception:', e);
     return [];
   }
 };
@@ -1542,7 +1319,9 @@ export const fetchHistoryLogsPaginated = async (
   page: number = 1,
   perPage: number = 50,
   filters: any = {},
-  store?: string | null
+  store?: string | null,
+  sortBy?: string,
+  sortDirection: 'asc' | 'desc' = 'desc'
 ): Promise<{ data: any[]; count: number }> => {
   // Determine store from context if not provided
   const effectiveStore = store || 'mjm';
@@ -1582,10 +1361,29 @@ export const fetchHistoryLogsPaginated = async (
       }
     }
     
-    // Order by created_at desc and apply pagination
+    // Map frontend sort keys to database columns
+    // Note: currentQty is fetched from a separate stock table after the query,
+    // so we cannot sort by it at the database level. We'll handle it client-side.
+    const sortColumnMap: Record<string, string> = {
+      'timestamp': 'created_at',
+      'partNumber': 'part_number',
+      'name': type === 'in' ? 'nama_barang' : 'name',
+      'quantity': type === 'in' ? 'qty_masuk' : 'qty_keluar',
+      'price': 'harga_satuan',
+      'totalPrice': 'harga_total',
+      'customer': 'customer',
+      'currentStock': type === 'in' ? 'stok_akhir' : 'stock_ahir',
+      'currentQty': type === 'in' ? 'stok_akhir' : 'stock_ahir' // Use stok_akhir as proxy for currentQty
+    };
+    
+    // Determine sort column
+    const sortColumn = sortBy && sortColumnMap[sortBy] ? sortColumnMap[sortBy] : 'created_at';
+    const ascending = sortDirection === 'asc';
+    
+    // Order and apply pagination
     const start = (page - 1) * perPage;
     query = query
-      .order('created_at', { ascending: false })
+      .order(sortColumn, { ascending })
       .range(start, start + perPage - 1);
     
     const { data, error, count } = await query;
@@ -1600,20 +1398,16 @@ export const fetchHistoryLogsPaginated = async (
     let stockMap: Record<string, number> = {};
     
     if (partNumbers.length > 0) {
-      // Batch fetch in chunks of 100 to avoid Supabase query limits
-      const BATCH_SIZE = 100;
-      for (let i = 0; i < partNumbers.length; i += BATCH_SIZE) {
-        const batch = partNumbers.slice(i, i + BATCH_SIZE);
-        const { data: stockData } = await supabase
-          .from(stockTable)
-          .select('part_number, quantity')
-          .in('part_number', batch);
-        
-        if (stockData) {
-          stockData.forEach(item => {
-            stockMap[item.part_number] = item.quantity;
-          });
-        }
+      const { data: stockData } = await supabase
+        .from(stockTable)
+        .select('part_number, quantity')
+        .in('part_number', partNumbers);
+      
+      if (stockData) {
+        stockMap = stockData.reduce((acc, item) => {
+          acc[item.part_number] = item.quantity;
+          return acc;
+        }, {} as Record<string, number>);
       }
     }
     

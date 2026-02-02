@@ -17,7 +17,8 @@ export const GlobalHistoryModal: React.FC<GlobalHistoryModalProps> = ({ type, on
   const { selectedStore } = useStore();
   const [allData, setAllData] = useState<StockHistory[]>([]); // All data from server
   const [page, setPage] = useState(1);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadingProgress, setLoadingProgress] = useState('');
   
   // Filter states
   const [filterCustomer, setFilterCustomer] = useState('');
@@ -26,14 +27,33 @@ export const GlobalHistoryModal: React.FC<GlobalHistoryModalProps> = ({ type, on
   // Sort state
   const [sortConfig, setSortConfig] = useState<SortConfig>({ key: 'timestamp', direction: 'desc' });
 
-  // Load ALL data once (use large limit to get everything)
+  // Load ALL data once on mount
   useEffect(() => {
     setLoading(true);
+    setLoadingProgress('Mengambil data...');
+    
     const loadAllData = async () => {
-      const { data: result } = await fetchHistoryLogsPaginated(type, 1, 50000, {}, selectedStore);
-      setAllData(result);
-      setLoading(false);
+      try {
+        // Load all data (use large limit)
+        const { data: result, count } = await fetchHistoryLogsPaginated(
+          type, 
+          1, 
+          100000, // Get all data
+          {}, 
+          selectedStore,
+          'timestamp',
+          'desc'
+        );
+        setAllData(result);
+        setLoadingProgress(`${count.toLocaleString('id-ID')} data dimuat`);
+      } catch (error) {
+        console.error('Error loading data:', error);
+        setAllData([]);
+      } finally {
+        setLoading(false);
+      }
     };
+    
     loadAllData();
   }, [type, selectedStore]);
 
@@ -55,7 +75,7 @@ export const GlobalHistoryModal: React.FC<GlobalHistoryModalProps> = ({ type, on
       );
     }
     
-    // Filter by part number
+    // Filter by part number or name
     if (filterPartNumber.trim()) {
       const search = filterPartNumber.toLowerCase();
       result = result.filter(item => 
@@ -77,8 +97,8 @@ export const GlobalHistoryModal: React.FC<GlobalHistoryModalProps> = ({ type, on
       
       // Handle special cases
       if (sortConfig.key === 'customer') {
-        aVal = (a.reason || '').toLowerCase();
-        bVal = (b.reason || '').toLowerCase();
+        aVal = ((a as any).customer || a.reason || '').toLowerCase();
+        bVal = ((b as any).customer || b.reason || '').toLowerCase();
       }
       
       // Handle numeric values
@@ -86,9 +106,13 @@ export const GlobalHistoryModal: React.FC<GlobalHistoryModalProps> = ({ type, on
         return sortConfig.direction === 'asc' ? aVal - bVal : bVal - aVal;
       }
       
+      // Handle null/undefined
+      if (aVal == null) aVal = '';
+      if (bVal == null) bVal = '';
+      
       // Handle string values
-      aVal = String(aVal || '').toLowerCase();
-      bVal = String(bVal || '').toLowerCase();
+      aVal = String(aVal).toLowerCase();
+      bVal = String(bVal).toLowerCase();
       
       if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
       if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1;
@@ -131,6 +155,7 @@ export const GlobalHistoryModal: React.FC<GlobalHistoryModalProps> = ({ type, on
                         className="w-full bg-gray-900 border border-gray-700 rounded-lg pl-9 pr-3 py-2 text-sm text-gray-200 focus:border-blue-500 outline-none" 
                         value={filterCustomer} 
                         onChange={(e) => setFilterCustomer(e.target.value)} 
+                        disabled={loading}
                     />
                 </div>
                 <div className="relative">
@@ -141,22 +166,30 @@ export const GlobalHistoryModal: React.FC<GlobalHistoryModalProps> = ({ type, on
                         className="w-full bg-gray-900 border border-gray-700 rounded-lg pl-9 pr-3 py-2 text-sm text-gray-200 focus:border-blue-500 outline-none" 
                         value={filterPartNumber} 
                         onChange={(e) => setFilterPartNumber(e.target.value)} 
+                        disabled={loading}
                     />
                 </div>
             </div>
             
             <div className="flex-1 overflow-auto bg-gray-900/30 p-2">
-                {loading ? ( <div className="flex justify-center py-10"><Loader2 className="animate-spin text-blue-500" size={30}/></div> ) : paginatedData.length === 0 ? ( <div className="text-center py-10 text-gray-500">Tidak ada data history</div> ) : (
+                {loading ? (
+                  <div className="flex flex-col items-center justify-center py-10 gap-3">
+                    <Loader2 className="animate-spin text-blue-500" size={30}/>
+                    <span className="text-sm text-gray-400">{loadingProgress}</span>
+                  </div>
+                ) : paginatedData.length === 0 ? (
+                  <div className="text-center py-10 text-gray-500">Tidak ada data history</div>
+                ) : (
                     <HistoryTable data={paginatedData} sortConfig={sortConfig} onSort={handleSort} />
                 )}
             </div>
             <div className="p-3 border-t border-gray-700 flex justify-between items-center bg-gray-800 rounded-b-2xl">
-                <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} className="p-2 bg-gray-700 rounded disabled:opacity-30 hover:bg-gray-600 transition-colors"><ChevronLeft size={18}/></button>
+                <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1 || loading} className="p-2 bg-gray-700 rounded disabled:opacity-30 hover:bg-gray-600 transition-colors"><ChevronLeft size={18}/></button>
                 <div className="text-center">
                   <span className="text-xs text-gray-400">Hal {page} / {totalPages || 1}</span>
-                  <span className="text-[10px] text-gray-500 ml-2">({totalCount} item)</span>
+                  <span className="text-[10px] text-gray-500 ml-2">({totalCount.toLocaleString('id-ID')} item)</span>
                 </div>
-                <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages || totalPages === 0} className="p-2 bg-gray-700 rounded disabled:opacity-30 hover:bg-gray-600 transition-colors"><ChevronRight size={18}/></button>
+                <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages || totalPages === 0 || loading} className="p-2 bg-gray-700 rounded disabled:opacity-30 hover:bg-gray-600 transition-colors"><ChevronRight size={18}/></button>
             </div>
         </div>
     </div>
