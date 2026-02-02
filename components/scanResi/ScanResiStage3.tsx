@@ -25,6 +25,7 @@ import {
 } from '../../services/resiScanService';
 import { 
   parseShopeeCSV, 
+  parseShopeeIntlCSV,
   parseTikTokCSV, 
   detectCSVPlatform
 } from '../../services/csvParserService';
@@ -1622,22 +1623,30 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
       const csvText = XLSX.utils.sheet_to_csv(worksheet, { rawNumbers: false, blankrows: false });
 
       const platform = detectCSVPlatform(csvText);
-      addLog('info', 'SISTEM', `Format terdeteksi: ${platform === 'shopee' ? 'Shopee' : platform === 'tiktok' ? 'TikTok' : 'Unknown'} | Sumber: ${isXLSXFile ? 'XLSX' : 'CSV'}`);
+      const platformLabel = platform === 'shopee' ? 'Shopee ID' : 
+                           platform === 'shopee-intl' ? 'Shopee International/My Laris' :
+                           platform === 'tiktok' ? 'TikTok' : 'Unknown';
+      addLog('info', 'SISTEM', `Format terdeteksi: ${platformLabel} | Sumber: ${isXLSXFile ? 'XLSX' : 'CSV'}`);
       
       let parsedItems: any[] = [];
       
-      // Parsing berdasarkan deteksi format file (Shopee/TikTok)
+      // Parsing berdasarkan deteksi format file (Shopee/Shopee International/TikTok)
       // Namun attribute ecommerce/toko akan kita override dengan pilihan user
       // Untuk TikTok: CSV mulai dari baris 2, XLSX mulai dari baris 3
       if (platform === 'shopee') parsedItems = parseShopeeCSV(csvText);
+      else if (platform === 'shopee-intl') parsedItems = parseShopeeIntlCSV(csvText);
       else if (platform === 'tiktok') parsedItems = parseTikTokCSV(csvText, isXLSXFile);
       else { 
         // Fallback coba parse Shopee standar jika tidak terdeteksi
         parsedItems = parseShopeeCSV(csvText);
         if(parsedItems.length === 0) {
+             // Try Shopee International as second fallback
+             parsedItems = parseShopeeIntlCSV(csvText);
+        }
+        if(parsedItems.length === 0) {
              setIsProcessingUpload(false);
              setShowSkippedModal(false);
-             alert('Format File tidak dikenali! Pastikan header kolom "No. Resi" atau "No. Pesanan" ada.'); 
+             alert('Format File tidak dikenali! Pastikan file memiliki header seperti "No. Resi", "No. Pesanan", "Order ID", atau "Tracking Number".');
              setLoading(false); 
              return; 
         }

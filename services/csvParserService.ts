@@ -177,10 +177,11 @@ export const detectCSVPlatform = (text: string): 'shopee' | 'shopee-intl' | 'tik
   );
   if (isShopeeID) return 'shopee';
   
-  // Shopee International (PH/MY/SG): Header mengandung "Order ID" dan "Tracking Number"
+  // Shopee International / My Laris (PH/MY/SG): Header mengandung "Order ID" dan "Tracking Number" (with or without asterisk)
+  // Also check for "Shipment Method" which is specific to My Laris export
   const isShopeeIntl = (
     text.includes('Order ID') && 
-    (text.includes('Tracking Number') || text.includes('Product Name') || text.includes('Buyer Username'))
+    (text.includes('Tracking Number') || text.includes('Product Name') || text.includes('Buyer Username') || text.includes('Shipment Method'))
   );
   if (isShopeeIntl) return 'shopee-intl';
   
@@ -333,7 +334,7 @@ export const parseShopeeCSV = (text: string): ParsedCSVItem[] => {
 };
 
 // ============================================================================
-// SHOPEE INTERNATIONAL PARSER (PH, MY, SG)
+// SHOPEE INTERNATIONAL PARSER (PH, MY, SG) - Also supports My Laris export
 // Header: Baris 1
 // Data: Mulai Baris 2
 // RESI: Gunakan Order ID (bukan Tracking Number)
@@ -347,17 +348,59 @@ export const parseShopeeIntlCSV = (text: string): ParsedCSVItem[] => {
   const headers = parseCSVLine(lines[0]);
   const dataRows = lines.slice(1);
   
+  // Debug: Log headers untuk troubleshooting
+  console.log('[Shopee Intl CSV] Headers found:', headers);
+  
   // Map column indexes (English headers)
+  // Support both standard Shopee International and My Laris export format
   const idxOrderId = headers.findIndex(h => h.includes('Order ID'));
-  const idxTracking = headers.findIndex(h => h.includes('Tracking Number'));
+  // Tracking Number bisa dengan atau tanpa asterisk (Tracking Number*)
+  const idxTracking = headers.findIndex(h => h.toLowerCase().includes('tracking number'));
   const idxStatus = headers.findIndex(h => h.includes('Order Status'));
   const idxShipping = headers.findIndex(h => h.includes('Shipping Option'));
-  const idxBuyer = headers.findIndex(h => h.includes('Buyer Username') || h.includes('Username'));
-  const idxSKU = headers.findIndex(h => h.includes('SKU Reference No') || h.includes('Parent SKU') || h === 'SKU');
+  const idxShipmentMethod = headers.findIndex(h => h.includes('Shipment Method')); // My Laris specific
+  
+  // Buyer: Cari kolom "Username (Buyer)" atau "Buyer Username" dengan prioritas yang benar
+  // JANGAN match "Buyer Paid Shipping" atau kolom lain yang mengandung "Buyer"
+  let idxBuyer = headers.findIndex(h => h.includes('Username (Buyer)')); // My Laris exact match
+  if (idxBuyer === -1) idxBuyer = headers.findIndex(h => h.includes('Buyer Username')); // Shopee Intl
+  if (idxBuyer === -1) idxBuyer = headers.findIndex(h => h === 'Username'); // Exact match
+  if (idxBuyer === -1) idxBuyer = headers.findIndex(h => h === 'Buyer'); // Exact match only
+  // Fallback: cari yang mengandung "Username" tapi bukan "Buyer Paid" atau sejenisnya
+  if (idxBuyer === -1) {
+    idxBuyer = headers.findIndex(h => 
+      h.includes('Username') && 
+      !h.toLowerCase().includes('paid') && 
+      !h.toLowerCase().includes('shipping')
+    );
+  }
+  
+  // SKU: Support "Parent SKU Reference No." dari My Laris
+  const idxSKU = headers.findIndex(h => 
+    h.includes('SKU Reference No') || 
+    h.includes('Parent SKU') || 
+    h.includes('Seller SKU') ||
+    h === 'SKU'
+  );
   const idxProductName = headers.findIndex(h => h.includes('Product Name'));
   const idxVariation = headers.findIndex(h => h.includes('Variation Name'));
-  const idxQty = headers.findIndex(h => h.includes('Quantity'));
+  const idxQty = headers.findIndex(h => h.includes('Quantity') || h === 'Qty');
   const idxTotal = headers.findIndex(h => h.includes('Total Product Price') || h.includes('Product Subtotal'));
+  
+  // Debug: Log column indexes
+  console.log('[Shopee Intl CSV] Column indexes:', {
+    orderId: idxOrderId,
+    tracking: idxTracking,
+    status: idxStatus,
+    shipping: idxShipping,
+    shipmentMethod: idxShipmentMethod,
+    buyer: idxBuyer,
+    sku: idxSKU,
+    productName: idxProductName,
+    variation: idxVariation,
+    qty: idxQty,
+    total: idxTotal
+  });
   
   // Dedupe set
   const seenKeys = new Set<string>();
@@ -375,11 +418,17 @@ export const parseShopeeIntlCSV = (text: string): ParsedCSVItem[] => {
     // SKIP jika Order ID kosong
     if (!orderId) return null;
     
-    // Get status - TIDAK FILTER di sini, biarkan STEP 0 di handleFileUpload yang filter
-    // Supaya item batal bisa muncul di modal skip
-    const rawStatus = (idxStatus !== -1 && cols[idxStatus]) 
+    // Get status - cek dari kolom Order Status ATAU kolom B (index 1) untuk My Laris
+    // Di My Laris, kolom B berisi "Cancelled" jika dibatalkan
+    let rawStatus = (idxStatus !== -1 && cols[idxStatus]) 
       ? cols[idxStatus].replace(/["']/g, '').trim() 
       : '';
+    
+    // Check column B (index 1) for "cancelled" - My Laris specific
+    const colB = (cols[1] || '').replace(/["']/g, '').trim().toLowerCase();
+    if (colB === 'cancelled' || colB.includes('cancel')) {
+      rawStatus = 'Cancelled';
+    }
     
     // Get tracking number (untuk referensi saja)
     let trackingNumber = (idxTracking !== -1 && cols[idxTracking]) 
