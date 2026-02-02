@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   Link2, Search, ChevronLeft, ChevronRight, Image, Loader2, RefreshCw, 
-  X, Save, AlertCircle, Check, ZoomIn
+  X, Save, AlertCircle, Check, ZoomIn, Plus
 } from 'lucide-react';
 import { 
   fetchFotoLink, 
@@ -16,21 +16,35 @@ interface PartNumberOption {
   name: string;
 }
 
-// Inline SKU Input with Autocomplete
-const InlineSkuInput: React.FC<{
+// Helper to parse SKU string to array
+const parseSkus = (sku: string | null | undefined): string[] => {
+  if (!sku || !sku.trim()) return [];
+  return sku.split(',').map(s => s.trim()).filter(Boolean);
+};
+
+// Helper to join SKU array to string
+const joinSkus = (skus: string[]): string => {
+  return skus.filter(Boolean).join(', ');
+};
+
+// Multi-SKU Input with Chips/Tags - Auto-save on select with multi-select support
+const MultiSkuInput: React.FC<{
   options: PartNumberOption[];
-  value: string;
-  onChange: (value: string) => void;
+  skus: string[];
+  onChange: (skus: string[]) => void;
   onSave: () => void;
+  onAddSku: (sku: string) => void; // Direct save single SKU
+  onAddMultipleSkus: (skus: string[]) => void; // Direct save multiple SKUs at once
+  onRemoveSku: (sku: string) => void; // Direct remove single SKU
   isSaving?: boolean;
   hasChanges?: boolean;
-  rowIndex?: number;
   onNavigate?: (direction: 'prev' | 'next') => void;
   onInputRef?: (el: HTMLInputElement | null) => void;
-}> = ({ options, value, onChange, onSave, isSaving, hasChanges, rowIndex, onNavigate, onInputRef }) => {
+}> = ({ options, skus, onChange, onSave, onAddSku, onAddMultipleSkus, onRemoveSku, isSaving, hasChanges, onNavigate, onInputRef }) => {
   const [isOpen, setIsOpen] = useState(false);
-  const [inputValue, setInputValue] = useState(value);
+  const [inputValue, setInputValue] = useState('');
   const [highlightIndex, setHighlightIndex] = useState(-1);
+  const [selectedForAdd, setSelectedForAdd] = useState<Set<string>>(new Set()); // Multi-select mode
   const inputRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const optionRefs = useRef<Map<number, HTMLDivElement>>(new Map());
@@ -38,33 +52,43 @@ const InlineSkuInput: React.FC<{
   const filteredOptions = useMemo(() => {
     if (!inputValue.trim()) return [];
     const lowerSearch = inputValue.toLowerCase();
+    // Filter out already selected SKUs
     return options
       .filter(o => 
-        o.part_number.toLowerCase().includes(lowerSearch) || 
-        o.name.toLowerCase().includes(lowerSearch)
+        !skus.includes(o.part_number) &&
+        (o.part_number.toLowerCase().includes(lowerSearch) || 
+         o.name.toLowerCase().includes(lowerSearch))
       )
       .slice(0, 30);
-  }, [options, inputValue]);
+  }, [options, inputValue, skus]);
 
-  // Reset highlight when options change
+  // Reset highlight and selection when options change
   useEffect(() => {
     setHighlightIndex(-1);
   }, [filteredOptions.length]);
 
+  // Clear selection when dropdown closes
   useEffect(() => {
-    setInputValue(value);
-  }, [value]);
+    if (!isOpen) {
+      setSelectedForAdd(new Set());
+    }
+  }, [isOpen]);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        // If there are selected items, save them before closing
+        if (selectedForAdd.size > 0) {
+          onAddMultipleSkus(Array.from(selectedForAdd));
+          setSelectedForAdd(new Set());
+        }
         setIsOpen(false);
         setHighlightIndex(-1);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+  }, [selectedForAdd, onAddMultipleSkus]);
 
   // Scroll highlighted option into view
   useEffect(() => {
@@ -76,11 +100,44 @@ const InlineSkuInput: React.FC<{
     }
   }, [highlightIndex]);
 
-  const selectOption = (opt: PartNumberOption) => {
-    setInputValue(opt.part_number);
-    onChange(opt.part_number);
+  const toggleSelection = (sku: string) => {
+    setSelectedForAdd(prev => {
+      const next = new Set(prev);
+      if (next.has(sku)) {
+        next.delete(sku);
+      } else {
+        next.add(sku);
+      }
+      return next;
+    });
+  };
+
+  const confirmSelection = () => {
+    if (selectedForAdd.size > 0) {
+      onAddMultipleSkus(Array.from(selectedForAdd));
+      setSelectedForAdd(new Set());
+      setInputValue('');
+      setIsOpen(false);
+      setHighlightIndex(-1);
+      inputRef.current?.focus();
+    }
+  };
+
+  const addSku = (sku: string) => {
+    if (sku && !skus.includes(sku)) {
+      // Auto-save immediately when selecting from dropdown
+      onAddSku(sku);
+    }
+    setInputValue('');
     setIsOpen(false);
     setHighlightIndex(-1);
+    setSelectedForAdd(new Set());
+    inputRef.current?.focus();
+  };
+
+  const removeSku = (skuToRemove: string) => {
+    // Auto-save removal immediately
+    onRemoveSku(skuToRemove);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -98,25 +155,45 @@ const InlineSkuInput: React.FC<{
           prev > 0 ? prev - 1 : filteredOptions.length - 1
         );
         return;
-      } else if (e.key === 'Enter' && highlightIndex >= 0) {
+      } else if (e.key === ' ' && highlightIndex >= 0) {
+        // Space to toggle checkbox
         e.preventDefault();
-        selectOption(filteredOptions[highlightIndex]);
+        toggleSelection(filteredOptions[highlightIndex].part_number);
+        return;
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (selectedForAdd.size > 0) {
+          // Confirm multi-selection
+          confirmSelection();
+        } else if (highlightIndex >= 0) {
+          // Single select
+          addSku(filteredOptions[highlightIndex].part_number);
+        }
         return;
       }
     }
 
-    // Row navigation (like Excel)
-    if (e.key === 'ArrowDown' && !isOpen) {
+    // Backspace to remove last chip
+    if (e.key === 'Backspace' && !inputValue && skus.length > 0) {
       e.preventDefault();
-      if (onNavigate) onNavigate('next');
-      return;
-    } else if (e.key === 'ArrowUp' && !isOpen) {
-      e.preventDefault();
-      if (onNavigate) onNavigate('prev');
+      removeSku(skus[skus.length - 1]);
       return;
     }
 
-    if (e.key === 'Enter') {
+    // Row navigation (like Excel) - only when input is empty and dropdown is closed
+    if (!inputValue && !isOpen) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (onNavigate) onNavigate('next');
+        return;
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (onNavigate) onNavigate('prev');
+        return;
+      }
+    }
+
+    if (e.key === 'Enter' && !isOpen) {
       if (hasChanges) {
         onSave();
       }
@@ -126,6 +203,11 @@ const InlineSkuInput: React.FC<{
         onNavigate('next');
       }
     } else if (e.key === 'Tab') {
+      // Save any pending selections before leaving
+      if (selectedForAdd.size > 0) {
+        onAddMultipleSkus(Array.from(selectedForAdd));
+        setSelectedForAdd(new Set());
+      }
       setIsOpen(false);
       setHighlightIndex(-1);
       if (onNavigate) {
@@ -133,67 +215,135 @@ const InlineSkuInput: React.FC<{
         onNavigate(e.shiftKey ? 'prev' : 'next');
       }
     } else if (e.key === 'Escape') {
+      setSelectedForAdd(new Set());
       setIsOpen(false);
       setHighlightIndex(-1);
     }
   };
 
   return (
-    <div className="relative flex items-center gap-1" ref={dropdownRef}>
-      <input
-        ref={(el) => {
-          (inputRef as React.MutableRefObject<HTMLInputElement | null>).current = el;
-          if (onInputRef) onInputRef(el);
-        }}
-        type="text"
-        value={inputValue}
-        onChange={(e) => {
-          setInputValue(e.target.value);
-          onChange(e.target.value);
-          setIsOpen(true);
-        }}
-        onFocus={() => inputValue && setIsOpen(true)}
-        onKeyDown={handleKeyDown}
-        placeholder="Ketik SKU..."
-        className={`w-full px-2 py-1.5 bg-gray-700 border rounded text-xs text-gray-200 focus:outline-none focus:border-cyan-500 ${
-          hasChanges ? 'border-yellow-500' : 'border-gray-600'
-        }`}
-      />
-      
-      {hasChanges && (
-        <button
-          onClick={onSave}
-          disabled={isSaving}
-          className="p-1.5 bg-green-600 hover:bg-green-700 rounded text-white disabled:opacity-50 flex-shrink-0"
-          title="Simpan (Enter)"
-        >
-          {isSaving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
-        </button>
-      )}
-      
-      {isOpen && filteredOptions.length > 0 && (
-        <div className="absolute top-full left-0 right-0 mt-1 bg-gray-800 border border-gray-600 rounded-lg shadow-xl z-50 max-h-48 overflow-y-auto">
-          {filteredOptions.map((opt, idx) => (
-            <div
-              key={opt.part_number}
-              ref={(el) => {
-                if (el) optionRefs.current.set(idx, el);
-                else optionRefs.current.delete(idx);
-              }}
-              className={`px-3 py-2 text-xs cursor-pointer transition-colors ${
-                idx === highlightIndex 
-                  ? 'bg-cyan-600 text-white' 
-                  : opt.part_number === inputValue 
-                    ? 'bg-cyan-900/30 text-cyan-400' 
-                    : 'text-gray-300 hover:bg-gray-700'
-              }`}
-              onClick={() => selectOption(opt)}
-              onMouseEnter={() => setHighlightIndex(idx)}
+    <div className="relative" ref={dropdownRef}>
+      <div className={`flex flex-wrap items-center gap-1 p-1.5 bg-gray-700 border rounded min-h-[32px] ${
+        hasChanges ? 'border-yellow-500' : 'border-gray-600'
+      }`}>
+        {/* SKU Chips */}
+        {skus.map(sku => (
+          <span 
+            key={sku} 
+            className="inline-flex items-center gap-1 px-2 py-0.5 bg-cyan-900/50 text-cyan-300 rounded text-xs font-mono"
+          >
+            {sku}
+            <button 
+              onClick={() => removeSku(sku)}
+              className="hover:text-red-400 transition-colors"
+              title="Hapus SKU"
             >
-              <div className="font-mono font-medium">{opt.part_number}</div>
-              <div className={`text-[10px] truncate ${idx === highlightIndex ? 'text-cyan-200' : 'text-gray-500'}`}>{opt.name}</div>
+              <X size={10} />
+            </button>
+          </span>
+        ))}
+        
+        {/* Input for adding new SKU */}
+        <input
+          ref={(el) => {
+            (inputRef as React.MutableRefObject<HTMLInputElement | null>).current = el;
+            if (onInputRef) onInputRef(el);
+          }}
+          type="text"
+          value={inputValue}
+          onChange={(e) => {
+            setInputValue(e.target.value);
+            setIsOpen(true);
+          }}
+          onFocus={() => inputValue && setIsOpen(true)}
+          onKeyDown={handleKeyDown}
+          placeholder={skus.length === 0 ? "Ketik SKU..." : "+"}
+          className="flex-1 min-w-[60px] bg-transparent text-xs text-gray-200 focus:outline-none placeholder-gray-500"
+        />
+        
+        {/* Save button */}
+        {hasChanges && (
+          <button
+            onClick={onSave}
+            disabled={isSaving}
+            className="p-1 bg-green-600 hover:bg-green-700 rounded text-white disabled:opacity-50 flex-shrink-0"
+            title="Simpan (Enter)"
+          >
+            {isSaving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+          </button>
+        )}
+      </div>
+      
+      {/* Dropdown with multi-select support */}
+      {isOpen && filteredOptions.length > 0 && (
+        <div className="absolute top-full left-0 right-0 mt-1 bg-gray-800 border border-gray-600 rounded-lg shadow-xl z-50">
+          {/* Multi-select hint and confirm button */}
+          {selectedForAdd.size > 0 && (
+            <div className="px-3 py-2 bg-green-900/30 border-b border-gray-600 flex items-center justify-between">
+              <span className="text-xs text-green-400">
+                {selectedForAdd.size} SKU dipilih
+              </span>
+              <button
+                onClick={confirmSelection}
+                className="px-2 py-1 bg-green-600 hover:bg-green-700 text-white text-xs rounded flex items-center gap-1"
+              >
+                <Check size={12} />
+                Simpan Semua
+              </button>
             </div>
-          ))}
+          )}
+          <div className="text-[10px] px-3 py-1 text-gray-500 border-b border-gray-700">
+            💡 <kbd className="px-1 bg-gray-700 rounded">Space</kbd> = pilih beberapa SKU sekaligus
+          </div>
+          <div className="max-h-40 overflow-y-auto">
+            {filteredOptions.map((opt, idx) => {
+              const isSelected = selectedForAdd.has(opt.part_number);
+              return (
+                <div
+                  key={opt.part_number}
+                  ref={(el) => {
+                    if (el) optionRefs.current.set(idx, el);
+                    else optionRefs.current.delete(idx);
+                  }}
+                  className={`px-3 py-2 text-xs cursor-pointer transition-colors flex items-center gap-2 ${
+                    idx === highlightIndex 
+                      ? 'bg-cyan-600 text-white' 
+                      : isSelected
+                        ? 'bg-green-900/30 text-green-300'
+                        : 'text-gray-300 hover:bg-gray-700'
+                  }`}
+                  onClick={(e) => {
+                    if (e.ctrlKey || e.metaKey || e.shiftKey) {
+                      // Multi-select with modifier key
+                      toggleSelection(opt.part_number);
+                    } else if (selectedForAdd.size > 0) {
+                      // Already in multi-select mode, toggle
+                      toggleSelection(opt.part_number);
+                    } else {
+                      // Single select - save immediately
+                      addSku(opt.part_number);
+                    }
+                  }}
+                  onMouseEnter={() => setHighlightIndex(idx)}
+                >
+                  {/* Checkbox */}
+                  <div className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 ${
+                    isSelected 
+                      ? 'bg-green-500 border-green-500' 
+                      : 'border-gray-500'
+                  }`}>
+                    {isSelected && <Check size={10} className="text-white" />}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-mono font-medium">{opt.part_number}</div>
+                    <div className={`text-[10px] truncate ${
+                      idx === highlightIndex ? 'text-cyan-200' : isSelected ? 'text-green-400' : 'text-gray-500'
+                    }`}>{opt.name}</div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
     </div>
@@ -241,14 +391,13 @@ export const FotoLinkManager: React.FC = () => {
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [filter, setFilter] = useState<FilterType>('without_sku'); // Default to without_sku for batch editing
   
-  // Track edited SKUs - key is nama_csv, value is new sku
+  // Track edited SKUs - key is nama_csv, value is new sku (not used in auto-save mode)
   const [editedSkus, setEditedSkus] = useState<Record<string, string>>({});
   const [savingRows, setSavingRows] = useState<Set<string>>(new Set());
   
   const [partNumberOptions, setPartNumberOptions] = useState<PartNumberOption[]>([]);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [previewTitle, setPreviewTitle] = useState('');
-  const [savingAll, setSavingAll] = useState(false);
   
   // Refs for keyboard navigation between rows
   const inputRefs = useRef<Map<string, HTMLInputElement>>(new Map());
@@ -315,34 +464,34 @@ export const FotoLinkManager: React.FC = () => {
     withoutSku: data.filter(d => !d.sku || d.sku.trim() === '').length,
   }), [data]);
 
-  const handleSkuChange = (namaCsv: string, newSku: string) => {
-    setEditedSkus(prev => ({ ...prev, [namaCsv]: newSku }));
+  const handleSkuChange = (namaCsv: string, newSkus: string[]) => {
+    setEditedSkus(prev => ({ ...prev, [namaCsv]: joinSkus(newSkus) }));
   };
 
-  const handleSaveRow = async (namaCsv: string) => {
-    const newSku = editedSkus[namaCsv];
-    if (!newSku || !newSku.trim()) return;
+  // Auto-save: Add single SKU immediately
+  const handleAddSkuDirect = async (namaCsv: string, newSku: string) => {
+    const row = data.find(d => d.nama_csv === namaCsv);
+    if (!row) return;
+    
+    const currentSkus = parseSkus(row.sku);
+    if (currentSkus.includes(newSku)) return; // Already exists
+    
+    const updatedSkus = [...currentSkus, newSku];
+    const updatedSkuString = joinSkus(updatedSkus);
     
     setSavingRows(prev => new Set(prev).add(namaCsv));
     setError(null);
     try {
-      const result = await updateFotoLinkSku(namaCsv, newSku.trim());
+      const result = await updateFotoLinkSku(namaCsv, updatedSkuString);
       if (result.success) {
-        // Update local data
+        // Update local data immediately
         setData(prev => prev.map(d => 
-          d.nama_csv === namaCsv ? { ...d, sku: newSku.trim() } : d
+          d.nama_csv === namaCsv ? { ...d, sku: updatedSkuString } : d
         ));
-        // Clear from edited
-        setEditedSkus(prev => {
-          const next = { ...prev };
-          delete next[namaCsv];
-          return next;
-        });
-        // Show success or warning message
         if (result.warning) {
-          setError(`⚠️ ${result.warning}`); // Show warning in orange/yellow
+          setError(`⚠️ ${result.warning}`);
         } else {
-          setSuccessMsg(`✅ SKU "${newSku.trim()}" tersimpan! Foto disalin ke tabel foto dan akan muncul di Beranda.`);
+          setSuccessMsg(`✅ SKU "${newSku}" tersimpan!`);
         }
       } else {
         setError(`❌ ${result.error || 'Gagal menyimpan SKU'}`);
@@ -358,83 +507,137 @@ export const FotoLinkManager: React.FC = () => {
     }
   };
 
-  const getCurrentSku = (row: FotoLinkRow): string => {
-    if (editedSkus.hasOwnProperty(row.nama_csv)) {
-      return editedSkus[row.nama_csv];
-    }
-    return row.sku || '';
-  };
-
-  const hasChanges = (row: FotoLinkRow): boolean => {
-    if (!editedSkus.hasOwnProperty(row.nama_csv)) return false;
-    const originalSku = row.sku || '';
-    return editedSkus[row.nama_csv] !== originalSku;
-  };
-
-  // Count unsaved changes
-  const unsavedCount = useMemo(() => {
-    return Object.keys(editedSkus).filter(namaCsv => {
-      const row = data.find(d => d.nama_csv === namaCsv);
-      if (!row) return false;
-      const originalSku = row.sku || '';
-      return editedSkus[namaCsv] !== originalSku && editedSkus[namaCsv].trim() !== '';
-    }).length;
-  }, [editedSkus, data]);
-
-  // Save all unsaved changes
-  const handleSaveAll = async () => {
-    const toSave = Object.entries(editedSkus).filter(([namaCsv, newSku]) => {
-      const row = data.find(d => d.nama_csv === namaCsv);
-      if (!row) return false;
-      const originalSku = row.sku || '';
-      return newSku !== originalSku && newSku.trim() !== '';
-    });
-
-    if (toSave.length === 0) return;
-
-    setSavingAll(true);
+  // Auto-save: Remove single SKU immediately
+  const handleRemoveSkuDirect = async (namaCsv: string, skuToRemove: string) => {
+    const row = data.find(d => d.nama_csv === namaCsv);
+    if (!row) return;
+    
+    const currentSkus = parseSkus(row.sku);
+    const updatedSkus = currentSkus.filter(s => s !== skuToRemove);
+    const updatedSkuString = joinSkus(updatedSkus);
+    
+    setSavingRows(prev => new Set(prev).add(namaCsv));
     setError(null);
-    let successCount = 0;
-    let errorCount = 0;
-    let warnings: string[] = [];
-
-    for (const [namaCsv, newSku] of toSave) {
-      setSavingRows(prev => new Set(prev).add(namaCsv));
-      try {
-        const result = await updateFotoLinkSku(namaCsv, newSku.trim());
-        if (result.success) {
-          successCount++;
-          setData(prev => prev.map(d => 
-            d.nama_csv === namaCsv ? { ...d, sku: newSku.trim() } : d
-          ));
-          setEditedSkus(prev => {
-            const next = { ...prev };
-            delete next[namaCsv];
-            return next;
-          });
-          if (result.warning) warnings.push(result.warning);
-        } else {
-          errorCount++;
-        }
-      } catch (err) {
-        errorCount++;
+    try {
+      const result = await updateFotoLinkSku(namaCsv, updatedSkuString || '');
+      if (result.success) {
+        // Update local data immediately
+        setData(prev => prev.map(d => 
+          d.nama_csv === namaCsv ? { ...d, sku: updatedSkuString } : d
+        ));
+        setSuccessMsg(`✅ SKU "${skuToRemove}" dihapus`);
+      } else {
+        setError(`❌ ${result.error || 'Gagal menghapus SKU'}`);
       }
+    } catch (err: any) {
+      setError(`❌ ${err.message || 'Gagal menghapus SKU'}`);
+    } finally {
       setSavingRows(prev => {
         const next = new Set(prev);
         next.delete(namaCsv);
         return next;
       });
     }
+  };
 
-    setSavingAll(false);
-    if (successCount > 0) {
-      setSuccessMsg(`✅ ${successCount} SKU berhasil disimpan!${errorCount > 0 ? ` (${errorCount} gagal)` : ''}`);
+  // Auto-save: Add multiple SKUs at once (from multi-select)
+  const handleAddMultipleSkusDirect = async (namaCsv: string, newSkus: string[]) => {
+    if (newSkus.length === 0) return;
+    
+    const row = data.find(d => d.nama_csv === namaCsv);
+    if (!row) return;
+    
+    const currentSkus = parseSkus(row.sku);
+    // Filter out already existing SKUs
+    const skusToAdd = newSkus.filter(s => !currentSkus.includes(s));
+    if (skusToAdd.length === 0) {
+      setError('⚠️ SKU yang dipilih sudah ada semua');
+      return;
     }
-    if (warnings.length > 0) {
-      setError(`⚠️ ${warnings[0]}${warnings.length > 1 ? ` (+${warnings.length - 1} lainnya)` : ''}`);
-    } else if (errorCount > 0 && successCount === 0) {
-      setError(`❌ Gagal menyimpan ${errorCount} SKU`);
+    
+    const updatedSkus = [...currentSkus, ...skusToAdd];
+    const updatedSkuString = joinSkus(updatedSkus);
+    
+    setSavingRows(prev => new Set(prev).add(namaCsv));
+    setError(null);
+    try {
+      const result = await updateFotoLinkSku(namaCsv, updatedSkuString);
+      if (result.success) {
+        // Update local data immediately
+        setData(prev => prev.map(d => 
+          d.nama_csv === namaCsv ? { ...d, sku: updatedSkuString } : d
+        ));
+        if (result.warning) {
+          setError(`⚠️ ${result.warning}`);
+        } else {
+          setSuccessMsg(`✅ ${skusToAdd.length} SKU tersimpan!`);
+        }
+      } else {
+        setError(`❌ ${result.error || 'Gagal menyimpan SKU'}`);
+      }
+    } catch (err: any) {
+      setError(`❌ ${err.message || 'Gagal menyimpan SKU'}`);
+    } finally {
+      setSavingRows(prev => {
+        const next = new Set(prev);
+        next.delete(namaCsv);
+        return next;
+      });
     }
+  };
+
+  const handleSaveRow = async (namaCsv: string) => {
+    const newSkuString = editedSkus[namaCsv];
+    if (!newSkuString || !newSkuString.trim()) return;
+    
+    const skuArray = parseSkus(newSkuString);
+    if (skuArray.length === 0) return;
+    
+    setSavingRows(prev => new Set(prev).add(namaCsv));
+    setError(null);
+    try {
+      // Save to foto_link with comma-separated SKUs
+      const result = await updateFotoLinkSku(namaCsv, newSkuString.trim());
+      if (result.success) {
+        // Update local data
+        setData(prev => prev.map(d => 
+          d.nama_csv === namaCsv ? { ...d, sku: newSkuString.trim() } : d
+        ));
+        // Clear from edited
+        setEditedSkus(prev => {
+          const next = { ...prev };
+          delete next[namaCsv];
+          return next;
+        });
+        // Show success or warning message
+        const skuCount = skuArray.length;
+        if (result.warning) {
+          setError(`⚠️ ${result.warning}`);
+        } else {
+          setSuccessMsg(`✅ ${skuCount} SKU tersimpan! Foto disalin ke tabel foto untuk setiap SKU.`);
+        }
+      } else {
+        setError(`❌ ${result.error || 'Gagal menyimpan SKU'}`);
+      }
+    } catch (err: any) {
+      setError(`❌ ${err.message || 'Gagal menyimpan SKU'}`);
+    } finally {
+      setSavingRows(prev => {
+        const next = new Set(prev);
+        next.delete(namaCsv);
+        return next;
+      });
+    }
+  };
+
+  const getCurrentSkus = (row: FotoLinkRow): string[] => {
+    // Always return from actual data (not edited), since we auto-save now
+    return parseSkus(row.sku);
+  };
+
+  const hasChanges = (row: FotoLinkRow): boolean => {
+    // With auto-save, there are no pending changes
+    return false;
   };
 
   // Navigate to another row's input
@@ -485,40 +688,24 @@ export const FotoLinkManager: React.FC = () => {
           </div>
           <div>
             <h2 className="text-lg font-bold text-gray-100">Foto Link Manager</h2>
-            <p className="text-xs text-gray-400">Mapping nama CSV ke SKU - Batch Editing Mode</p>
+            <p className="text-xs text-gray-400">Auto-save: Pilih SKU dari dropdown untuk langsung simpan</p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          {unsavedCount > 0 && (
-            <button
-              onClick={handleSaveAll}
-              disabled={savingAll}
-              className="flex items-center gap-2 px-3 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium disabled:opacity-50"
-            >
-              {savingAll ? (
-                <Loader2 size={14} className="animate-spin" />
-              ) : (
-                <Save size={14} />
-              )}
-              Save All ({unsavedCount})
-            </button>
-          )}
-          <button
-            onClick={() => loadData(search)}
-            disabled={loading}
-            className="p-2 bg-gray-700 hover:bg-gray-600 rounded-lg"
-            title="Refresh"
-          >
-            <RefreshCw size={16} className={loading ? 'animate-spin text-purple-400' : 'text-gray-300'} />
-          </button>
-        </div>
+        <button
+          onClick={() => loadData(search)}
+          disabled={loading}
+          className="p-2 bg-gray-700 hover:bg-gray-600 rounded-lg"
+          title="Refresh"
+        >
+          <RefreshCw size={16} className={loading ? 'animate-spin text-purple-400' : 'text-gray-300'} />
+        </button>
       </div>
       
       {/* Keyboard Hints */}
       <div className="mb-2 text-xs text-gray-500 flex flex-wrap items-center gap-x-4 gap-y-1">
-        <span>⌨️ <kbd className="px-1 bg-gray-700 rounded">↑↓</kbd> = Naik/turun baris (seperti Excel)</span>
-        <span><kbd className="px-1 bg-gray-700 rounded">Enter</kbd> = Simpan & turun</span>
-        <span><kbd className="px-1 bg-gray-700 rounded">Esc</kbd> = Tutup dropdown</span>
+        <span>⌨️ Ketik SKU → pilih dengan <kbd className="px-1 bg-gray-700 rounded">↑↓</kbd> → <kbd className="px-1 bg-gray-700 rounded">Enter</kbd> = Auto Save</span>
+        <span><kbd className="px-1 bg-gray-700 rounded">Space</kbd> = Multi-select (checklist)</span>
+        <span><kbd className="px-1 bg-gray-700 rounded">Backspace</kbd> = Hapus SKU terakhir</span>
       </div>
 
       {/* Stats */}
@@ -601,7 +788,7 @@ export const FotoLinkManager: React.FC = () => {
               </tr>
             ) : (
               paginatedData.map((row, idx) => {
-                const currentSku = getCurrentSku(row);
+                const currentSkus = getCurrentSkus(row);
                 const rowHasChanges = hasChanges(row);
                 const isSaving = savingRows.has(row.nama_csv);
                 const hasSku = row.sku && row.sku.trim() !== '';
@@ -620,14 +807,16 @@ export const FotoLinkManager: React.FC = () => {
                       </div>
                     </td>
                     <td className="px-2 py-3">
-                      <InlineSkuInput
+                      <MultiSkuInput
                         options={partNumberOptions}
-                        value={currentSku}
-                        onChange={(val) => handleSkuChange(row.nama_csv, val)}
+                        skus={currentSkus}
+                        onChange={(skus) => handleSkuChange(row.nama_csv, skus)}
                         onSave={() => handleSaveRow(row.nama_csv)}
+                        onAddSku={(sku) => handleAddSkuDirect(row.nama_csv, sku)}
+                        onRemoveSku={(sku) => handleRemoveSkuDirect(row.nama_csv, sku)}
+                        onAddMultipleSkus={(skus) => handleAddMultipleSkusDirect(row.nama_csv, skus)}
                         isSaving={isSaving}
                         hasChanges={rowHasChanges}
-                        rowIndex={idx}
                         onNavigate={(dir) => handleNavigateRow(row.nama_csv, dir)}
                         onInputRef={(el) => {
                           if (el) inputRefs.current.set(row.nama_csv, el);
@@ -670,7 +859,6 @@ export const FotoLinkManager: React.FC = () => {
         </button>
         <span className="text-xs text-gray-400">
           Hal {page}/{totalPages} ({filteredData.length} item)
-          {unsavedCount > 0 && <span className="text-yellow-400 ml-2">• {unsavedCount} belum disimpan</span>}
         </span>
         <button 
           onClick={() => setPage(p => Math.min(totalPages, p + 1))} 
@@ -680,24 +868,6 @@ export const FotoLinkManager: React.FC = () => {
           Next <ChevronRight size={16} className="inline" />
         </button>
       </div>
-
-      {/* Floating Save All Button */}
-      {unsavedCount > 0 && (
-        <div className="fixed bottom-6 right-6 z-40">
-          <button
-            onClick={handleSaveAll}
-            disabled={savingAll}
-            className="flex items-center gap-2 px-4 py-3 bg-green-600 hover:bg-green-700 text-white rounded-xl shadow-lg text-sm font-bold disabled:opacity-50 transition-all hover:scale-105"
-          >
-            {savingAll ? (
-              <Loader2 size={18} className="animate-spin" />
-            ) : (
-              <Save size={18} />
-            )}
-            Simpan Semua ({unsavedCount})
-          </button>
-        </div>
-      )}
 
       {/* Image Preview Modal - Single Large Image */}
       {previewImage && (

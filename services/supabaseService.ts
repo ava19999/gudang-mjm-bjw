@@ -651,30 +651,22 @@ export const insertFotoLinkBatch = async (
 };
 
 // Update SKU in foto_link and sync to foto + product_alias + base_mjm image_url
+// Supports multiple SKUs separated by comma
 export const updateFotoLinkSku = async (
   namaCsv: string,
-  sku: string
+  skuString: string
 ): Promise<{ success: boolean; error?: string; warning?: string }> => {
-  if (!namaCsv || !sku) {
+  if (!namaCsv || !skuString) {
     return { success: false, error: 'nama_csv and sku are required' };
   }
 
+  // Parse comma-separated SKUs
+  const skuArray = skuString.split(',').map(s => s.trim()).filter(Boolean);
+  if (skuArray.length === 0) {
+    return { success: false, error: 'No valid SKU provided' };
+  }
+
   try {
-    // 0. Check if SKU exists in base_mjm or base_bjw
-    const { data: mjmItem } = await supabase
-      .from('base_mjm')
-      .select('part_number')
-      .eq('part_number', sku)
-      .maybeSingle();
-    
-    const { data: bjwItem } = await supabase
-      .from('base_bjw')
-      .select('part_number')
-      .eq('part_number', sku)
-      .maybeSingle();
-
-    const skuExistsInInventory = !!(mjmItem || bjwItem);
-
     // 1. Get the foto_link row to get foto URLs
     const { data: linkData, error: fetchError } = await supabase
       .from('foto_link')
@@ -686,15 +678,13 @@ export const updateFotoLinkSku = async (
       return { success: false, error: 'foto_link entry not found: ' + (fetchError?.message || 'unknown') };
     }
 
-    // 2. Update the sku in foto_link
-    // Note: Jika kolom sku belum ada, ini akan error - user perlu menambahkan kolom dulu
+    // 2. Update the sku in foto_link (store as comma-separated string)
     const { error: updateError } = await supabase
       .from('foto_link')
-      .update({ sku })
+      .update({ sku: skuString })
       .eq('nama_csv', namaCsv);
 
     if (updateError) {
-      // Check if error is because column doesn't exist
       if (updateError.message?.includes('column') || updateError.code === '42703') {
         return { 
           success: false, 
@@ -707,92 +697,88 @@ export const updateFotoLinkSku = async (
     // Get first foto URL for base_mjm update
     const firstFoto = linkData.foto_1 || linkData.foto_2 || linkData.foto_3 || '';
 
-    // 3. Insert/upsert to foto table with the photos
-    const fotoPayload: any = {
-      part_number: sku,
-    };
-    // Only add foto fields that have values
-    if (linkData.foto_1) fotoPayload.foto_1 = linkData.foto_1;
-    if (linkData.foto_2) fotoPayload.foto_2 = linkData.foto_2;
-    if (linkData.foto_3) fotoPayload.foto_3 = linkData.foto_3;
-    if (linkData.foto_4) fotoPayload.foto_4 = linkData.foto_4;
-    if (linkData.foto_5) fotoPayload.foto_5 = linkData.foto_5;
-    if (linkData.foto_6) fotoPayload.foto_6 = linkData.foto_6;
-    if (linkData.foto_7) fotoPayload.foto_7 = linkData.foto_7;
-    if (linkData.foto_8) fotoPayload.foto_8 = linkData.foto_8;
-    if (linkData.foto_9) fotoPayload.foto_9 = linkData.foto_9;
-    if (linkData.foto_10) fotoPayload.foto_10 = linkData.foto_10;
+    // Build foto fields object
+    const fotoFields: any = {};
+    if (linkData.foto_1) fotoFields.foto_1 = linkData.foto_1;
+    if (linkData.foto_2) fotoFields.foto_2 = linkData.foto_2;
+    if (linkData.foto_3) fotoFields.foto_3 = linkData.foto_3;
+    if (linkData.foto_4) fotoFields.foto_4 = linkData.foto_4;
+    if (linkData.foto_5) fotoFields.foto_5 = linkData.foto_5;
+    if (linkData.foto_6) fotoFields.foto_6 = linkData.foto_6;
+    if (linkData.foto_7) fotoFields.foto_7 = linkData.foto_7;
+    if (linkData.foto_8) fotoFields.foto_8 = linkData.foto_8;
+    if (linkData.foto_9) fotoFields.foto_9 = linkData.foto_9;
+    if (linkData.foto_10) fotoFields.foto_10 = linkData.foto_10;
 
-    // Try upsert first, if fails try delete then insert
-    let { error: fotoError } = await supabase
-      .from('foto')
-      .upsert(fotoPayload, { onConflict: 'part_number' });
+    let notFoundSkus: string[] = [];
 
-    if (fotoError) {
-      console.warn('Upsert to foto failed, trying delete+insert:', fotoError.message);
-      // Delete existing and insert new
-      await supabase.from('foto').delete().eq('part_number', sku);
-      const { error: insertError } = await supabase.from('foto').insert(fotoPayload);
-      if (insertError) {
-        console.warn('Insert to foto also failed:', insertError.message);
-      } else {
-        console.log('Successfully inserted foto for:', sku);
-      }
-    } else {
-      console.log('Successfully upserted foto for:', sku);
-    }
-
-    // 4. Update image_url in base_mjm directly (so foto appears immediately)
-    if (firstFoto) {
-      const { error: mjmError } = await supabase
+    // 3. For each SKU, insert/upsert to foto table and update base_mjm/bjw
+    for (const sku of skuArray) {
+      // Check if SKU exists in inventory
+      const { data: mjmItem } = await supabase
         .from('base_mjm')
-        .update({ image_url: firstFoto })
-        .eq('part_number', sku);
+        .select('part_number')
+        .eq('part_number', sku)
+        .maybeSingle();
       
-      if (mjmError) {
-        console.warn('Warning: Update base_mjm image_url failed:', mjmError.message);
-      }
-
-      // Also try base_bjw
-      const { error: bjwError } = await supabase
+      const { data: bjwItem } = await supabase
         .from('base_bjw')
-        .update({ image_url: firstFoto })
-        .eq('part_number', sku);
-      
-      if (bjwError) {
-        console.warn('Warning: Update base_bjw image_url failed:', bjwError.message);
+        .select('part_number')
+        .eq('part_number', sku)
+        .maybeSingle();
+
+      const skuExistsInInventory = !!(mjmItem || bjwItem);
+      if (!skuExistsInInventory) {
+        notFoundSkus.push(sku);
       }
-    }
 
-    // 5. Insert to product_alias for search capability
-    // First check if alias already exists
-    const { data: existingAlias } = await supabase
-      .from('product_alias')
-      .select('id')
-      .eq('part_number', sku)
-      .eq('alias_name', namaCsv)
-      .maybeSingle();
+      // Insert/upsert to foto table
+      const fotoPayload = { part_number: sku, ...fotoFields };
+      let { error: fotoError } = await supabase
+        .from('foto')
+        .upsert(fotoPayload, { onConflict: 'part_number' });
 
-    if (!existingAlias) {
-      const { error: aliasError } = await supabase
+      if (fotoError) {
+        console.warn(`Upsert to foto failed for ${sku}, trying delete+insert:`, fotoError.message);
+        await supabase.from('foto').delete().eq('part_number', sku);
+        const { error: insertError } = await supabase.from('foto').insert(fotoPayload);
+        if (insertError) {
+          console.warn(`Insert to foto also failed for ${sku}:`, insertError.message);
+        } else {
+          console.log('Successfully inserted foto for:', sku);
+        }
+      } else {
+        console.log('Successfully upserted foto for:', sku);
+      }
+
+      // Update image_url in base_mjm/base_bjw
+      if (firstFoto) {
+        await supabase.from('base_mjm').update({ image_url: firstFoto }).eq('part_number', sku);
+        await supabase.from('base_bjw').update({ image_url: firstFoto }).eq('part_number', sku);
+      }
+
+      // Insert to product_alias for search capability
+      const { data: existingAlias } = await supabase
         .from('product_alias')
-        .insert({
+        .select('id')
+        .eq('part_number', sku)
+        .eq('alias_name', namaCsv)
+        .maybeSingle();
+
+      if (!existingAlias) {
+        await supabase.from('product_alias').insert({
           part_number: sku,
           alias_name: namaCsv,
           source: 'foto_link'
         });
-
-      if (aliasError) {
-        console.warn('Warning: Insert to product_alias failed:', aliasError.message);
-        // Continue anyway
       }
     }
 
-    // Return with warning if SKU not found in inventory
-    if (!skuExistsInInventory) {
+    // Return with warning if some SKUs not found in inventory
+    if (notFoundSkus.length > 0) {
       return { 
         success: true, 
-        warning: `SKU "${sku}" tidak ditemukan di inventory. Foto tersimpan tapi tidak akan muncul di Beranda/Gudang.` 
+        warning: `SKU tidak ditemukan di inventory: ${notFoundSkus.join(', ')}. Foto tersimpan tapi tidak akan muncul di Beranda/Gudang.` 
       };
     }
 
