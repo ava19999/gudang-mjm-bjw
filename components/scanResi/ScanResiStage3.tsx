@@ -1135,6 +1135,10 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
   const [savingStatus, setSavingStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
   const [partOptions, setPartOptions] = useState<string[]>([]);
   
+  // AUTO-SAVE DEBOUNCE REFS
+  const autoSaveTimers = useRef<Map<string, NodeJS.Timeout>>(new Map());
+  const pendingUpdates = useRef<Map<string, Stage3Row>>(new Map());
+  
   // SELECTED RESI FOR PROCESS
   const [selectedResis, setSelectedResis] = useState<Set<string>>(new Set());
   
@@ -1240,6 +1244,16 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
   useEffect(() => {
     loadSavedDataFromDB();
   }, [selectedStore]);
+
+  // Cleanup auto-save timers on unmount
+  useEffect(() => {
+    return () => {
+      // Clear all pending timers
+      autoSaveTimers.current.forEach(timer => clearTimeout(timer));
+      autoSaveTimers.current.clear();
+      pendingUpdates.current.clear();
+    };
+  }, []);
 
   const loadSavedDataFromDB = async () => {
     setLoading(true);
@@ -1936,7 +1950,33 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
     }
   };
 
+  // Auto-save function with debounce
+  const autoSaveRow = (updatedRow: Stage3Row) => {
+    // Cancel previous timer for this row
+    const existingTimer = autoSaveTimers.current.get(updatedRow.id);
+    if (existingTimer) {
+      clearTimeout(existingTimer);
+    }
+    
+    // Store the updated row in pending updates
+    pendingUpdates.current.set(updatedRow.id, updatedRow);
+    
+    // Set new timer for 1 second debounce
+    const timer = setTimeout(async () => {
+      const rowToSave = pendingUpdates.current.get(updatedRow.id);
+      if (rowToSave) {
+        await handleSaveRow(rowToSave);
+        pendingUpdates.current.delete(updatedRow.id);
+        autoSaveTimers.current.delete(updatedRow.id);
+      }
+    }, 1000);
+    
+    autoSaveTimers.current.set(updatedRow.id, timer);
+  };
+
   const updateRow = (id: string, field: keyof Stage3Row, value: any) => {
+    let updatedRow: Stage3Row | null = null;
+    
     setRows(prev => prev.map(r => {
         if (r.id !== id) return r;
         const updated = { ...r, [field]: value };
@@ -1947,8 +1987,23 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
         } else if (field === 'qty_keluar') {
             updated.harga_total = updated.harga_satuan * updated.qty_keluar;
         }
+        updatedRow = updated;
         return updated;
     }));
+    
+    // Auto-save to database with debounce (only for editable fields)
+    if (updatedRow && ['part_number', 'qty_keluar', 'harga_total', 'harga_satuan', 'customer', 'ecommerce', 'sub_toko', 'tanggal'].includes(field)) {
+      // Get the latest row data after state update
+      setTimeout(() => {
+        setRows(currentRows => {
+          const latestRow = currentRows.find(r => r.id === id);
+          if (latestRow) {
+            autoSaveRow(latestRow);
+          }
+          return currentRows;
+        });
+      }, 0);
+    }
   };
 
   const handleLoadPending = async () => {
