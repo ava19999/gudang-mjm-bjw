@@ -1280,8 +1280,13 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
           if (d.no_pesanan) statusMapByOrder.set(String(d.no_pesanan).trim().toUpperCase(), d);
         });
 
+        // Map part info dengan UPPERCASE key untuk case-insensitive matching
         const partMap = new Map();
-        bulkPartInfo.forEach((p: any) => partMap.set(p.part_number, p));
+        bulkPartInfo.forEach((p: any) => {
+          if (p.part_number) {
+            partMap.set(p.part_number.trim().toUpperCase(), p);
+          }
+        });
 
         const loadedRows: Stage3Row[] = [];
         
@@ -1298,7 +1303,9 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
              dbRow = statusMapByOrder.get(orderIdUpper);
            }
            
-           const partInfo = partMap.get(item.part_number);
+           // Gunakan UPPERCASE untuk lookup part number
+           const partNumberUpper = (item.part_number || '').trim().toUpperCase();
+           const partInfo = partMap.get(partNumberUpper);
            
            let statusMsg = 'Ready';
            let verified = true;
@@ -1400,15 +1407,16 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
         }
 
         // === OPSI 3: AGGREGATE CHECK ===
-        // Hitung total qty yang dibutuhkan per part_number
+        // Hitung total qty yang dibutuhkan per part_number (UPPERCASE key untuk konsistensi)
         const aggregateQtyMap = new Map<string, { totalNeeded: number; stock: number }>();
         loadedRows.forEach(row => {
           if (row.part_number) {
-            const existing = aggregateQtyMap.get(row.part_number);
+            const partKey = row.part_number.trim().toUpperCase();
+            const existing = aggregateQtyMap.get(partKey);
             if (existing) {
               existing.totalNeeded += row.qty_keluar;
             } else {
-              aggregateQtyMap.set(row.part_number, { 
+              aggregateQtyMap.set(partKey, { 
                 totalNeeded: row.qty_keluar, 
                 stock: row.stock_saat_ini 
               });
@@ -1419,11 +1427,14 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
         // Update status untuk item yang total qty melebihi stok
         loadedRows.forEach(row => {
           if (row.part_number) {
-            const aggregate = aggregateQtyMap.get(row.part_number);
+            const partKey = row.part_number.trim().toUpperCase();
+            const aggregate = aggregateQtyMap.get(partKey);
             if (aggregate && aggregate.totalNeeded > aggregate.stock) {
               // Hanya update jika status sebelumnya Ready atau Stok Kurang
               if (row.status_message === 'Ready' || row.status_message === 'Stok Kurang') {
                 row.status_message = `Stok Total Kurang`;
+                // Tambahkan info tooltip: Total X, Stok Y
+                (row as any).stockTooltip = `Total: ${aggregate.totalNeeded}, Stok: ${aggregate.stock}`;
                 row.is_stock_valid = false;
               }
             }
