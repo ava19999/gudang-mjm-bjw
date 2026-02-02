@@ -328,25 +328,50 @@ export const addReseller = async (nama: string): Promise<{ success: boolean; mes
 
 /**
  * Get unique reseller names from barang_keluar table
+ * Mengambil dari field kode_toko dimana ecommerce = 'RESELLER'
+ * Ini sama dengan sumber data yang digunakan di menu Reseller (ResellerView)
  */
 export const getResellerNamesFromBarangKeluar = async (store: string | null): Promise<string[]> => {
-  const table = store === 'mjm' ? 'barang_keluar_mjm' : (store === 'bjw' ? 'barang_keluar_bjw' : null);
-  if (!table) return [];
-
   try {
-    const { data, error } = await supabase
-      .from(table)
-      .select('customer')
-      .eq('ecommerce', 'RESELLER')
-      .not('customer', 'is', null);
+    const allNames: string[] = [];
+    
+    const fetchFromTable = async (table: string): Promise<string[]> => {
+      const { data, error } = await supabase
+        .from(table)
+        .select('kode_toko')
+        .eq('ecommerce', 'RESELLER')
+        .not('kode_toko', 'is', null);
 
-    if (error) {
-      console.error('Error fetching reseller names:', error);
-      return [];
+      if (error) {
+        console.error(`Error fetching reseller names from ${table}:`, error);
+        return [];
+      }
+
+      return (data || []).map((d: any) => d.kode_toko).filter(Boolean);
+    };
+    
+    // Ambil dari kedua toko untuk daftar reseller yang lengkap
+    if (store === 'mjm') {
+      const names = await fetchFromTable('barang_keluar_mjm');
+      allNames.push(...names);
+    } else if (store === 'bjw') {
+      const names = await fetchFromTable('barang_keluar_bjw');
+      allNames.push(...names);
+    } else {
+      // Default: ambil dari kedua tabel
+      const [mjmNames, bjwNames] = await Promise.all([
+        fetchFromTable('barang_keluar_mjm'),
+        fetchFromTable('barang_keluar_bjw')
+      ]);
+      allNames.push(...mjmNames, ...bjwNames);
     }
 
-    // Get unique names
-    const uniqueNames = [...new Set((data || []).map((d: any) => d.customer).filter(Boolean))];
+    // Get unique names dan filter yang kosong
+    const uniqueNames = [...new Set(
+      allNames.filter((name: string) => name && name.trim() !== '')
+    )];
+    
+    console.log('[getResellerNamesFromBarangKeluar] Found reseller names:', uniqueNames.length);
     return uniqueNames.sort();
   } catch (err) {
     console.error('Exception fetching reseller names:', err);

@@ -261,18 +261,8 @@ export const parseShopeeCSV = (text: string): ParsedCSVItem[] => {
     // Label ditaruh di kolom ecommerce
     // Prioritas: cek "kilat" dulu karena "kilat instan" mengandung kedua kata
     const isKilat = shippingOptionLower.includes('kilat');
-    
-    // ANTER AJA SAMEDAY dan PIXEL SAMEDAY dianggap INSTAN (bukan sameday biasa)
-    const isAnterAjaSameday = shippingOptionLower.includes('anter aja') && shippingOptionLower.includes('sameday');
-    const isPixelSameday = shippingOptionLower.includes('pixel') && shippingOptionLower.includes('sameday');
-    
-    // Sameday biasa (bukan Anter Aja atau Pixel)
-    const isSameday = (shippingOptionLower.includes('same day') || shippingOptionLower.includes('sameday')) 
-                      && !isAnterAjaSameday && !isPixelSameday;
-    
-    // Instant termasuk Anter Aja Sameday dan Pixel Sameday
-    const isInstant = ((shippingOptionLower.includes('instant') || shippingOptionLower.includes('instan')) && !isKilat)
-                      || isAnterAjaSameday || isPixelSameday;
+    const isSameday = shippingOptionLower.includes('same day') || shippingOptionLower.includes('sameday');
+    const isInstant = (shippingOptionLower.includes('instant') || shippingOptionLower.includes('instan')) && !isKilat;
     
     let ecommerceLabel = 'SHOPEE';
     if (isKilat) {
@@ -284,7 +274,7 @@ export const parseShopeeCSV = (text: string): ParsedCSVItem[] => {
       if (orderId) resi = orderId;
       ecommerceLabel = 'SHOPEE SAMEDAY';
     } else if (isInstant) {
-      // Instant - gunakan No. Pesanan (termasuk Anter Aja Sameday, Pixel Sameday)
+      // Instant - gunakan No. Pesanan
       if (orderId) resi = orderId;
       ecommerceLabel = 'SHOPEE INSTAN';
     }
@@ -467,24 +457,32 @@ export const parseShopeeIntlCSV = (text: string): ParsedCSVItem[] => {
 // ============================================================================
 // TIKTOK PARSER
 // Header: Baris 1
-// Skip: Baris 2 (biasanya data report atau kosong)
-// Data: Mulai Baris 3
+// Data: 
+//   - CSV: Mulai baris 2 (index 1)
+//   - XLSX: Mulai baris 3 (index 2) karena ada baris deskripsi di baris 2
 // Filter: Skip "Dibatalkan" dan "Belum dibayar"
 // RESI LOGIC:
-//   - Instant/On-demand/Express: Gunakan Order ID sebagai resi, label "TIKTOK INSTAN"
-//   - Same Day: Gunakan Tracking ID sebagai resi, label "TIKTOK INSTAN"
-//   - Regular: Gunakan Tracking ID sebagai resi, label "TIKTOK"
-// Dedupe: Sama resi + customer + nama_produk = skip
+//   - Default: Gunakan Tracking ID sebagai resi
+//   - Instan/Same Day: Gunakan Order ID sebagai resi, label "TIKTOK INSTAN"
+// Dedupe: Sama resi + customer + nama_produk + original_row_idx = skip (lebih ketat)
 // ============================================================================
-export const parseTikTokCSV = (text: string): ParsedCSVItem[] => {
+export const parseTikTokCSV = (text: string, isFromXLSX: boolean = false): ParsedCSVItem[] => {
   const lines = text.split('\n').filter(l => l.trim() !== '');
-  if (lines.length < 3) return [];
+  if (lines.length < 2) return [];
   
   // Header di baris 1 (index 0)
   const headers = parseCSVLine(lines[0]);
-  // Skip baris 2 (index 1)
-  // Data mulai baris 3 (index 2)
-  const dataRows = lines.slice(2);
+  
+  // ATURAN DATA START INDEX:
+  // - CSV: Mulai dari baris 2 (index 1) - langsung data setelah header
+  // - XLSX: Mulai dari baris 3 (index 2) - karena baris 2 adalah deskripsi kolom
+  let dataStartIndex = isFromXLSX ? 2 : 1;
+  
+  console.log('[TikTok CSV] Source:', isFromXLSX ? 'XLSX' : 'CSV');
+  console.log('[TikTok CSV] Data starts at row', dataStartIndex + 1, '(index', dataStartIndex, ')');
+  
+  const dataRows = lines.slice(dataStartIndex);
+  console.log('[TikTok CSV] Data starts at row', dataStartIndex + 1, '| Total data rows:', dataRows.length);
 
   // Map column indexes
   const idxResi = headers.findIndex(h => h.includes('Tracking ID'));
@@ -499,12 +497,36 @@ export const parseTikTokCSV = (text: string): ParsedCSVItem[] => {
   );
   const idxUser = headers.findIndex(h => h.includes('Buyer Username'));
   const idxSKU = headers.findIndex(h => h.includes('Seller SKU'));
+  // Tambahkan SKU ID untuk dedupe yang lebih akurat (kolom unik per item)
+  const idxSKUID = headers.findIndex(h => h === 'SKU ID' || h.includes('SKU ID'));
   const idxProductName = headers.findIndex(h => h.includes('Product Name'));
   const idxVariation = headers.findIndex(h => h.includes('Variation'));
   const idxQty = headers.findIndex(h => h.includes('Quantity'));
-  const idxTotal = headers.findIndex(h => h.includes('SKU Subtotal After Discount'));
+  // PERBAIKAN: Ambil dari "SKU Subtotal Before Discount" (kolom M)
+  // Ini adalah harga sebelum diskon, lebih akurat untuk pencatatan
+  const idxTotal = headers.findIndex(h => {
+    const hLower = h.toLowerCase();
+    // Prioritas: SKU Subtotal Before Discount
+    if (hLower.includes('sku subto') && hLower.includes('before')) return true;
+    return false;
+  });
+  // Fallback ke "SKU Subtotal" jika "Before Discount" tidak ditemukan
+  const idxTotalFallback = idxTotal === -1 
+    ? headers.findIndex(h => {
+        const hLower = h.toLowerCase();
+        // Cari "SKU Subtotal" yang BUKAN "Before Discount" dan BUKAN "After Discount"
+        if (hLower === 'sku subtotal' || (hLower.includes('sku subto') && !hLower.includes('before') && !hLower.includes('after'))) return true;
+        return false;
+      })
+    : -1;
+  const finalIdxTotal = idxTotal !== -1 ? idxTotal : idxTotalFallback;
+  
+  // Tambahkan kolom harga unit untuk dedupe
+  const idxUnitPrice = headers.findIndex(h => h.includes('SKU Unit Original Price') || h.includes('Unit Price'));
   
   console.log('[TikTok CSV] Headers:', headers);
+  console.log('[TikTok CSV] Column indexes - Order:', idxOrder, 'Resi:', idxResi, 'SKU:', idxSKU, 'SKU ID:', idxSKUID);
+  console.log('[TikTok CSV] idxTotal (SKU Subtotal Before Discount):', finalIdxTotal, 'column name:', finalIdxTotal !== -1 ? headers[finalIdxTotal] : 'NOT FOUND');
   console.log('[TikTok CSV] idxStatus:', idxStatus, 'column name:', idxStatus !== -1 ? headers[idxStatus] : 'NOT FOUND');
   console.log('[TikTok CSV] idxDeliveryOption:', idxDeliveryOption, 'column name:', idxDeliveryOption !== -1 ? headers[idxDeliveryOption] : 'NOT FOUND');
   console.log('[TikTok CSV] idxResi (Tracking ID):', idxResi, 'column name:', idxResi !== -1 ? headers[idxResi] : 'NOT FOUND');
@@ -554,12 +576,11 @@ export const parseTikTokCSV = (text: string): ParsedCSVItem[] => {
     }
     
     // LOGIC RESI TIKTOK:
-    // Cek kolom "Delivery Option" untuk menentukan jenis pengiriman:
-    // - Instant/On-demand/Express: Gunakan Order ID sebagai resi, label "TIKTOK INSTAN"
-    // - Same Day: Gunakan Tracking ID sebagai resi, label "TIKTOK INSTAN"
-    // - Regular: Gunakan Tracking ID sebagai resi, label "TIKTOK"
+    // Cek kolom "Delivery Option" untuk kata instant/instan/sameday/same day/on-demand
+    // - Jika Instan/Same Day/On-Demand: Gunakan Order ID sebagai resi, label "TIKTOK INSTAN"
+    // - Jika Regular: Gunakan Tracking ID sebagai resi, label "TIKTOK"
     
-    // Deteksi jenis pengiriman
+    // Tambahkan variasi penulisan yang mungkin ada di TikTok CSV
     const isInstant = deliveryOptionLower.includes('instant') || 
                       deliveryOptionLower.includes('instan') ||
                       deliveryOptionLower.includes('on-demand') ||
@@ -568,20 +589,16 @@ export const parseTikTokCSV = (text: string): ParsedCSVItem[] => {
     const isSameday = deliveryOptionLower.includes('same day') || 
                       deliveryOptionLower.includes('sameday') ||
                       deliveryOptionLower.includes('same-day');
+    const isInstantOrSameday = isInstant || isSameday;
     
     let resi = '';
     let ecommerceLabel = 'TIKTOK';
     
-    if (isInstant) {
-      // Instant/On-demand/Express: Gunakan Order ID sebagai resi
+    if (isInstantOrSameday) {
+      // Instan/Same Day: Gunakan Order ID sebagai resi
       resi = orderId;
       ecommerceLabel = 'TIKTOK INSTAN';
-      console.log('[TikTok CSV] DETECTED INSTANT:', deliveryOption, '-> Use Order ID as resi');
-    } else if (isSameday) {
-      // Same Day: Gunakan Tracking ID sebagai resi
-      resi = trackingId;
-      ecommerceLabel = 'TIKTOK INSTAN';
-      console.log('[TikTok CSV] DETECTED SAMEDAY:', deliveryOption, '-> Use Tracking ID as resi');
+      console.log('[TikTok CSV] DETECTED INSTANT/SAMEDAY:', deliveryOption, '-> Label:', ecommerceLabel);
     } else {
       // Regular: Gunakan Tracking ID sebagai resi
       resi = trackingId;
@@ -602,17 +619,38 @@ export const parseTikTokCSV = (text: string): ParsedCSVItem[] => {
     const variation = (idxVariation !== -1) ? cols[idxVariation] : '';
     const productName = formatNamaProduk(namaProduk, variation);
     
-    // Dedupe check - gunakan resi + SKU untuk akurasi
-    const sku = (idxSKU !== -1 && cols[idxSKU]) ? cols[idxSKU].replace(/["']/g, '') : '';
-    const dedupeKey = `${resi}||${sku}||${productName}`;
+    // Get SKU dan SKU ID untuk dedupe yang lebih akurat
+    const sku = (idxSKU !== -1 && cols[idxSKU]) ? cols[idxSKU].replace(/["']/g, '').trim() : '';
+    const skuId = (idxSKUID !== -1 && cols[idxSKUID]) ? cols[idxSKUID].replace(/["']/g, '').trim() : '';
+    
+    // Parse harga untuk dedupe tambahan - gunakan finalIdxTotal (SKU Subtotal)
+    const totalPriceIDR = (finalIdxTotal !== -1) ? parseCurrencyIDR(cols[finalIdxTotal]) : 0;
+    const unitPrice = (idxUnitPrice !== -1) ? parseCurrencyIDR(cols[idxUnitPrice]) : 0;
+    const qty = (idxQty !== -1) ? (parseInt(cols[idxQty]) || 1) : 1;
+    
+    // IMPROVED DEDUPE: Gunakan kombinasi yang lebih unik
+    // Prioritas: SKU ID (paling unik) > SKU + Product Name + Unit Price
+    // SKU ID adalah identifier unik per line item di TikTok
+    let dedupeKey: string;
+    if (skuId) {
+      // SKU ID tersedia - gunakan ini karena paling unik per item
+      dedupeKey = `${resi}||${skuId}`;
+    } else if (sku) {
+      // SKU tersedia - kombinasikan dengan product name dan harga
+      dedupeKey = `${resi}||${sku}||${productName}||${unitPrice}`;
+    } else {
+      // Tidak ada SKU - gunakan product name + harga + quantity sebagai pembeda
+      dedupeKey = `${resi}||${productName}||${unitPrice}||${qty}`;
+    }
+    
+    console.log('[TikTok CSV] Row dedupe key:', dedupeKey);
+    
     if (seenKeys.has(dedupeKey)) {
       skippedDuplicate++;
+      console.log('[TikTok CSV] SKIPPED DUPLICATE:', dedupeKey);
       return null;
     }
     seenKeys.add(dedupeKey);
-
-    // Parse harga
-    const totalPriceIDR = (idxTotal !== -1) ? parseCurrencyIDR(cols[idxTotal]) : 0;
 
     return {
       resi,
@@ -620,11 +658,11 @@ export const parseTikTokCSV = (text: string): ParsedCSVItem[] => {
       order_status: rawStatus,
       shipping_option: deliveryOption,
       customer,
-      part_number: (idxSKU !== -1 && cols[idxSKU]) ? cols[idxSKU].replace(/["']/g, '') : '',
+      part_number: sku,
       product_name: productName,
-      quantity: (idxQty !== -1) ? (parseInt(cols[idxQty]) || 1) : 1,
+      quantity: qty,
       total_price: totalPriceIDR,
-      original_currency_val: (idxTotal !== -1) ? cols[idxTotal] : '0',
+      original_currency_val: (finalIdxTotal !== -1) ? cols[finalIdxTotal] : '0',
       ecommerce: ecommerceLabel
     };
   }).filter((item): item is ParsedCSVItem => item !== null);

@@ -1569,6 +1569,10 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
     if (!file) return;
     setLoading(true);
     
+    // Deteksi apakah file adalah XLSX berdasarkan ekstensi
+    const fileName = file.name.toLowerCase();
+    const isXLSXFile = fileName.endsWith('.xlsx') || fileName.endsWith('.xls');
+    
     // Buka modal progress
     setIsProcessingUpload(true);
     setProcessLogs([]);
@@ -1618,14 +1622,15 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
       const csvText = XLSX.utils.sheet_to_csv(worksheet, { rawNumbers: false, blankrows: false });
 
       const platform = detectCSVPlatform(csvText);
-      addLog('info', 'SISTEM', `Format terdeteksi: ${platform === 'shopee' ? 'Shopee' : platform === 'tiktok' ? 'TikTok' : 'Unknown'}`);
+      addLog('info', 'SISTEM', `Format terdeteksi: ${platform === 'shopee' ? 'Shopee' : platform === 'tiktok' ? 'TikTok' : 'Unknown'} | Sumber: ${isXLSXFile ? 'XLSX' : 'CSV'}`);
       
       let parsedItems: any[] = [];
       
       // Parsing berdasarkan deteksi format file (Shopee/TikTok)
       // Namun attribute ecommerce/toko akan kita override dengan pilihan user
+      // Untuk TikTok: CSV mulai dari baris 2, XLSX mulai dari baris 3
       if (platform === 'shopee') parsedItems = parseShopeeCSV(csvText);
-      else if (platform === 'tiktok') parsedItems = parseTikTokCSV(csvText);
+      else if (platform === 'tiktok') parsedItems = parseTikTokCSV(csvText, isXLSXFile);
       else { 
         // Fallback coba parse Shopee standar jika tidak terdeteksi
         parsedItems = parseShopeeCSV(csvText);
