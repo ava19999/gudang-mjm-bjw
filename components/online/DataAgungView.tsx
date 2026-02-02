@@ -1,10 +1,29 @@
 // FILE: src/components/online/DataAgungView.tsx
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
-import { Package, Plus, X, Search, Keyboard } from 'lucide-react';
+import { Package, Plus, X, Search, Keyboard, RefreshCw, CloudOff, Cloud } from 'lucide-react';
 import { InventoryItem, OnlineProduct, ProdukKosong, TableMasuk, BaseWarehouseItem } from '../../types';
 import Autocomplete from '@mui/material/Autocomplete';
 import TextField from '@mui/material/TextField';
 import { generateId } from '../../utils';
+import { useStore } from '../../context/StoreContext';
+import {
+  getOnlineProducts,
+  addOnlineProduct,
+  updateOnlineProduct,
+  deleteOnlineProduct,
+  toggleOnlineProduct,
+  getProdukKosong,
+  addProdukKosong,
+  updateProdukKosong,
+  deleteProdukKosong,
+  toggleProdukKosong,
+  getTableMasuk,
+  addTableMasuk,
+  updateTableMasuk,
+  deleteTableMasuk,
+  toggleTableMasuk,
+  moveProdukKosongToMasuk
+} from '../../services/dataAgungService';
 
 interface DataAgungViewProps {
   items: InventoryItem[];
@@ -17,10 +36,42 @@ type TableType = 'base' | 'online' | 'kosong' | 'masuk';
 const TABLES: TableType[] = ['base', 'online', 'kosong', 'masuk'];
 
 export const DataAgungView: React.FC<DataAgungViewProps> = ({ items, onRefresh, showToast }) => {
+  const { selectedStore } = useStore();
+  
+  // Loading state for database operations
+  const [isLoading, setIsLoading] = useState(false);
+  const [isOnline, setIsOnline] = useState(true);
+
   // State for the four tables
   const [onlineProducts, setOnlineProducts] = useState<OnlineProduct[]>([]);
   const [produkKosong, setProdukKosong] = useState<ProdukKosong[]>([]);
   const [tableMasuk, setTableMasuk] = useState<TableMasuk[]>([]);
+
+  // Load data from database on mount
+  useEffect(() => {
+    loadAllData();
+  }, [selectedStore]);
+
+  const loadAllData = async () => {
+    setIsLoading(true);
+    try {
+      const [online, kosong, masuk] = await Promise.all([
+        getOnlineProducts(selectedStore),
+        getProdukKosong(selectedStore),
+        getTableMasuk(selectedStore)
+      ]);
+      setOnlineProducts(online);
+      setProdukKosong(kosong);
+      setTableMasuk(masuk);
+      setIsOnline(true);
+    } catch (err) {
+      console.error('Error loading data:', err);
+      setIsOnline(false);
+      showToast('Gagal memuat data dari database', 'error');
+    } finally {
+      setIsLoading(false);
+    }
+  };
   
   // Search states
   const [searchBase, setSearchBase] = useState('');
@@ -240,7 +291,7 @@ export const DataAgungView: React.FC<DataAgungViewProps> = ({ items, onRefresh, 
   }, [selectedRow, activeTable, getCurrentTableData]);
 
   // Handle add product to online
-  const handleAddOnlineProduct = () => {
+  const handleAddOnlineProduct = async () => {
     if (!selectedPartNumber) {
       showToast('Pilih produk terlebih dahulu', 'error');
       return;
@@ -252,79 +303,142 @@ export const DataAgungView: React.FC<DataAgungViewProps> = ({ items, onRefresh, 
       return;
     }
 
-    // Check if already exists
+    // Check if already exists locally
     if (onlineProducts.some(p => p.partNumber === item.partNumber)) {
       showToast('Produk sudah ada di list online', 'error');
       return;
     }
 
-    const newProduct: OnlineProduct = {
-      id: generateId(),
+    setIsLoading(true);
+    const result = await addOnlineProduct(selectedStore, {
       partNumber: item.partNumber,
       name: item.name,
       brand: item.brand,
       quantity: item.quantity,
-      isActive: true,
-      timestamp: Date.now()
-    };
+      isActive: true
+    });
 
-    setOnlineProducts(prev => [...prev, newProduct]);
-    showToast('Produk ditambahkan ke Online');
+    if (result.success) {
+      // Add to local state with returned id
+      const newProduct: OnlineProduct = {
+        id: result.id || generateId(),
+        partNumber: item.partNumber,
+        name: item.name,
+        brand: item.brand,
+        quantity: item.quantity,
+        isActive: true,
+        timestamp: Date.now()
+      };
+      setOnlineProducts(prev => [...prev, newProduct]);
+      showToast('Produk ditambahkan ke Online');
+    } else {
+      showToast(result.message || 'Gagal menambahkan produk', 'error');
+    }
+    
+    setIsLoading(false);
     setShowAddModal(false);
     setSelectedPartNumber('');
   };
 
   // Handle toggle online product
-  const handleToggleOnlineProduct = (id: string) => {
+  const handleToggleOnlineProduct = async (id: string) => {
     const product = onlineProducts.find(p => p.id === id);
     if (!product) return;
 
     if (product.isActive) {
-      // Move to Produk Kosong
-      const kosongItem: ProdukKosong = {
-        id: generateId(),
+      setIsLoading(true);
+      
+      // Add to Produk Kosong in database
+      const addResult = await addProdukKosong(selectedStore, {
         partNumber: product.partNumber,
         name: product.name,
         brand: product.brand,
         quantity: product.quantity,
-        isOnlineActive: false,
-        timestamp: Date.now()
-      };
-      setProdukKosong(prev => [...prev, kosongItem]);
-      setOnlineProducts(prev => prev.filter(p => p.id !== id));
-      showToast('Produk dipindahkan ke Produk Kosong');
+        isOnlineActive: false
+      });
+
+      if (addResult.success) {
+        // Delete from Online in database
+        await deleteOnlineProduct(selectedStore, id);
+        
+        // Update local state
+        const kosongItem: ProdukKosong = {
+          id: addResult.id || generateId(),
+          partNumber: product.partNumber,
+          name: product.name,
+          brand: product.brand,
+          quantity: product.quantity,
+          isOnlineActive: false,
+          timestamp: Date.now()
+        };
+        setProdukKosong(prev => [...prev, kosongItem]);
+        setOnlineProducts(prev => prev.filter(p => p.id !== id));
+        showToast('Produk dipindahkan ke Produk Kosong');
+      } else {
+        showToast(addResult.message || 'Gagal memindahkan produk', 'error');
+      }
+      
+      setIsLoading(false);
     }
   };
 
   // Handle toggle produk kosong
-  const handleToggleProdukKosong = (id: string) => {
+  const handleToggleProdukKosong = async (id: string) => {
     const product = produkKosong.find(p => p.id === id);
     if (!product) return;
 
     if (!product.isOnlineActive) {
-      // Move back to Online Products
-      const onlineItem: OnlineProduct = {
-        id: generateId(),
+      setIsLoading(true);
+      
+      // Add to Online in database
+      const addResult = await addOnlineProduct(selectedStore, {
         partNumber: product.partNumber,
         name: product.name,
         brand: product.brand,
         quantity: product.quantity,
-        isActive: true,
-        timestamp: Date.now()
-      };
-      setOnlineProducts(prev => [...prev, onlineItem]);
-      setProdukKosong(prev => prev.filter(p => p.id !== id));
-      showToast('Produk dikembalikan ke Online');
+        isActive: true
+      });
+
+      if (addResult.success) {
+        // Delete from Kosong in database
+        await deleteProdukKosong(selectedStore, id);
+        
+        // Update local state
+        const onlineItem: OnlineProduct = {
+          id: addResult.id || generateId(),
+          partNumber: product.partNumber,
+          name: product.name,
+          brand: product.brand,
+          quantity: product.quantity,
+          isActive: true,
+          timestamp: Date.now()
+        };
+        setOnlineProducts(prev => [...prev, onlineItem]);
+        setProdukKosong(prev => prev.filter(p => p.id !== id));
+        showToast('Produk dikembalikan ke Online');
+      } else {
+        showToast(addResult.message || 'Gagal mengembalikan produk', 'error');
+      }
+      
+      setIsLoading(false);
     }
   };
 
   // Handle toggle table masuk
-  const handleToggleTableMasuk = (id: string) => {
-    setTableMasuk(prev =>
-      prev.map(item =>
-        item.id === id ? { ...item, isActive: !item.isActive } : item
-      )
-    );
+  const handleToggleTableMasuk = async (id: string) => {
+    setIsLoading(true);
+    const result = await toggleTableMasuk(selectedStore, id);
+    
+    if (result.success) {
+      setTableMasuk(prev =>
+        prev.map(item =>
+          item.id === id ? { ...item, isActive: result.newValue ?? !item.isActive } : item
+        )
+      );
+    } else {
+      showToast(result.message || 'Gagal mengubah status', 'error');
+    }
+    setIsLoading(false);
   };
 
   // Auto-sync: Check for quantity changes
@@ -410,16 +524,38 @@ export const DataAgungView: React.FC<DataAgungViewProps> = ({ items, onRefresh, 
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-100">Data Agung - Manajemen Online</h1>
-          <p className="text-sm text-gray-400 mt-1">Kelola produk online dengan tracking otomatis</p>
+          <p className="text-sm text-gray-400 mt-1 flex items-center gap-2">
+            Kelola produk online dengan tracking otomatis
+            {isOnline ? (
+              <span className="flex items-center gap-1 text-green-400">
+                <Cloud size={14} /> Online
+              </span>
+            ) : (
+              <span className="flex items-center gap-1 text-red-400">
+                <CloudOff size={14} /> Offline
+              </span>
+            )}
+          </p>
         </div>
-        <button
-          onClick={() => setShowKeyboardHelp(!showKeyboardHelp)}
-          className="flex items-center gap-2 px-3 py-2 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-lg transition-all text-sm"
-          title="Keyboard Shortcuts (Press ?)"
-        >
-          <Keyboard size={18} />
-          <span className="hidden md:inline">Shortcuts</span>
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={loadAllData}
+            disabled={isLoading}
+            className="flex items-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-800 text-white rounded-lg transition-all text-sm"
+            title="Refresh data dari database"
+          >
+            <RefreshCw size={18} className={isLoading ? 'animate-spin' : ''} />
+            <span className="hidden md:inline">{isLoading ? 'Loading...' : 'Refresh'}</span>
+          </button>
+          <button
+            onClick={() => setShowKeyboardHelp(!showKeyboardHelp)}
+            className="flex items-center gap-2 px-3 py-2 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-lg transition-all text-sm"
+            title="Keyboard Shortcuts (Press ?)"
+          >
+            <Keyboard size={18} />
+            <span className="hidden md:inline">Shortcuts</span>
+          </button>
+        </div>
       </div>
 
       {/* Keyboard Help Modal */}
