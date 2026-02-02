@@ -245,7 +245,7 @@ export interface ChatSession {
 
 // E-commerce platform types
 export type EcommercePlatform = 'TIKTOK' | 'SHOPEE' | 'KILAT' | 'RESELLER' | 'EKSPOR';
-export type SubToko = 'LARIS' | 'MJM' | 'BJW' | 'PRAKTIS_PART';
+export type SubToko = 'LARIS' | 'MJM' | 'BJW' | 'PRAKTIS PART';
 export type NegaraEkspor = 'PH' | 'MY' | 'SG' | 'HK';
 export type ResiScanStatus = 'pending' | 'stage1' | 'stage2' | 'completed';
 

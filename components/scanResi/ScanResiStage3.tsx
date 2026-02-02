@@ -124,7 +124,7 @@ const TokoCellDropdown = ({ value, onChange, onSave }: { value: string, onChange
   const [show, setShow] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
-  const tokoOptions = ['MJM', 'BJW', 'LARIS'];
+  const tokoOptions = ['MJM', 'BJW', 'LARIS', 'PRAKTIS PART'];
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -2566,12 +2566,14 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
       if (toko === 'MJM') return 'bg-orange-900/15';
       if (toko === 'BJW') return 'bg-orange-800/20';
       if (toko === 'LARIS') return 'bg-orange-700/15';
+      if (toko === 'PRAKTIS PART') return 'bg-orange-600/15';
       return 'bg-orange-900/10';
     }
     if (ecomm.includes('TIKTOK')) {
       if (toko === 'MJM') return 'bg-cyan-900/15';
       if (toko === 'BJW') return 'bg-cyan-800/20';
       if (toko === 'LARIS') return 'bg-cyan-700/15';
+      if (toko === 'PRAKTIS PART') return 'bg-cyan-600/15';
       return 'bg-cyan-900/10';
     }
     if (ecomm.includes('EKSPOR')) {
@@ -2664,6 +2666,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                         <option value="MJM">MJM</option>
                         <option value="BJW">BJW</option>
                         <option value="LARIS">LARIS</option>
+                        <option value="PRAKTIS PART">PRAKTIS PART</option>
                     </select>
                 )}
 
