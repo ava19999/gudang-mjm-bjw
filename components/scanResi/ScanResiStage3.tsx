@@ -1331,7 +1331,11 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                statusMsg = 'Belum Scan S1'; verified = false; 
            } else {
                // CHECK 2: Belum verifikasi Stage 2
-               if (!dbRow.stage2_verified || String(dbRow.stage2_verified) !== 'true') { 
+               // Handle berbagai format: boolean true, string 'true', atau truthy value
+               const isS2Verified = dbRow.stage2_verified === true || 
+                                    dbRow.stage2_verified === 'true' || 
+                                    String(dbRow.stage2_verified).toLowerCase() === 'true';
+               if (!isS2Verified) { 
                    statusMsg = 'Pending S2'; verified = false; 
                }
            }
@@ -2097,6 +2101,32 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
             // Rumus: harga_satuan = harga_total / qty
             updated.harga_satuan = updated.qty_keluar > 0 ? updated.harga_total / updated.qty_keluar : 0;
         }
+        
+        // Update status_message secara real-time berdasarkan kondisi saat ini
+        if (field === 'part_number' || field === 'qty_keluar') {
+            // Recalculate status
+            if (!updated.is_db_verified) {
+                // Masih belum verifikasi Stage 1/2
+                if (updated.status_message === 'Belum Scan S1' || updated.status_message === 'Pending S2') {
+                    // Keep status as is
+                }
+            } else if (!updated.part_number) {
+                updated.status_message = 'Butuh Input';
+                updated.is_db_verified = false;
+            } else if (updated.stock_saat_ini < updated.qty_keluar && updated.qty_keluar > 0) {
+                updated.status_message = 'Stok Kurang';
+                updated.is_stock_valid = false;
+            } else if (!updated.nama_barang_base && updated.part_number) {
+                updated.status_message = 'Base Kosong';
+                updated.is_db_verified = false;
+            } else {
+                // Semua valid
+                updated.status_message = 'Ready';
+                updated.is_db_verified = true;
+                updated.is_stock_valid = true;
+            }
+        }
+        
         updatedRow = updated;
         return updated;
     }));
@@ -2250,14 +2280,17 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
       setRows(prev => {
         const newRows = prev.map(r => {
           if (r.id !== id) return r;
+          // Hanya set "Butuh Input" jika bukan status S1/S2 yang belum selesai
+          const keepStatus = r.status_message === 'Belum Scan S1' || r.status_message === 'Pending S2';
           const updated = {
             ...r,
             brand: '',
             application: '',
             stock_saat_ini: 0,
             is_stock_valid: false,
+            is_db_verified: false,
             nama_barang_base: '',
-            status_message: r.is_db_verified ? 'Butuh Input' : r.status_message
+            status_message: keepStatus ? r.status_message : 'Butuh Input'
           };
           rowToSave = updated;
           return updated;
@@ -2281,8 +2314,12 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
             const stockValid = stock >= qty;
             
             // Tentukan status berdasarkan kondisi
+            // PERBAIKAN: Selalu update status jika bukan "Belum Scan S1" atau "Pending S2"
             let newStatus = r.status_message;
-            if (r.is_db_verified) {
+            const isStage1or2Pending = r.status_message === 'Belum Scan S1' || r.status_message === 'Pending S2';
+            
+            if (!isStage1or2Pending) {
+              // Part number sudah diinput, update status berdasarkan validasi
               if (!info?.name) {
                 newStatus = 'Base Kosong'; // Part number tidak ditemukan di database
               } else if (!stockValid) {
@@ -2298,6 +2335,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                 application: info?.application || '-',
                 stock_saat_ini: stock,
                 is_stock_valid: stockValid,
+                is_db_verified: !isStage1or2Pending && info?.name ? true : r.is_db_verified,
                 nama_barang_base: info?.name || '',
                 status_message: newStatus
             };
