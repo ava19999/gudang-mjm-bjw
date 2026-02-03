@@ -1346,21 +1346,23 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
               namaBase = partInfo.name || '';
            }
            
-           const qty = Number(item.jumlah || item.quantity || 1);
-           const stockValid = stock >= qty;
+           const qty = Number(item.jumlah || item.quantity || 0);
+           const stockValid = qty > 0 ? stock >= qty : true; // Jika qty 0, tidak perlu cek stok
            
-           // CHECK 3: Stok kurang
-           if (!stockValid && verified) statusMsg = 'Stok Kurang';
-           
-           // CHECK 4: Nama barang base masih kosong (belum ada part number valid)
-           if (verified && stockValid && !namaBase && item.part_number) {
-               statusMsg = 'Base Kosong';
+           // CHECK 3: Part number belum diisi - CEK INI DULU sebelum stok
+           if (verified && !item.part_number) {
+               statusMsg = 'Butuh Input';
                verified = false;
            }
            
-           // CHECK 5: Part number belum diisi
-           if (verified && stockValid && !item.part_number) {
-               statusMsg = 'Butuh Input';
+           // CHECK 4: Stok kurang - hanya cek jika part number sudah diisi
+           if (verified && !stockValid) {
+               statusMsg = 'Stok Kurang';
+           }
+           
+           // CHECK 5: Nama barang base masih kosong (part number ada tapi tidak ditemukan di database)
+           if (verified && stockValid && !namaBase && item.part_number) {
+               statusMsg = 'Base Kosong';
                verified = false;
            }
            
@@ -1473,14 +1475,14 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
               brand: '',
               application: '',
               stock_saat_ini: 0,
-              qty_keluar: 1,
+              qty_keluar: 0,
               harga_total: 0,
               harga_satuan: 0,
               mata_uang: ecommerce.startsWith('EKSPOR') ? (ecommerce.split(' - ')[1] || 'PHP') : 'IDR',
               customer: s1.customer || '',
               no_pesanan: s1.no_pesanan || '',
               is_db_verified: s1.stage2_verified,
-              is_stock_valid: false,
+              is_stock_valid: true,
               status_message: statusMsg,
               force_override_double: false
             });
@@ -1519,14 +1521,14 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
             brand: '',
             application: '',
             stock_saat_ini: 0,
-            qty_keluar: 1,
+            qty_keluar: 0,
             harga_total: 0,
             harga_satuan: 0,
             mata_uang: ecommerce.startsWith('EKSPOR') ? (ecommerce.split(' - ')[1] || 'PHP') : 'IDR',
             customer: s1.customer || '',
             no_pesanan: s1.no_pesanan || '',
             is_db_verified: s1.stage2_verified,
-            is_stock_valid: false,
+            is_stock_valid: true,
             status_message: statusMsg,
             force_override_double: false
           };
@@ -2037,14 +2039,14 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
       brand: '',
       application: '',
       stock_saat_ini: 0,
-      qty_keluar: 1,
+      qty_keluar: 0,
       harga_total: 0,
       harga_satuan: 0,
       mata_uang: (item.ecommerce || '').startsWith('EKSPOR') ? ((item.ecommerce || '').split(' - ')[1] || 'PHP') : 'IDR',
       no_pesanan: item.order_id || '',
       customer: item.customer || '',
       is_db_verified: true,
-      is_stock_valid: false,
+      is_stock_valid: true,
       status_message: 'Butuh Input',
       force_override_double: false  // FITUR 1
     }));
@@ -2144,15 +2146,54 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
   };
 
   const handlePartNumberBlur = async (id: string, sku: string) => {
-    if (!sku) return;
+    let rowToSave: Stage3Row | undefined;
+    
+    // Jika part number kosong, set status ke "Butuh Input"
+    if (!sku || sku.trim() === '') {
+      setRows(prev => {
+        const newRows = prev.map(r => {
+          if (r.id !== id) return r;
+          const updated = {
+            ...r,
+            brand: '',
+            application: '',
+            stock_saat_ini: 0,
+            is_stock_valid: false,
+            nama_barang_base: '',
+            status_message: r.is_db_verified ? 'Butuh Input' : r.status_message
+          };
+          rowToSave = updated;
+          return updated;
+        });
+        return newRows;
+      });
+      
+      if (rowToSave) {
+        handleSaveRow(rowToSave);
+      }
+      return;
+    }
+    
     const info = await lookupPartNumberInfo(sku, selectedStore);
     
-    let rowToSave: Stage3Row | undefined;
     setRows(prev => {
         const newRows = prev.map(r => {
             if (r.id !== id) return r;
             const stock = info?.quantity || 0;
-            const stockValid = stock >= r.qty_keluar;
+            const qty = r.qty_keluar || 1;
+            const stockValid = stock >= qty;
+            
+            // Tentukan status berdasarkan kondisi
+            let newStatus = r.status_message;
+            if (r.is_db_verified) {
+              if (!info?.name) {
+                newStatus = 'Base Kosong'; // Part number tidak ditemukan di database
+              } else if (!stockValid) {
+                newStatus = 'Stok Kurang';
+              } else {
+                newStatus = 'Ready';
+              }
+            }
             
             const updated = {
                 ...r,
@@ -2161,7 +2202,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                 stock_saat_ini: stock,
                 is_stock_valid: stockValid,
                 nama_barang_base: info?.name || '',
-                status_message: stockValid ? (r.is_db_verified ? 'Ready' : r.status_message) : 'Stok Kurang'
+                status_message: newStatus
             };
             rowToSave = updated;
             return updated;
@@ -3326,11 +3367,12 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                     <input 
                         id={`input-${idx}-qty_keluar`} 
                         type="number" 
-                        value={row.qty_keluar} 
+                        value={row.qty_keluar || ''} 
                         onChange={(e) => updateRow(row.id, 'qty_keluar', parseInt(e.target.value) || 0)} 
                         onBlur={() => handleSaveRow(row)} 
                         onKeyDown={(e) => handleKeyDown(e, idx, 'qty_keluar')} 
                         className="w-full h-full bg-transparent text-center focus:bg-blue-900/50 outline-none font-bold"
+                        placeholder=""
                     />
                   </td>
 
