@@ -308,6 +308,75 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
                       )}
                   </div>
               )}
+
+              {/* Stock Table - Only in Edit Mode */}
+              {isEditMode && (
+                  <div className="bg-gray-900/50 rounded-xl border border-gray-700 overflow-hidden">
+                      <div className="bg-gray-800 px-3 py-2 border-b border-gray-700">
+                          <h4 className="text-xs font-bold text-gray-300 uppercase flex items-center gap-1.5">
+                              <Layers size={12} className="text-blue-400"/>
+                              Stok Saat Ini
+                          </h4>
+                      </div>
+                      <div className="divide-y divide-gray-700">
+                          <div className="flex items-center justify-between px-3 py-2">
+                              <span className="text-xs text-gray-400">Stok Awal</span>
+                              <input 
+                                  type="number" 
+                                  min="0"
+                                  value={formData.initialStock || 0}
+                                  onChange={(e) => {
+                                      const newInitialStock = parseInt(e.target.value) || 0;
+                                      const newQuantity = newInitialStock + (formData.qtyIn || 0) - (formData.qtyOut || 0);
+                                      setFormData(prev => ({ ...prev, initialStock: newInitialStock, quantity: newQuantity }));
+                                  }}
+                                  className="w-20 text-right text-sm font-mono font-bold text-gray-300 bg-gray-800 border border-gray-600 rounded px-2 py-1 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
+                              />
+                          </div>
+                          <div className="flex items-center justify-between px-3 py-2">
+                              <span className="text-xs text-gray-400">Total Masuk</span>
+                              <div className="flex items-center gap-1">
+                                  <span className="text-green-400 font-bold">+</span>
+                                  <input 
+                                      type="number" 
+                                      min="0"
+                                      value={formData.qtyIn || 0}
+                                      onChange={(e) => {
+                                          const newQtyIn = parseInt(e.target.value) || 0;
+                                          const newQuantity = (formData.initialStock || 0) + newQtyIn - (formData.qtyOut || 0);
+                                          setFormData(prev => ({ ...prev, qtyIn: newQtyIn, quantity: newQuantity }));
+                                      }}
+                                      className="w-20 text-right text-sm font-mono font-bold text-green-400 bg-gray-800 border border-gray-600 rounded px-2 py-1 focus:border-green-500 focus:ring-1 focus:ring-green-500 outline-none"
+                                  />
+                              </div>
+                          </div>
+                          <div className="flex items-center justify-between px-3 py-2">
+                              <span className="text-xs text-gray-400">Total Keluar</span>
+                              <div className="flex items-center gap-1">
+                                  <span className="text-red-400 font-bold">-</span>
+                                  <input 
+                                      type="number" 
+                                      min="0"
+                                      value={formData.qtyOut || 0}
+                                      onChange={(e) => {
+                                          const newQtyOut = parseInt(e.target.value) || 0;
+                                          const newQuantity = (formData.initialStock || 0) + (formData.qtyIn || 0) - newQtyOut;
+                                          setFormData(prev => ({ ...prev, qtyOut: newQtyOut, quantity: newQuantity }));
+                                      }}
+                                      className="w-20 text-right text-sm font-mono font-bold text-red-400 bg-gray-800 border border-gray-600 rounded px-2 py-1 focus:border-red-500 focus:ring-1 focus:ring-red-500 outline-none"
+                                  />
+                              </div>
+                          </div>
+                          <div className="flex items-center justify-between px-3 py-2.5 bg-blue-900/20">
+                              <span className="text-xs font-bold text-blue-300">STOK SEKARANG</span>
+                              <span className={`text-lg font-mono font-extrabold ${
+                                  formData.quantity === 0 ? 'text-red-400' : 
+                                  formData.quantity < 4 ? 'text-yellow-400' : 'text-blue-400'
+                              }`}>{formData.quantity}</span>
+                          </div>
+                      </div>
+                  </div>
+              )}
               
               {!isEditMode && (
                   <div className="bg-blue-900/20 p-4 rounded-xl border border-blue-900/40">

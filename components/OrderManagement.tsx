@@ -6,13 +6,13 @@ import { useStore } from '../context/StoreContext';
 import { 
   fetchOfflineOrders, fetchSoldItems, fetchReturItems,
   processOfflineOrderItem, updateOfflineOrder, fetchInventory, createReturFromSold, updateReturStatus,
-  fetchDistinctEcommerce, deleteBarangLog, insertBarangKeluar
+  fetchDistinctEcommerce, deleteBarangLog
 } from '../services/supabaseService';
 import { OfflineOrderRow, SoldItemRow, ReturRow } from '../types';
 import { 
   ClipboardList, CheckCircle, RotateCcw, Search, RefreshCw, Box, Check, X, 
   ChevronDown, ChevronUp, Layers, User, Pencil, Save, XCircle, Trash2, ChevronLeft, ChevronRight,
-  PackageX, RotateCw, ArrowLeftRight, Package, Hash, ShoppingBag, Copy, Undo2
+  PackageX, RotateCw, ArrowLeftRight, Package, Hash, ShoppingBag, Copy
 } from 'lucide-react';
 
 // Toast Component Sederhana
@@ -298,9 +298,6 @@ export const OrderManagement: React.FC = () => {
   const [soldData, setSoldData] = useState<SoldItemRow[]>([]);
   const [returData, setReturData] = useState<ReturRow[]>([]);
 
-  // Undo Stack untuk Ctrl+Z - menyimpan item yang baru dihapus
-  const [deletedItemsStack, setDeletedItemsStack] = useState<SoldItemRow[]>([]);
-
   // Pagination for TERJUAL
   const [soldPage, setSoldPage] = useState(1);
   const ITEMS_PER_PAGE = 50;
@@ -320,37 +317,39 @@ export const OrderManagement: React.FC = () => {
 
   // Load inventory langsung saat komponen mount - TANPA CACHE untuk menghindari masalah
   useEffect(() => {
-    let mounted = true;
-    
     const loadInventory = async () => {
       setInventoryLoading(true);
       try {
+        console.log('=== LOADING INVENTORY ===');
         const [invMjm, invBjw] = await Promise.all([
           fetchInventory('mjm'),
           fetchInventory('bjw')
         ]);
         
-        if (mounted) {
-          // Gabungkan semua
-          const all = [...(invMjm || []), ...(invBjw || [])];
-          setInventory(all);
+        console.log('MJM items:', invMjm?.length || 0);
+        console.log('BJW items:', invBjw?.length || 0);
+        
+        // Log sample dari setiap toko
+        if (invMjm?.length > 0) {
+          console.log('Sample MJM:', invMjm[0]);
         }
+        if (invBjw?.length > 0) {
+          console.log('Sample BJW:', invBjw[0]);
+        }
+        
+        // Gabungkan semua
+        const all = [...(invMjm || []), ...(invBjw || [])];
+        console.log('Total inventory:', all.length);
+        
+        setInventory(all);
       } catch (err) {
-        if (process.env.NODE_ENV !== 'production') {
-          console.error("Error fetching inventory:", err);
-        }
+        console.error("Error fetching inventory:", err);
       } finally {
-        if (mounted) {
-          setInventoryLoading(false);
-        }
+        setInventoryLoading(false);
       }
     };
     
     loadInventory();
-    
-    return () => {
-      mounted = false;
-    };
   }, []); // Load sekali saat mount
 
   // Update selectedItem when partNumber changes
@@ -409,57 +408,6 @@ export const OrderManagement: React.FC = () => {
     };
     loadEcommerceOptions();
   }, [selectedStore]);
-
-  // Keyboard listener untuk Ctrl+Z (Undo hapus item terjual)
-  useEffect(() => {
-    const handleKeyDown = async (e: KeyboardEvent) => {
-      if (e.ctrlKey && e.key === 'z' && deletedItemsStack.length > 0 && activeTab === 'TERJUAL') {
-        e.preventDefault();
-        await handleUndoDelete();
-      }
-    };
-    
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [deletedItemsStack, activeTab]);
-
-  // Fungsi Undo Delete - kembalikan item yang baru dihapus
-  const handleUndoDelete = async () => {
-    if (deletedItemsStack.length === 0) return;
-    
-    const lastDeleted = deletedItemsStack[deletedItemsStack.length - 1];
-    setLoading(true);
-    
-    try {
-      const result = await insertBarangKeluar({
-        kode_toko: lastDeleted.kode_toko,
-        tempo: lastDeleted.tempo,
-        ecommerce: lastDeleted.ecommerce,
-        customer: lastDeleted.customer,
-        part_number: lastDeleted.part_number,
-        name: lastDeleted.name,
-        brand: lastDeleted.brand,
-        application: lastDeleted.application,
-        qty_keluar: lastDeleted.qty_keluar,
-        harga_total: lastDeleted.harga_total,
-        resi: lastDeleted.resi,
-        tanggal: lastDeleted.created_at
-      }, selectedStore);
-      
-      if (result.success) {
-        // Hapus dari undo stack
-        setDeletedItemsStack(prev => prev.slice(0, -1));
-        showToast(`Item "${lastDeleted.name}" berhasil dikembalikan! (Ctrl+Z)`);
-        loadData();
-      } else {
-        showToast('Gagal mengembalikan item', 'error');
-      }
-    } catch (error) {
-      showToast('Terjadi kesalahan saat undo', 'error');
-    }
-    
-    setLoading(false);
-  };
 
   // --- LOGIC GROUPING ---
   const groupedOfflineOrders = useMemo(() => {
@@ -575,27 +523,24 @@ export const OrderManagement: React.FC = () => {
     setReturModalOpen(true);
   };
 
-  // Handle Delete Sold Item - Hapus permanen dengan opsi Ctrl+Z untuk undo
+  // Handle Delete Sold Item
   const handleDeleteSoldItem = async (item: SoldItemRow) => {
-    if (!window.confirm(`Hapus item "${item.name}" dari data terjual?\n\nStok akan dikembalikan +${item.qty_keluar} pcs.\n\nTekan Ctrl+Z untuk membatalkan penghapusan.`)) {
+    if (!window.confirm(`Hapus item "${item.name}" dari data penjualan?\n\nStok akan dikembalikan +${item.qty_keluar} pcs.`)) {
       return;
     }
     
     setLoading(true);
     try {
-      // Hapus dari barang_keluar dan kembalikan stok
-      const deleteSuccess = await deleteBarangLog(
-        item.id,
+      const success = await deleteBarangLog(
+        parseInt(item.id),
         'out',
         item.part_number,
         item.qty_keluar,
         selectedStore
       );
       
-      if (deleteSuccess) {
-        // Simpan ke undo stack untuk Ctrl+Z
-        setDeletedItemsStack(prev => [...prev, item]);
-        showToast(`Item "${item.name}" berhasil dihapus, stok +${item.qty_keluar}. Tekan Ctrl+Z untuk undo.`);
+      if (success) {
+        showToast(`Item "${item.name}" berhasil dihapus, stok +${item.qty_keluar}`);
         loadData();
       } else {
         showToast('Gagal menghapus item', 'error');
@@ -606,49 +551,39 @@ export const OrderManagement: React.FC = () => {
     setLoading(false);
   };
 
-  // Handle Delete All Items in a Group - Hapus permanen dengan opsi Ctrl+Z untuk undo
+  // Handle Delete All Items in a Group
   const handleDeleteAllGroupItems = async (items: SoldItemRow[]) => {
     if (items.length === 0) return;
     
     const totalQty = items.reduce((sum, item) => sum + item.qty_keluar, 0);
-    if (!window.confirm(`Hapus SEMUA ${items.length} item dari pesanan ini?\n\nTotal stok yang akan dikembalikan: +${totalQty} pcs\n\nTekan Ctrl+Z untuk membatalkan penghapusan (satu per satu).`)) {
+    if (!window.confirm(`Hapus SEMUA ${items.length} item dari pesanan ini?\n\nTotal stok yang akan dikembalikan: +${totalQty} pcs`)) {
       return;
     }
     
     setLoading(true);
     let successCount = 0;
     let failCount = 0;
-    const deletedItems: SoldItemRow[] = [];
     
     for (const item of items) {
       try {
         const success = await deleteBarangLog(
-          item.id,
+          parseInt(item.id),
           'out',
           item.part_number,
           item.qty_keluar,
           selectedStore
         );
-        if (success) {
-          successCount++;
-          // Simpan ke array untuk undo stack
-          deletedItems.push(item);
-        }
+        if (success) successCount++;
         else failCount++;
       } catch {
         failCount++;
       }
     }
     
-    // Simpan semua item yang berhasil dihapus ke undo stack
-    if (deletedItems.length > 0) {
-      setDeletedItemsStack(prev => [...prev, ...deletedItems]);
-    }
-    
     setLoading(false);
     
     if (failCount === 0) {
-      showToast(`${successCount} item berhasil dihapus, stok +${totalQty}. Tekan Ctrl+Z untuk undo.`);
+      showToast(`${successCount} item berhasil dihapus, stok +${totalQty}`);
     } else {
       showToast(`${successCount} berhasil, ${failCount} gagal`, failCount > 0 ? 'error' : 'success');
     }
@@ -1228,26 +1163,6 @@ export const OrderManagement: React.FC = () => {
         {/* --- 3. TAB TERJUAL (GROUPED VIEW dengan PAGINATION) - MODERN DESIGN --- */}
         {activeTab === 'TERJUAL' && (
           <div className="space-y-4">
-            {/* Undo Banner - muncul jika ada item yang baru dihapus */}
-            {deletedItemsStack.length > 0 && (
-              <div className="flex items-center justify-between bg-yellow-900/30 border border-yellow-700/50 rounded-xl px-4 py-3 animate-in fade-in slide-in-from-top-2">
-                <div className="flex items-center gap-3">
-                  <Undo2 size={20} className="text-yellow-400"/>
-                  <span className="text-sm text-yellow-200">
-                    <span className="font-bold">{deletedItemsStack.length}</span> item baru dihapus. 
-                  </span>
-                </div>
-                <button 
-                  onClick={handleUndoDelete}
-                  disabled={loading}
-                  className="flex items-center gap-2 px-4 py-2 bg-yellow-600 hover:bg-yellow-500 text-white font-bold rounded-lg transition-colors text-sm disabled:opacity-50"
-                >
-                  <Undo2 size={16}/>
-                  Undo (Ctrl+Z)
-                </button>
-              </div>
-            )}
-            
             {paginatedSoldGroups.length === 0 && (
               <div className="flex flex-col items-center justify-center py-16 bg-gray-800/30 rounded-2xl border border-gray-700/50">
                 <div className="w-20 h-20 rounded-full bg-gray-800 flex items-center justify-center mb-4">

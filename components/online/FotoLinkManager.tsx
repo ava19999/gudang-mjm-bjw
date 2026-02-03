@@ -384,6 +384,7 @@ type FilterType = 'all' | 'with_sku' | 'without_sku';
 
 export const FotoLinkManager: React.FC = () => {
   const [search, setSearch] = useState('');
+  const [searchSku, setSearchSku] = useState('');
   const [page, setPage] = useState(1);
   const [data, setData] = useState<FotoLinkRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -450,10 +451,20 @@ export const FotoLinkManager: React.FC = () => {
   }, [successMsg]);
 
   const filteredData = useMemo(() => {
-    if (filter === 'with_sku') return data.filter(d => d.sku && d.sku.trim() !== '');
-    if (filter === 'without_sku') return data.filter(d => !d.sku || d.sku.trim() === '');
-    return data;
-  }, [data, filter]);
+    let result = data;
+    
+    // Filter by SKU presence
+    if (filter === 'with_sku') result = result.filter(d => d.sku && d.sku.trim() !== '');
+    if (filter === 'without_sku') result = result.filter(d => !d.sku || d.sku.trim() === '');
+    
+    // Filter by SKU search
+    if (searchSku.trim()) {
+      const skuLower = searchSku.toLowerCase().trim();
+      result = result.filter(d => d.sku && d.sku.toLowerCase().includes(skuLower));
+    }
+    
+    return result;
+  }, [data, filter, searchSku]);
 
   const totalPages = Math.ceil(filteredData.length / itemsPerPage) || 1;
   const paginatedData = filteredData.slice((page - 1) * itemsPerPage, page * itemsPerPage);
@@ -463,6 +474,39 @@ export const FotoLinkManager: React.FC = () => {
     withSku: data.filter(d => d.sku && d.sku.trim() !== '').length,
     withoutSku: data.filter(d => !d.sku || d.sku.trim() === '').length,
   }), [data]);
+
+  // Focus next empty SKU row after save
+  const focusNextEmptyRow = (currentNamaCsv: string) => {
+    // Get current page data with updated info
+    const currentIndex = paginatedData.findIndex(d => d.nama_csv === currentNamaCsv);
+    if (currentIndex === -1) return;
+    
+    // Look for next empty row in current page (after current)
+    for (let i = currentIndex + 1; i < paginatedData.length; i++) {
+      const row = paginatedData[i];
+      const isEmpty = !row.sku || row.sku.trim() === '';
+      if (isEmpty) {
+        const inputEl = inputRefs.current.get(row.nama_csv);
+        if (inputEl) {
+          setTimeout(() => inputEl.focus(), 100);
+          return;
+        }
+      }
+    }
+    
+    // If no empty row found after current, check from beginning
+    for (let i = 0; i < currentIndex; i++) {
+      const row = paginatedData[i];
+      const isEmpty = !row.sku || row.sku.trim() === '';
+      if (isEmpty) {
+        const inputEl = inputRefs.current.get(row.nama_csv);
+        if (inputEl) {
+          setTimeout(() => inputEl.focus(), 100);
+          return;
+        }
+      }
+    }
+  };
 
   const handleSkuChange = (namaCsv: string, newSkus: string[]) => {
     setEditedSkus(prev => ({ ...prev, [namaCsv]: joinSkus(newSkus) }));
@@ -493,6 +537,8 @@ export const FotoLinkManager: React.FC = () => {
         } else {
           setSuccessMsg(`✅ SKU "${newSku}" tersimpan!`);
         }
+        // Focus next empty row after successful save
+        setTimeout(() => focusNextEmptyRow(namaCsv), 150);
       } else {
         setError(`❌ ${result.error || 'Gagal menyimpan SKU'}`);
       }
@@ -572,6 +618,8 @@ export const FotoLinkManager: React.FC = () => {
         } else {
           setSuccessMsg(`✅ ${skusToAdd.length} SKU tersimpan!`);
         }
+        // Focus next empty row after successful save
+        setTimeout(() => focusNextEmptyRow(namaCsv), 150);
       } else {
         setError(`❌ ${result.error || 'Gagal menyimpan SKU'}`);
       }
@@ -740,15 +788,27 @@ export const FotoLinkManager: React.FC = () => {
       </div>
 
       {/* Search */}
-      <div className="relative mb-4">
-        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
-        <input
-          type="text"
-          placeholder="Cari nama CSV..."
-          value={search}
-          onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-          className="w-full bg-gray-800 border border-gray-700 rounded-lg pl-9 pr-4 py-2 text-sm text-gray-200 focus:border-purple-500 outline-none"
-        />
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mb-4">
+        <div className="relative">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+          <input
+            type="text"
+            placeholder="Cari nama CSV..."
+            value={search}
+            onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+            className="w-full bg-gray-800 border border-gray-700 rounded-lg pl-9 pr-4 py-2 text-sm text-gray-200 focus:border-purple-500 outline-none"
+          />
+        </div>
+        <div className="relative">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+          <input
+            type="text"
+            placeholder="Cari SKU..."
+            value={searchSku}
+            onChange={(e) => { setSearchSku(e.target.value); setPage(1); }}
+            className="w-full bg-gray-800 border border-gray-700 rounded-lg pl-9 pr-4 py-2 text-sm text-gray-200 focus:border-cyan-500 outline-none"
+          />
+        </div>
       </div>
 
       {/* Success Message */}

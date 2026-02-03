@@ -21,7 +21,8 @@ import {
   checkResiOrOrderStatus,
   checkExistingInBarangKeluar,
   getStage1ResiList,
-  getAllPendingStage1Resi
+  getAllPendingStage1Resi,
+  batchUpdateResiItems
 } from '../../services/resiScanService';
 import { 
   parseShopeeCSV, 
@@ -1346,11 +1347,11 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
               namaBase = partInfo.name || '';
            }
            
-           // Jika part_number kosong, set qty ke 0 (default)
-           // Jika ada part_number, gunakan qty dari database
+           // Ambil qty dari database - SELALU gunakan nilai asli
+           // Tidak perlu set ke 0 meskipun part_number kosong
            const rawQty = Number(item.jumlah || item.quantity || 0);
-           const qty = item.part_number ? rawQty : 0;
-           const stockValid = qty > 0 ? stock >= qty : true; // Jika qty 0, tidak perlu cek stok
+           const qty = rawQty; // Gunakan qty asli dari CSV/database
+           const stockValid = (qty > 0 && item.part_number) ? stock >= qty : true; // Hanya cek stok jika ada part_number
            
            // CHECK 3: Part number belum diisi - CEK INI DULU sebelum stok
            if (verified && !item.part_number) {
@@ -1591,6 +1592,95 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
       setTimeout(() => setSavingStatus('idle'), 2000);
     } catch (e) {
       console.error("Auto-save failed:", e);
+      setSavingStatus('idle');
+    }
+  };
+
+  // SAVE ALL ROWS - Force save semua baris sekaligus ke database dengan batch update
+  const handleSaveAllRows = async () => {
+    if (rows.length === 0) return;
+    
+    setSavingStatus('saving');
+    let savedCount = 0;
+    let errorCount = 0;
+    
+    try {
+      // Clear any pending auto-save timers first
+      autoSaveTimers.current.forEach(timer => clearTimeout(timer));
+      autoSaveTimers.current.clear();
+      
+      // Pisahkan rows yang perlu update vs insert
+      const rowsToUpdate: Array<{ id: string; payload: any }> = [];
+      const rowsToInsert: typeof rows = [];
+      
+      for (const row of rows) {
+        if (row.id.startsWith('db-')) {
+          // Row sudah ada di DB, siapkan untuk batch update
+          const dbId = row.id.replace('db-', '');
+          rowsToUpdate.push({
+            id: dbId,
+            payload: {
+              customer: row.customer,
+              part_number: row.part_number,
+              nama_produk: row.nama_barang_csv,
+              jumlah: row.qty_keluar,
+              total_harga_produk: row.harga_total,
+              ecommerce: row.ecommerce,
+              toko: row.sub_toko
+            }
+          });
+        } else {
+          // Row baru, perlu insert
+          rowsToInsert.push(row);
+        }
+      }
+      
+      // Batch update semua rows yang sudah ada di DB (parallel)
+      if (rowsToUpdate.length > 0) {
+        console.log(`[SaveAll] Batch updating ${rowsToUpdate.length} rows...`);
+        const batchResult = await batchUpdateResiItems(selectedStore, rowsToUpdate);
+        savedCount += batchResult.updatedCount;
+        errorCount += batchResult.errorCount;
+        console.log(`[SaveAll] Batch update done: ${batchResult.updatedCount} success, ${batchResult.errorCount} errors`);
+      }
+      
+      // Insert rows baru satu per satu (karena perlu mendapat ID baru)
+      for (const row of rowsToInsert) {
+        try {
+          const payload = {
+            resi: row.resi,
+            ecommerce: row.ecommerce,
+            toko: row.sub_toko,
+            customer: row.customer,
+            part_number: row.part_number,
+            nama_produk: row.nama_barang_csv,
+            jumlah: row.qty_keluar,
+            total_harga_produk: row.harga_total,
+            status: 'pending',
+            order_id: row.no_pesanan,
+            created_at: new Date().toISOString()
+          };
+          
+          const newId = await insertResiItem(selectedStore, payload);
+          
+          if (newId) {
+            setRows(prev => prev.map(r => r.id === row.id ? { ...r, id: `db-${newId}` } : r));
+            savedCount++;
+          }
+        } catch (e) {
+          console.error("Insert row failed:", row.id, e);
+          errorCount++;
+        }
+      }
+      
+      // Clear pending updates
+      pendingUpdates.current.clear();
+      
+      console.log(`[SaveAll] Total: ${savedCount} saved, ${errorCount} errors`);
+      setSavingStatus('saved');
+      setTimeout(() => setSavingStatus('idle'), 3000);
+    } catch (e) {
+      console.error("Save all failed:", e);
       setSavingStatus('idle');
     }
   };
@@ -1997,11 +2087,15 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
         if (r.id !== id) return r;
         const updated = { ...r, [field]: value };
         if (field === 'harga_total') {
+            // Ketika harga_total diubah, hitung ulang harga_satuan
             updated.harga_satuan = updated.qty_keluar > 0 ? updated.harga_total / updated.qty_keluar : 0;
         } else if (field === 'harga_satuan') {
+            // Ketika harga_satuan diubah, hitung ulang harga_total
             updated.harga_total = updated.harga_satuan * updated.qty_keluar;
         } else if (field === 'qty_keluar') {
-            updated.harga_total = updated.harga_satuan * updated.qty_keluar;
+            // Ketika qty diubah, hitung ulang harga_satuan dari harga_total yang ada
+            // Rumus: harga_satuan = harga_total / qty
+            updated.harga_satuan = updated.qty_keluar > 0 ? updated.harga_total / updated.qty_keluar : 0;
         }
         updatedRow = updated;
         return updated;
@@ -2818,6 +2912,34 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                 <button onClick={() => fileInputRef.current?.click()} className="bg-blue-600 hover:bg-blue-500 px-3 md:px-4 py-1 rounded text-[10px] md:text-xs flex gap-1 items-center font-bold shadow transition-colors ml-auto md:ml-0">
                     <Upload size={12}/> Import CSV
                 </button>
+                
+                {/* SAVE ALL BUTTON - Force save semua data ke database */}
+                <button 
+                    onClick={handleSaveAllRows}
+                    disabled={savingStatus === 'saving' || rows.length === 0}
+                    className={`px-3 md:px-4 py-1 rounded text-[10px] md:text-xs flex gap-1 items-center font-bold shadow transition-colors ${
+                        savingStatus === 'saving' 
+                            ? 'bg-yellow-600 text-white cursor-wait' 
+                            : savingStatus === 'saved'
+                                ? 'bg-green-600 text-white'
+                                : 'bg-purple-600 hover:bg-purple-500 text-white'
+                    }`}
+                    title="Simpan semua data ke database"
+                >
+                    {savingStatus === 'saving' ? (
+                        <>
+                            <Loader2 size={12} className="animate-spin" /> Menyimpan...
+                        </>
+                    ) : savingStatus === 'saved' ? (
+                        <>
+                            <CheckCircle size={12} /> Tersimpan
+                        </>
+                    ) : (
+                        <>
+                            <Save size={12}/> Simpan ({rows.length})
+                        </>
+                    )}
+                </button>
             </div>
 
             {/* VIEW FILTER BAR */}
@@ -3160,8 +3282,12 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
               <th className="border border-gray-600 px-1 py-1 text-left border-b-2 border-b-yellow-600/50 w-[90px] md:w-[8%] bg-gray-600 cursor-pointer hover:bg-gray-500" onClick={() => handleSort('part_number')}>
                 <div className="flex items-center gap-0.5">Part No. {sortField === 'part_number' && (sortDirection === 'asc' ? '↑' : '↓')}</div>
               </th>
-              <th className="border border-gray-600 px-1 py-1 text-left w-[140px] md:w-[12%] bg-gray-700">Nama (CSV)</th>
-              <th className="border border-gray-600 px-1 py-1 text-left w-[100px] md:w-[9%] bg-gray-700">Nama (Base)</th>
+              <th className="border border-gray-600 px-1 py-1 text-left w-[140px] md:w-[12%] bg-gray-700 cursor-pointer hover:bg-gray-600" onClick={() => handleSort('nama_barang_csv')}>
+                <div className="flex items-center gap-0.5">Nama (CSV) {sortField === 'nama_barang_csv' && (sortDirection === 'asc' ? '↑' : '↓')}</div>
+              </th>
+              <th className="border border-gray-600 px-1 py-1 text-left w-[100px] md:w-[9%] bg-gray-700 cursor-pointer hover:bg-gray-600" onClick={() => handleSort('nama_barang_base')}>
+                <div className="flex items-center gap-0.5">Nama (Base) {sortField === 'nama_barang_base' && (sortDirection === 'asc' ? '↑' : '↓')}</div>
+              </th>
               <th className="border border-gray-600 px-1 py-1 text-left w-[55px] md:w-[5%] bg-gray-700 cursor-pointer hover:bg-gray-600" onClick={() => handleSort('brand')}>
                 <div className="flex items-center gap-0.5">Brand {sortField === 'brand' && (sortDirection === 'asc' ? '↑' : '↓')}</div>
               </th>
@@ -3180,7 +3306,9 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
               <th className="border border-gray-600 px-1 py-1 text-right w-[60px] md:w-[4%] bg-gray-700 cursor-pointer hover:bg-gray-600" onClick={() => handleSort('harga_satuan')}>
                 <div className="flex items-center justify-end gap-0.5">Satuan {sortField === 'harga_satuan' && (sortDirection === 'asc' ? '↑' : '↓')}</div>
               </th>
-              <th className="border border-gray-600 px-1 py-1 text-left w-[60px] md:w-[4%] bg-gray-700">No. Pesanan</th>
+              <th className="border border-gray-600 px-1 py-1 text-left w-[60px] md:w-[4%] bg-gray-700 cursor-pointer hover:bg-gray-600" onClick={() => handleSort('no_pesanan')}>
+                <div className="flex items-center gap-0.5">No. Pesanan {sortField === 'no_pesanan' && (sortDirection === 'asc' ? '↑' : '↓')}</div>
+              </th>
               <th className="border border-gray-600 px-1 py-1 text-center w-[35px] md:w-[2%] bg-gray-700">#</th>
             </tr>
           </thead>
@@ -3402,7 +3530,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                   {/* HARGA SATUAN (DISPLAY + INPUT) */}
                   <td className="border border-gray-600 p-0 relative group/satuan">
                     <div className="w-full h-full px-1 text-right font-mono text-yellow-300 text-[11px] group-focus-within/satuan:hidden flex items-center justify-end gap-1">
-                      <span>{row.harga_satuan ? formatNumber(row.harga_satuan) : ''}</span>
+                      <span>{formatNumber(row.harga_satuan || 0)}</span>
                       {row.mata_uang && row.mata_uang !== 'IDR' && row.harga_satuan > 0 && (
                         <span className="text-[8px] px-0.5 py-0.5 bg-purple-600/30 text-purple-300 rounded font-normal">{row.mata_uang}</span>
                       )}

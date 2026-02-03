@@ -1148,6 +1148,52 @@ export const insertResiItem = async (
 };
 
 // ============================================================================
+// [BARU] BATCH UPDATE - Update banyak item sekaligus untuk performa lebih baik
+// ============================================================================
+export const batchUpdateResiItems = async (
+  store: string | null,
+  items: Array<{ id: string; payload: any }>
+): Promise<{ success: boolean; updatedCount: number; errorCount: number }> => {
+  const table = store === 'mjm' ? 'resi_items_mjm' : (store === 'bjw' ? 'resi_items_bjw' : null);
+  if (!table) return { success: false, updatedCount: 0, errorCount: items.length };
+
+  let updatedCount = 0;
+  let errorCount = 0;
+
+  // Supabase tidak support true batch update, tapi kita bisa gunakan Promise.all
+  // untuk menjalankan semua update secara parallel
+  const updatePromises = items.map(async (item) => {
+    try {
+      const { error } = await supabase
+        .from(table)
+        .update(item.payload)
+        .eq('id', item.id);
+
+      if (error) {
+        console.error(`Batch update error for ${item.id}:`, error);
+        errorCount++;
+        return false;
+      }
+      updatedCount++;
+      return true;
+    } catch (err) {
+      console.error(`Batch update exception for ${item.id}:`, err);
+      errorCount++;
+      return false;
+    }
+  });
+
+  // Jalankan semua update secara parallel (max 50 concurrent untuk menghindari rate limit)
+  const batchSize = 50;
+  for (let i = 0; i < updatePromises.length; i += batchSize) {
+    const batch = updatePromises.slice(i, i + batchSize);
+    await Promise.all(batch);
+  }
+
+  return { success: errorCount === 0, updatedCount, errorCount };
+};
+
+// ============================================================================
 // [BARU] FUNGSI UNTUK PRODUCT ALIAS
 // ============================================================================
 
