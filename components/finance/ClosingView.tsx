@@ -53,6 +53,136 @@ interface PivotGroup {
   items: any[];
 }
 
+interface PivotFilterDropdownProps {
+  label: string;
+  options: string[];
+  selected: string[];
+  onChange: (next: string[]) => void;
+}
+
+const PivotFilterDropdown: React.FC<PivotFilterDropdownProps> = ({
+  label,
+  options,
+  selected,
+  onChange
+}) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const wrapperRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleClickOutside = (event: MouseEvent) => {
+      if (wrapperRef.current && !wrapperRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isOpen]);
+
+  const safeOptions = useMemo(() => {
+    return options.filter(Boolean);
+  }, [options]);
+
+  const filteredOptions = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return safeOptions;
+    return safeOptions.filter(opt => opt.toLowerCase().includes(q));
+  }, [query, safeOptions]);
+
+  const isActive = selected.length > 0 && selected.length < safeOptions.length;
+  const buttonLabel = isActive ? `${label} • ${selected.length}` : label;
+
+  const toggleValue = (value: string) => {
+    const exists = selected.includes(value);
+    const next = exists ? selected.filter(v => v !== value) : [...selected, value];
+    onChange(next);
+  };
+
+  const handleSelectAll = () => {
+    onChange([...safeOptions]);
+  };
+
+  const handleClear = () => {
+    onChange([]);
+  };
+
+  return (
+    <div className="relative" ref={wrapperRef}>
+      <button
+        type="button"
+        onClick={() => setIsOpen(prev => !prev)}
+        disabled={safeOptions.length === 0}
+        className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm font-medium transition-colors ${
+          safeOptions.length === 0
+            ? 'bg-gray-800 border-gray-700 text-gray-500 cursor-not-allowed'
+            : isActive
+              ? 'bg-blue-600/20 border-blue-500 text-blue-200 hover:bg-blue-600/30'
+              : 'bg-gray-700 border-gray-600 text-gray-200 hover:bg-gray-600'
+        }`}
+      >
+        <span>{buttonLabel}</span>
+        <ChevronDown size={16} className={`transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+      </button>
+
+      {isOpen && (
+        <div className="absolute z-20 mt-2 w-64 rounded-xl border border-gray-700 bg-gray-800 shadow-xl">
+          <div className="p-3 border-b border-gray-700">
+            <div className="flex items-center gap-2 bg-gray-900/60 border border-gray-700 rounded-lg px-2 py-1">
+              <Search size={14} className="text-gray-400" />
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder={`Cari ${label.toLowerCase()}...`}
+                className="w-full bg-transparent text-sm text-gray-200 placeholder-gray-500 focus:outline-none"
+              />
+            </div>
+          </div>
+
+          <div className="max-h-56 overflow-y-auto">
+            {filteredOptions.length === 0 ? (
+              <div className="px-4 py-3 text-sm text-gray-500">Tidak ada data</div>
+            ) : (
+              filteredOptions.map(option => (
+                <label
+                  key={option}
+                  className="flex items-center gap-2 px-4 py-2 text-sm text-gray-200 hover:bg-gray-700/60 cursor-pointer"
+                >
+                  <input
+                    type="checkbox"
+                    checked={selected.includes(option)}
+                    onChange={() => toggleValue(option)}
+                    className="accent-blue-500"
+                  />
+                  <span className="truncate">{option}</span>
+                </label>
+              ))
+            )}
+          </div>
+
+          <div className="flex items-center gap-2 p-2 border-t border-gray-700">
+            <button
+              type="button"
+              onClick={handleSelectAll}
+              className="flex-1 px-2 py-1 text-xs font-semibold bg-gray-700 hover:bg-gray-600 text-gray-200 rounded-md"
+            >
+              Pilih Semua
+            </button>
+            <button
+              type="button"
+              onClick={handleClear}
+              className="flex-1 px-2 py-1 text-xs font-semibold bg-gray-700 hover:bg-gray-600 text-gray-200 rounded-md"
+            >
+              Reset
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 export const ClosingView: React.FC = () => {
   const { selectedStore } = useStore();
   const [viewMode, setViewMode] = useState<ViewMode>('masuk');
@@ -64,8 +194,13 @@ export const ClosingView: React.FC = () => {
   const [expandedKeys, setExpandedKeys] = useState<Set<string>>(new Set());
   
   // Filters
-  const [selectedTempo, setSelectedTempo] = useState<string>('all');
-  const [selectedEcommerce, setSelectedEcommerce] = useState<string>('all');
+  const [tempoFilterMasuk, setTempoFilterMasuk] = useState<string[]>([]);
+  const [tempoFilterKeluar, setTempoFilterKeluar] = useState<string[]>([]);
+  const [ecommerceFilter, setEcommerceFilter] = useState<string[]>([]);
+  const [supplierFilter, setSupplierFilter] = useState<string[]>([]);
+  const [customerFilter, setCustomerFilter] = useState<string[]>([]);
+  const [partNumberFilterMasuk, setPartNumberFilterMasuk] = useState<string[]>([]);
+  const [partNumberFilterKeluar, setPartNumberFilterKeluar] = useState<string[]>([]);
 
   // Initialize dates to today
   useEffect(() => {
@@ -155,6 +290,96 @@ export const ClosingView: React.FC = () => {
     return Array.from(ecoms).sort();
   }, [barangKeluar]);
 
+  const availableSuppliers = useMemo(() => {
+    const suppliers = new Set(barangMasuk.map(item => item.customer || 'Unknown'));
+    return Array.from(suppliers).sort();
+  }, [barangMasuk]);
+
+  const availableCustomers = useMemo(() => {
+    const customers = new Set(barangKeluar.map(item => item.customer || 'Unknown'));
+    return Array.from(customers).sort();
+  }, [barangKeluar]);
+
+  const availablePartNumbersMasuk = useMemo(() => {
+    const parts = new Set(barangMasuk.map(item => item.part_number).filter(Boolean));
+    return Array.from(parts).sort();
+  }, [barangMasuk]);
+
+  const availablePartNumbersKeluar = useMemo(() => {
+    const parts = new Set(barangKeluar.map(item => item.part_number).filter(Boolean));
+    return Array.from(parts).sort();
+  }, [barangKeluar]);
+
+  const isFilterActive = (selected: string[], options: string[]) => {
+    if (options.length === 0) return false;
+    return selected.length > 0 && selected.length < options.length;
+  };
+
+  const shouldInclude = (value: string, selected: string[], options: string[]) => {
+    if (!isFilterActive(selected, options)) return true;
+    return selected.includes(value);
+  };
+
+  const summarizeFilterValues = (values: string[]) => {
+    if (values.length <= 3) return values.join(', ');
+    return `${values.slice(0, 3).join(', ')} +${values.length - 3}`;
+  };
+
+  const buildFilterInfo = () => {
+    if (viewMode === 'masuk') {
+      return [
+        { label: 'Tempo', values: tempoFilterMasuk, options: availableTempoMasuk },
+        { label: 'Supplier', values: supplierFilter, options: availableSuppliers },
+        { label: 'Part Number', values: partNumberFilterMasuk, options: availablePartNumbersMasuk }
+      ]
+        .filter(f => isFilterActive(f.values, f.options))
+        .map(f => `${f.label}: ${summarizeFilterValues(f.values)}`);
+    }
+
+    return [
+      { label: 'Platform', values: ecommerceFilter, options: availableEcommerce },
+      { label: 'Tempo', values: tempoFilterKeluar, options: availableTempoKeluar },
+      { label: 'Customer', values: customerFilter, options: availableCustomers },
+      { label: 'Part Number', values: partNumberFilterKeluar, options: availablePartNumbersKeluar }
+    ]
+      .filter(f => isFilterActive(f.values, f.options))
+      .map(f => `${f.label}: ${summarizeFilterValues(f.values)}`);
+  };
+
+  const pruneFilterValues = (values: string[], options: string[]) => {
+    if (values.length === 0) return values;
+    const next = values.filter(v => options.includes(v));
+    return next.length === values.length ? values : next;
+  };
+
+  useEffect(() => {
+    setTempoFilterMasuk(prev => pruneFilterValues(prev, availableTempoMasuk));
+  }, [availableTempoMasuk]);
+
+  useEffect(() => {
+    setTempoFilterKeluar(prev => pruneFilterValues(prev, availableTempoKeluar));
+  }, [availableTempoKeluar]);
+
+  useEffect(() => {
+    setEcommerceFilter(prev => pruneFilterValues(prev, availableEcommerce));
+  }, [availableEcommerce]);
+
+  useEffect(() => {
+    setSupplierFilter(prev => pruneFilterValues(prev, availableSuppliers));
+  }, [availableSuppliers]);
+
+  useEffect(() => {
+    setCustomerFilter(prev => pruneFilterValues(prev, availableCustomers));
+  }, [availableCustomers]);
+
+  useEffect(() => {
+    setPartNumberFilterMasuk(prev => pruneFilterValues(prev, availablePartNumbersMasuk));
+  }, [availablePartNumbersMasuk]);
+
+  useEffect(() => {
+    setPartNumberFilterKeluar(prev => pruneFilterValues(prev, availablePartNumbersKeluar));
+  }, [availablePartNumbersKeluar]);
+
   // Filtered data based on selected filters (exclude RETUR from closing)
   const filteredBarangMasuk = useMemo(() => {
     return barangMasuk.filter(item => {
@@ -164,13 +389,26 @@ export const ClosingView: React.FC = () => {
       if (tempo === 'RETUR' || tempo.includes('RETUR') || keterangan.includes('RETUR')) {
         return false;
       }
-      
-      if (selectedTempo !== 'all' && (item.tempo || 'CASH') !== selectedTempo) {
-        return false;
-      }
+
+      const tempoValue = item.tempo || 'CASH';
+      const supplierValue = item.customer || 'Unknown';
+      const partNumberValue = item.part_number || '';
+
+      if (!shouldInclude(tempoValue, tempoFilterMasuk, availableTempoMasuk)) return false;
+      if (!shouldInclude(supplierValue, supplierFilter, availableSuppliers)) return false;
+      if (!shouldInclude(partNumberValue, partNumberFilterMasuk, availablePartNumbersMasuk)) return false;
+
       return true;
     });
-  }, [barangMasuk, selectedTempo]);
+  }, [
+    barangMasuk,
+    tempoFilterMasuk,
+    supplierFilter,
+    partNumberFilterMasuk,
+    availableTempoMasuk,
+    availableSuppliers,
+    availablePartNumbersMasuk
+  ]);
 
   const filteredBarangKeluar = useMemo(() => {
     return barangKeluar.filter(item => {
@@ -180,16 +418,30 @@ export const ClosingView: React.FC = () => {
       if (tempo === 'RETUR' || tempo.includes('RETUR') || ecommerce === 'RETUR') {
         return false;
       }
-      
-      if (selectedTempo !== 'all' && (item.tempo || 'CASH') !== selectedTempo) {
-        return false;
-      }
-      if (selectedEcommerce !== 'all' && (item.ecommerce || 'OFFLINE') !== selectedEcommerce) {
-        return false;
-      }
+
+      const tempoValue = item.tempo || 'CASH';
+      const ecommerceValue = item.ecommerce || 'OFFLINE';
+      const customerValue = item.customer || 'Unknown';
+      const partNumberValue = item.part_number || '';
+
+      if (!shouldInclude(tempoValue, tempoFilterKeluar, availableTempoKeluar)) return false;
+      if (!shouldInclude(ecommerceValue, ecommerceFilter, availableEcommerce)) return false;
+      if (!shouldInclude(customerValue, customerFilter, availableCustomers)) return false;
+      if (!shouldInclude(partNumberValue, partNumberFilterKeluar, availablePartNumbersKeluar)) return false;
+
       return true;
     });
-  }, [barangKeluar, selectedTempo, selectedEcommerce]);
+  }, [
+    barangKeluar,
+    tempoFilterKeluar,
+    ecommerceFilter,
+    customerFilter,
+    partNumberFilterKeluar,
+    availableTempoKeluar,
+    availableEcommerce,
+    availableCustomers,
+    availablePartNumbersKeluar
+  ]);
 
   // Toggle expand/collapse
   const toggleExpand = (key: string) => {
@@ -435,9 +687,7 @@ export const ClosingView: React.FC = () => {
       const title = viewMode === 'masuk' ? 'Laporan Barang Masuk' : 'Laporan Barang Keluar';
       const period = `${formatDateDisplay(startDate)} - ${formatDateDisplay(endDate)}`;
       const store = selectedStore?.toUpperCase() || 'ALL';
-      const filterInfo = [];
-      if (selectedTempo !== 'all') filterInfo.push(`Tempo: ${selectedTempo}`);
-      if (selectedEcommerce !== 'all' && viewMode === 'keluar') filterInfo.push(`Platform: ${selectedEcommerce}`);
+      const filterInfo = buildFilterInfo();
       const filterText = filterInfo.length > 0 ? ` | Filter: ${filterInfo.join(', ')}` : '';
       const grandTotal = viewMode === 'masuk' ? grandTotalMasuk : grandTotalKeluar;
       const totalItems = viewMode === 'masuk' ? filteredBarangMasuk.length : filteredBarangKeluar.length;
@@ -451,28 +701,26 @@ export const ClosingView: React.FC = () => {
         position: absolute;
         left: -9999px;
         top: 0;
-        background: white;
-        padding: 20px;
-        min-width: 1100px;
-        font-family: Arial, Helvetica, sans-serif;
-        font-size: 9px;
-        line-height: 1.2;
-        color: #000000;
+        background: #0b1220;
+        padding: 18px;
+        min-width: 1200px;
+        font-family: 'Inter', 'Segoe UI', Arial, sans-serif;
+        font-size: 12px;
+        line-height: 1.35;
+        color: #e5e7eb;
       `;
 
       // Add header
       const header = document.createElement('div');
       header.innerHTML = `
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 2px solid #3b82f6;">
-          <div>
-            <h1 style="font-size: 18px; color: #000000; margin: 0 0 4px 0; font-weight: bold;">${title}</h1>
-            <p style="font-size: 10px; color: #374151; margin: 0;">Periode: ${period} | Toko: ${store}${filterText}</p>
+        <div style="background:#1f2937;border:1px solid #334155;border-radius:12px;padding:14px 16px;margin-bottom:12px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:16px;">
+            <div style="font-size:16px;font-weight:700;color:#f8fafc;">
+              ${title}
+              <span style="font-size:12px;font-weight:500;color:#93c5fd;"> (${period})</span>
+            </div>
           </div>
-          <div style="text-align: right; background: ${accentBg}; padding: 8px 14px; border-radius: 6px; border: 2px solid ${accentBorder};">
-            <div style="font-size: 8px; color: #374151; text-transform: uppercase; letter-spacing: 0.5px;">Grand Total</div>
-            <div style="font-size: 16px; font-weight: bold; color: ${accentColor};">${formatCurrency(grandTotal.harga)}</div>
-            <div style="font-size: 8px; color: #374151;">${totalItems} item (${grandTotal.qty} qty)</div>
-          </div>
+          ${filterText ? `<div style="margin-top:6px;font-size:11px;color:#94a3b8;">${filterText.replace(' | ', '')}</div>` : ''}
         </div>
       `;
       container.appendChild(header);
@@ -482,35 +730,39 @@ export const ClosingView: React.FC = () => {
       tableClone.style.cssText = `
         width: 100%;
         border-collapse: collapse;
-        font-size: 9px;
-        background: white;
-        color: #000000;
+        font-size: 12px;
+        background: #1f2937;
+        color: #e5e7eb;
+        border-radius: 12px;
+        overflow: hidden;
       `;
 
       // Style all cells - black text
       const allCells = tableClone.querySelectorAll('th, td');
       allCells.forEach((cell: Element) => {
         const el = cell as HTMLElement;
-        el.style.padding = '4px 6px';
-        el.style.borderBottom = '1px solid #d1d5db';
-        el.style.color = '#000000';
+        el.style.padding = '8px 10px';
+        el.style.borderBottom = '1px solid #2f3b4e';
+        el.style.color = '#e5e7eb';
         el.style.verticalAlign = 'middle';
+        el.style.fontVariantNumeric = 'tabular-nums';
       });
 
       // Style header cells
       const headerCells = tableClone.querySelectorAll('th');
       headerCells.forEach((cell: Element) => {
         const el = cell as HTMLElement;
-        el.style.background = '#1e40af';
-        el.style.color = '#ffffff';
-        el.style.fontWeight = '600';
-        el.style.fontSize = '8px';
+        el.style.background = '#374151';
+        el.style.color = '#e5e7eb';
+        el.style.fontWeight = '700';
+        el.style.fontSize = '11px';
         el.style.textTransform = 'uppercase';
-        el.style.letterSpacing = '0.03em';
-        el.style.padding = '6px';
+        el.style.letterSpacing = '0.05em';
+        el.style.padding = '10px';
+        el.style.borderBottom = '1px solid #4b5563';
       });
 
-      // Style row backgrounds - differentiate by background color only
+      // Style row backgrounds and indentation to mimic sheet pivot
       const rows = tableClone.querySelectorAll('tbody tr');
       let rowIndex = 0;
       rows.forEach((row: Element) => {
@@ -519,54 +771,125 @@ export const ClosingView: React.FC = () => {
         
         // Level-based background colors
         if (className.includes('bg-blue-900')) {
-          el.style.background = '#bfdbfe'; // Date level - blue
-          el.style.borderLeft = '4px solid #2563eb';
+          el.style.background = '#1f2a44'; // Date level
         } else if (className.includes('bg-purple-900')) {
-          el.style.background = '#ddd6fe'; // Tempo level - purple
-          el.style.borderLeft = '4px solid #7c3aed';
+          el.style.background = '#2b2446'; // Tempo level
         } else if (className.includes('bg-gray-700/20')) {
-          el.style.background = '#fef3c7'; // Subtotal - amber/yellow
-          el.style.borderLeft = '4px solid #f59e0b';
+          el.style.background = '#2a3443'; // Subtotal
         } else if (className.includes('bg-gray-700')) {
-          el.style.background = '#e5e7eb'; // Supplier level - gray
-          el.style.borderLeft = '4px solid #6b7280';
+          el.style.background = '#263241'; // Supplier/Customer level
         } else if (className.includes('bg-gray-800')) {
-          el.style.background = rowIndex % 2 === 0 ? '#ffffff' : '#f3f4f6';
+          el.style.background = rowIndex % 2 === 0 ? '#1f2a3a' : '#202b3b';
           rowIndex++;
         } else if (className.includes('bg-green-900')) {
-          el.style.background = '#bbf7d0'; // Grand total green
-          el.style.borderTop = '3px solid #16a34a';
-          el.style.borderLeft = '4px solid #16a34a';
+          el.style.background = '#1f2937'; // Grand total
+          el.style.borderTop = '2px solid #10b981';
         } else if (className.includes('bg-red-900')) {
-          el.style.background = '#fecaca'; // Grand total red
-          el.style.borderTop = '3px solid #dc2626';
-          el.style.borderLeft = '4px solid #dc2626';
+          el.style.background = '#1f2937'; // Grand total
+          el.style.borderTop = '2px solid #10b981';
         }
 
-        // Hide SVG icons
+        // Style SVG chevrons like UI
         const svgs = el.querySelectorAll('svg');
         svgs.forEach(svg => {
-          (svg as HTMLElement).style.display = 'none';
+          const svgEl = svg as HTMLElement;
+          svgEl.style.color = '#94a3b8';
+          svgEl.style.width = '14px';
+          svgEl.style.height = '14px';
         });
 
-        // Make all text black, only bold for totals
+        // Style text colors per level to match dark pivot UI
         const cells = el.querySelectorAll('td');
+        const isGroupRow = className.includes('bg-blue-900') || className.includes('bg-purple-900') || className.includes('bg-gray-700') || className.includes('bg-gray-700/20');
+        const isGrandTotal = className.includes('bg-green-900') || className.includes('bg-red-900');
         cells.forEach((cell: Element) => {
           const cellEl = cell as HTMLElement;
           const cellClass = cellEl.className;
-          cellEl.style.color = '#000000';
+          cellEl.style.color = '#e5e7eb';
+          cellEl.style.fontWeight = isGrandTotal ? '700' : isGroupRow ? '600' : '400';
+          cellEl.style.fontSize = '12px';
+          cellEl.style.lineHeight = '1.35';
+          if (isGroupRow || isGrandTotal) {
+            cellEl.style.paddingTop = '10px';
+            cellEl.style.paddingBottom = '10px';
+          } else if (className.includes('bg-gray-800')) {
+            cellEl.style.paddingTop = '8px';
+            cellEl.style.paddingBottom = '8px';
+          }
           
           // Only make total values bold
           if (cellClass.includes('font-bold') || cellClass.includes('text-green') || cellClass.includes('text-red') || cellClass.includes('text-amber')) {
-            cellEl.style.fontWeight = 'bold';
+            cellEl.style.fontWeight = '700';
           }
+
+          // Ensure typography consistency for nested elements
+          const descendants = cellEl.querySelectorAll('*');
+          descendants.forEach(desc => {
+            (desc as HTMLElement).style.fontFamily = "'Inter', 'Segoe UI', Arial, sans-serif";
+            (desc as HTMLElement).style.fontSize = '12px';
+          });
         });
+
+        if (cells.length >= 3) {
+          const firstCell = cells[0] as HTMLElement;
+          const qtyCell = cells[1] as HTMLElement;
+          const totalCell = cells[2] as HTMLElement;
+
+          if (className.includes('bg-blue-900')) {
+            firstCell.style.color = '#7dd3fc';
+            qtyCell.style.color = '#e5e7eb';
+            totalCell.style.color = '#4ade80';
+          } else if (className.includes('bg-purple-900')) {
+            firstCell.style.color = '#c084fc';
+            qtyCell.style.color = '#e5e7eb';
+            totalCell.style.color = '#4ade80';
+          } else if (className.includes('bg-gray-700')) {
+            firstCell.style.color = '#f8fafc';
+            qtyCell.style.color = '#e5e7eb';
+            totalCell.style.color = '#4ade80';
+          } else if (className.includes('bg-gray-700/20')) {
+            firstCell.style.color = '#cbd5f5';
+            qtyCell.style.color = '#e5e7eb';
+            totalCell.style.color = '#facc15';
+          } else if (className.includes('bg-gray-800')) {
+            firstCell.style.color = '#e5e7eb';
+            qtyCell.style.color = '#cbd5f5';
+            totalCell.style.color = '#cbd5f5';
+
+            const partNumberSpan = firstCell.querySelector('span');
+            if (partNumberSpan) {
+              (partNumberSpan as HTMLElement).style.color = '#60a5fa';
+            }
+          } else if (className.includes('bg-green-900') || className.includes('bg-red-900')) {
+            firstCell.style.color = '#f8fafc';
+            qtyCell.style.color = '#e5e7eb';
+            totalCell.style.color = '#4ade80';
+          }
+        }
+
+        // Apply indentation for hierarchy (pivot-like spacing)
+        const firstCell = el.querySelector('td') as HTMLElement | null;
+        if (firstCell) {
+          let indent = 12;
+          if (className.includes('bg-blue-900')) {
+            indent = 12; // Date
+          } else if (className.includes('bg-purple-900')) {
+            indent = 32; // Tempo
+          } else if (className.includes('bg-gray-700')) {
+            indent = 56; // Supplier/Customer
+          } else if (className.includes('bg-gray-700/20')) {
+            indent = 56; // Subtotal
+          } else if (className.includes('bg-gray-800')) {
+            indent = 80; // Item rows
+          }
+          firstCell.style.paddingLeft = `${indent}px`;
+        }
       });
 
       // Add footer
       const footer = document.createElement('div');
       footer.innerHTML = `
-        <div style="margin-top: 10px; padding-top: 8px; border-top: 1px solid #d1d5db; display: flex; justify-content: space-between; font-size: 9px; color: #374151;">
+        <div style="margin-top: 12px; padding-top: 8px; border-top: 1px solid #273244; display: flex; justify-content: space-between; font-size: 10px; color: #94a3b8;">
           <span>Dicetak: ${new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })}</span>
           <span>Gudang ${store}</span>
         </div>
@@ -578,7 +901,7 @@ export const ClosingView: React.FC = () => {
 
       const canvas = await html2canvas(container, {
         scale: 2,
-        backgroundColor: '#ffffff',
+        backgroundColor: '#0b1220',
         logging: false,
         useCORS: true
       });
@@ -613,9 +936,7 @@ export const ClosingView: React.FC = () => {
       const title = viewMode === 'masuk' ? 'Laporan Barang Masuk' : 'Laporan Barang Keluar';
       const period = `${formatDateDisplay(startDate)} - ${formatDateDisplay(endDate)}`;
       const store = selectedStore?.toUpperCase() || 'ALL';
-      const filterInfo = [];
-      if (selectedTempo !== 'all') filterInfo.push(`Tempo: ${selectedTempo}`);
-      if (selectedEcommerce !== 'all' && viewMode === 'keluar') filterInfo.push(`Platform: ${selectedEcommerce}`);
+      const filterInfo = buildFilterInfo();
       const filterText = filterInfo.length > 0 ? ` | Filter: ${filterInfo.join(', ')}` : '';
       const totalItems = viewMode === 'masuk' ? filteredBarangMasuk.length : filteredBarangKeluar.length;
       const grandTotal = viewMode === 'masuk' ? grandTotalMasuk : grandTotalKeluar;
@@ -892,6 +1213,35 @@ export const ClosingView: React.FC = () => {
     );
   };
 
+  const activeFilters = viewMode === 'masuk'
+    ? [
+        { label: 'Tempo', values: tempoFilterMasuk, options: availableTempoMasuk, onClear: () => setTempoFilterMasuk([]) },
+        { label: 'Supplier', values: supplierFilter, options: availableSuppliers, onClear: () => setSupplierFilter([]) },
+        { label: 'Part Number', values: partNumberFilterMasuk, options: availablePartNumbersMasuk, onClear: () => setPartNumberFilterMasuk([]) }
+      ]
+    : [
+        { label: 'Platform', values: ecommerceFilter, options: availableEcommerce, onClear: () => setEcommerceFilter([]) },
+        { label: 'Tempo', values: tempoFilterKeluar, options: availableTempoKeluar, onClear: () => setTempoFilterKeluar([]) },
+        { label: 'Customer', values: customerFilter, options: availableCustomers, onClear: () => setCustomerFilter([]) },
+        { label: 'Part Number', values: partNumberFilterKeluar, options: availablePartNumbersKeluar, onClear: () => setPartNumberFilterKeluar([]) }
+      ];
+
+  const hasActiveFilters = activeFilters.some(filter => isFilterActive(filter.values, filter.options));
+
+  const resetCurrentFilters = () => {
+    if (viewMode === 'masuk') {
+      setTempoFilterMasuk([]);
+      setSupplierFilter([]);
+      setPartNumberFilterMasuk([]);
+      return;
+    }
+
+    setEcommerceFilter([]);
+    setTempoFilterKeluar([]);
+    setCustomerFilter([]);
+    setPartNumberFilterKeluar([]);
+  };
+
   return (
     <div className="min-h-screen bg-gray-900 p-4">
       {/* Header */}
@@ -967,70 +1317,83 @@ export const ClosingView: React.FC = () => {
               </button>
             </div>
           </div>
-
-          {/* Tempo & Ecommerce Filters */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-2">
-                Filter Tempo
-              </label>
-              <select
-                value={selectedTempo}
-                onChange={(e) => setSelectedTempo(e.target.value)}
-                className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              >
-                <option value="all">Semua Tempo</option>
-                {(viewMode === 'masuk' ? availableTempoMasuk : availableTempoKeluar).map(tempo => (
-                  <option key={tempo} value={tempo}>{tempo}</option>
-                ))}
-              </select>
+          {/* Pivot Filters */}
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-gray-300 mb-2">
+              Pivot Filters
+            </label>
+            <div className="flex flex-wrap gap-2">
+              {viewMode === 'masuk' ? (
+                <>
+                  <PivotFilterDropdown
+                    label="Tempo"
+                    options={availableTempoMasuk}
+                    selected={tempoFilterMasuk}
+                    onChange={setTempoFilterMasuk}
+                  />
+                  <PivotFilterDropdown
+                    label="Supplier"
+                    options={availableSuppliers}
+                    selected={supplierFilter}
+                    onChange={setSupplierFilter}
+                  />
+                  <PivotFilterDropdown
+                    label="Part Number"
+                    options={availablePartNumbersMasuk}
+                    selected={partNumberFilterMasuk}
+                    onChange={setPartNumberFilterMasuk}
+                  />
+                </>
+              ) : (
+                <>
+                  <PivotFilterDropdown
+                    label="Platform"
+                    options={availableEcommerce}
+                    selected={ecommerceFilter}
+                    onChange={setEcommerceFilter}
+                  />
+                  <PivotFilterDropdown
+                    label="Tempo"
+                    options={availableTempoKeluar}
+                    selected={tempoFilterKeluar}
+                    onChange={setTempoFilterKeluar}
+                  />
+                  <PivotFilterDropdown
+                    label="Customer"
+                    options={availableCustomers}
+                    selected={customerFilter}
+                    onChange={setCustomerFilter}
+                  />
+                  <PivotFilterDropdown
+                    label="Part Number"
+                    options={availablePartNumbersKeluar}
+                    selected={partNumberFilterKeluar}
+                    onChange={setPartNumberFilterKeluar}
+                  />
+                </>
+              )}
             </div>
-            {viewMode === 'keluar' && (
-              <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">
-                  Filter Ecommerce / Platform
-                </label>
-                <select
-                  value={selectedEcommerce}
-                  onChange={(e) => setSelectedEcommerce(e.target.value)}
-                  className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                >
-                  <option value="all">Semua Platform</option>
-                  {availableEcommerce.map(ecom => (
-                    <option key={ecom} value={ecom}>{ecom}</option>
-                  ))}
-                </select>
-              </div>
-            )}
           </div>
 
           {/* Active Filters Display */}
-          {(selectedTempo !== 'all' || selectedEcommerce !== 'all') && (
+          {hasActiveFilters && (
             <div className="flex flex-wrap gap-2 mb-4">
               <span className="text-sm text-gray-400">Filter aktif:</span>
-              {selectedTempo !== 'all' && (
-                <span className="px-3 py-1 bg-blue-600/30 text-blue-300 rounded-full text-sm flex items-center gap-1">
-                  Tempo: {selectedTempo}
-                  <button 
-                    onClick={() => setSelectedTempo('all')}
-                    className="ml-1 hover:text-white"
-                  >×</button>
-                </span>
-              )}
-              {selectedEcommerce !== 'all' && viewMode === 'keluar' && (
-                <span className="px-3 py-1 bg-purple-600/30 text-purple-300 rounded-full text-sm flex items-center gap-1">
-                  Platform: {selectedEcommerce}
-                  <button 
-                    onClick={() => setSelectedEcommerce('all')}
-                    className="ml-1 hover:text-white"
-                  >×</button>
-                </span>
-              )}
+              {activeFilters
+                .filter(filter => isFilterActive(filter.values, filter.options))
+                .map(filter => (
+                  <span key={filter.label} className="px-3 py-1 bg-blue-600/30 text-blue-300 rounded-full text-sm flex items-center gap-1">
+                    {filter.label}: {summarizeFilterValues(filter.values)}
+                    <button
+                      onClick={filter.onClear}
+                      className="ml-1 hover:text-white"
+                    >
+                      x
+                    </button>
+                  </span>
+                ))}
               <button
-                onClick={() => {
-                  setSelectedTempo('all');
-                  setSelectedEcommerce('all');
-                }}
+                onClick={resetCurrentFilters}
                 className="px-3 py-1 bg-gray-600 hover:bg-gray-500 text-gray-300 rounded-full text-sm transition-colors"
               >
                 Reset Filter
@@ -1220,3 +1583,4 @@ export const ClosingView: React.FC = () => {
     </div>
   );
 };
+

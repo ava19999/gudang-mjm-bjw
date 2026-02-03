@@ -38,10 +38,10 @@ import { ActiveView } from './types/ui';
 import { StoreProvider, useStore } from './context/StoreContext';
 
 // --- TYPES & SERVICES ---
-import { InventoryItem, InventoryFormData, CartItem, Order, StockHistory, OrderStatus } from './types';
+import { InventoryItem, InventoryFormData, CartItem, StockHistory } from './types';
 import { 
   fetchInventory, addInventory, updateInventory, deleteInventory, getItemByPartNumber, 
-  fetchHistory, addBarangMasuk, addBarangKeluar,
+  fetchHistory,
   saveOfflineOrder
 } from './services/supabaseService';
 import { generateId } from './utils';
@@ -267,101 +267,6 @@ const AppContent: React.FC = () => {
       }
   };
 
-  // --- RETUR LOGIC (UPDATE STOK) ---
-  const handleProcessReturn = async (orderId: string, returnedItems: { itemId: string, qty: number }[]) => {
-      const order = orders.find(o => o.id === orderId);
-      if (!order) return;
-      setLoading(true);
-      const today = new Intl.DateTimeFormat('sv-SE', {
-        timeZone: 'Asia/Jakarta'
-      }).format(new Date());
-      let pureName = order.customerName;
-      let resiVal = '-'; let shopVal = ''; let ecommerceVal = 'APLIKASI';
-
-      const resiMatch = pureName.match(/\(Resi: (.*?)\)/); if (resiMatch) { resiVal = resiMatch[1]; pureName = pureName.replace(/\(Resi:.*?\)/, ''); }
-      const shopMatch = pureName.match(/\(Toko: (.*?)\)/); if (shopMatch) { shopVal = shopMatch[1]; pureName = pureName.replace(/\(Toko:.*?\)/, ''); }
-      const viaMatch = pureName.match(/\(Via: (.*?)\)/); if (viaMatch) { ecommerceVal = viaMatch[1]; pureName = pureName.replace(/\(Via:.*?\)/, ''); }
-      pureName = pureName.trim() || "Pelanggan";
-
-      for (const retur of returnedItems) {
-          const itemInOrder = order.items.find(i => i.id === retur.itemId);
-          if (!itemInOrder) continue;
-          const currentItem = await getItemByPartNumber(itemInOrder.partNumber, selectedStore);
-          if (currentItem) {
-              const restoreQty = retur.qty;
-              const newQuantity = currentItem.quantity + restoreQty;
-              const itemToUpdate = { ...currentItem, qtyOut: Math.max(0, (currentItem.qtyOut || 0) - restoreQty), quantity: newQuantity, lastUpdated: Date.now() };
-              await updateInventory(itemToUpdate, undefined, selectedStore);
-              await addBarangMasuk({ tanggal: today, tempo: `${resiVal} / ${shopVal}`, ecommerce: ecommerceVal, keterangan: `${pureName} (RETUR)`, partNumber: itemToUpdate.partNumber, name: itemToUpdate.name, brand: itemToUpdate.brand, application: itemToUpdate.application, rak: itemToUpdate.shelf, stockAhir: newQuantity, qtyMasuk: restoreQty, hargaSatuan: itemInOrder.customPrice ?? itemInOrder.price, hargaTotal: (itemInOrder.customPrice ?? itemInOrder.price) * restoreQty });
-          }
-      }
-
-      const newItems = order.items.map(item => {
-          const returInfo = returnedItems.find(r => r.itemId === item.id);
-          if (returInfo) return { ...item, cartQuantity: item.cartQuantity - returInfo.qty };
-          return item;
-      }).filter(item => item.cartQuantity > 0); 
-
-      const newTotal = newItems.reduce((sum, item) => sum + ((item.customPrice ?? item.price) * item.cartQuantity), 0);
-      const newStatus = newItems.length === 0 ? 'cancelled' : 'completed';
-
-      if (await updateOrderData(orderId, newItems, newTotal, newStatus)) { showToast('Retur berhasil diproses & Stok kembali!'); await refreshData(); } 
-      else { showToast('Gagal update data pesanan', 'error'); }
-      setLoading(false);
-  };
-
-  const handleUpdateStatus = async (orderId: string, newStatus: OrderStatus) => {
-      const order = orders.find(o => o.id === orderId);
-      if (!order) return;
-      
-      let pureName = order.customerName; let resiVal = '-'; let shopVal = ''; let ecommerceVal = 'APLIKASI';
-      const resiMatch = pureName.match(/\(Resi: (.*?)\)/); if (resiMatch) { resiVal = resiMatch[1]; pureName = pureName.replace(/\(Resi:.*?\)/, ''); }
-      const shopMatch = pureName.match(/\(Toko: (.*?)\)/); if (shopMatch) { shopVal = shopMatch[1]; pureName = pureName.replace(/\(Toko:.*?\)/, ''); }
-      const viaMatch = pureName.match(/\(Via: (.*?)\)/); if (viaMatch) { ecommerceVal = viaMatch[1]; pureName = pureName.replace(/\(Via:.*?\)/, ''); }
-      pureName = pureName.trim() || "Pelanggan";
-      const today = new Intl.DateTimeFormat('sv-SE', {
-        timeZone: 'Asia/Jakarta'
-      }).format(new Date());
-      let updateTime = (newStatus === 'completed' || newStatus === 'cancelled') ? Date.now() : undefined;
-
-      if (order.status === 'pending' && newStatus === 'processing') {
-          if (await updateOrderStatusService(orderId, newStatus)) { 
-              for (const orderItem of order.items) {
-                  const currentItem = await getItemByPartNumber(orderItem.partNumber, selectedStore);
-                  if (currentItem) {
-                      const qtySold = orderItem.cartQuantity;
-                      const newQuantity = Math.max(0, currentItem.quantity - qtySold);
-                      const itemToUpdate = { ...currentItem, qtyOut: (currentItem.qtyOut || 0) + qtySold, quantity: newQuantity, lastUpdated: Date.now() };
-                      await updateInventory(itemToUpdate, undefined, selectedStore);
-                      await addBarangKeluar({ tanggal: today, kodeToko: 'APP', tempo: shopVal, ecommerce: ecommerceVal, customer: pureName, partNumber: currentItem.partNumber, name: currentItem.name, brand: currentItem.brand, application: currentItem.application, rak: currentItem.shelf, stockAhir: newQuantity, qtyKeluar: qtySold, hargaSatuan: orderItem.customPrice ?? orderItem.price, hargaTotal: (orderItem.customPrice ?? orderItem.price) * qtySold, resi: resiVal });
-                  }
-              }
-              showToast('Pesanan diproses, stok berkurang.'); refreshData();
-          }
-      }
-      else if (newStatus === 'cancelled' && order.status !== 'cancelled') {
-          if (await updateOrderStatusService(orderId, newStatus, updateTime)) {
-              if (order.status !== 'pending') {
-                  for (const orderItem of order.items) {
-                      const currentItem = await getItemByPartNumber(orderItem.partNumber, selectedStore);
-                      if (currentItem) {
-                          const restoreQty = orderItem.cartQuantity;
-                          const newQuantity = currentItem.quantity + restoreQty;
-                          const itemToUpdate = { ...currentItem, qtyOut: Math.max(0, (currentItem.qtyOut || 0) - restoreQty), quantity: newQuantity, lastUpdated: Date.now() };
-                          await updateInventory(itemToUpdate, undefined, selectedStore);
-                          await addBarangMasuk({ tanggal: today, tempo: `${resiVal} / ${shopVal}`, ecommerce: ecommerceVal, keterangan: `${pureName} (RETUR FULL)`, partNumber: itemToUpdate.partNumber, name: itemToUpdate.name, brand: itemToUpdate.brand, application: itemToUpdate.application, rak: itemToUpdate.shelf, stockAhir: newQuantity, qtyMasuk: restoreQty, hargaSatuan: orderItem.customPrice ?? orderItem.price, hargaTotal: (orderItem.customPrice ?? orderItem.price) * restoreQty });
-                      }
-                  }
-                  showToast('Pesanan dibatalkan sepenuhnya.');
-              } else { showToast('Pesanan ditolak (Stok belum dipotong).'); }
-              refreshData();
-          }
-      }
-      else {
-          if (await updateOrderStatusService(orderId, newStatus, updateTime)) refreshData();
-      }
-  };
-
   // --- RENDERING ---
   if (loading && items.length === 0) return <div className="flex flex-col h-screen items-center justify-center bg-gray-900 font-sans text-gray-400 space-y-6"><div className="relative"><div className="w-16 h-16 border-4 border-gray-700 border-t-blue-500 rounded-full animate-spin"></div><div className="absolute inset-0 flex items-center justify-center"><CloudLightning size={20} className="text-blue-500 animate-pulse" /></div></div><div className="text-center space-y-1"><p className="font-medium text-gray-200">Menghubungkan Database</p><p className="text-xs">Memuat Data...</p></div></div>;
 
@@ -415,7 +320,7 @@ const AppContent: React.FC = () => {
         {activeView === 'scan_resi_history' && isAdmin && <RiwayatScanResi />}
         {activeView === 'kirim_barang' && isAdmin && <KirimBarangView />}
         {activeView === 'orders' && isAdmin && <OrderManagement />}
-        {activeView === 'orders' && !isAdmin && <CustomerOrderView orders={[]} />}
+        {activeView === 'orders' && !isAdmin && <CustomerOrderView orders={[]} currentCustomerName={userName} />}
         
         {isEditing && isAdmin && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm animate-in fade-in">
