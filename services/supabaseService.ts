@@ -656,14 +656,44 @@ export const updateFotoLinkSku = async (
   namaCsv: string,
   skuString: string
 ): Promise<{ success: boolean; error?: string; warning?: string }> => {
-  if (!namaCsv || !skuString) {
-    return { success: false, error: 'nama_csv and sku are required' };
+  if (!namaCsv) {
+    return { success: false, error: 'nama_csv is required' };
+  }
+
+  // If empty SKU, just clear the sku field
+  if (!skuString || skuString.trim() === '') {
+    try {
+      const { error: updateError } = await supabase
+        .from('foto_link')
+        .update({ sku: '' })
+        .eq('nama_csv', namaCsv);
+
+      if (updateError) {
+        return { success: false, error: updateError.message };
+      }
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
   }
 
   // Parse comma-separated SKUs
   const skuArray = skuString.split(',').map(s => s.trim()).filter(Boolean);
   if (skuArray.length === 0) {
-    return { success: false, error: 'No valid SKU provided' };
+    // All SKUs cleared
+    try {
+      const { error: updateError } = await supabase
+        .from('foto_link')
+        .update({ sku: '' })
+        .eq('nama_csv', namaCsv);
+
+      if (updateError) {
+        return { success: false, error: updateError.message };
+      }
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
   }
 
   try {
@@ -1116,7 +1146,15 @@ export const getItemByPartNumber = async (partNumber: string, store?: string | n
   return mapped;
 };
 
-export const fetchBarangMasukLog = async (store: string | null, page = 1, limit = 20, search = '') => {
+interface BarangMasukFilters {
+    search?: string;
+    partNumber?: string;
+    customer?: string;
+    dateFrom?: string;
+    dateTo?: string;
+}
+
+export const fetchBarangMasukLog = async (store: string | null, page = 1, limit = 20, filters: BarangMasukFilters = {}) => {
     const table = getLogTableName('barang_masuk', store);
     const stockTable = getTableName(store);
     const from = (page - 1) * limit;
@@ -1124,8 +1162,27 @@ export const fetchBarangMasukLog = async (store: string | null, page = 1, limit 
 
     let query = supabase.from(table).select('*', { count: 'exact' });
 
-    if (search) {
-        query = query.or(`part_number.ilike.%${search}%,nama_barang.ilike.%${search}%,customer.ilike.%${search}%`);
+    // Apply search filters
+    if (filters.search) {
+        query = query.or(`part_number.ilike.%${filters.search}%,nama_barang.ilike.%${filters.search}%,customer.ilike.%${filters.search}%`);
+    }
+    
+    // Apply part number filter
+    if (filters.partNumber) {
+        query = query.ilike('part_number', `%${filters.partNumber}%`);
+    }
+    
+    // Apply customer filter
+    if (filters.customer) {
+        query = query.ilike('customer', `%${filters.customer}%`);
+    }
+    
+    // Apply date range filter
+    if (filters.dateFrom) {
+        query = query.gte('created_at', `${filters.dateFrom}T00:00:00`);
+    }
+    if (filters.dateTo) {
+        query = query.lte('created_at', `${filters.dateTo}T23:59:59`);
     }
 
     // Order by id descending (newest first) as primary, then created_at as fallback
@@ -1139,20 +1196,32 @@ export const fetchBarangMasukLog = async (store: string | null, page = 1, limit 
     }
 
     // Fetch current quantities from stock table
+    // Normalize part numbers to handle variations (spaces, case differences)
+    const normalizePN = (pn: string): string => pn?.trim().toUpperCase().replace(/\s+/g, ' ') || '';
     const partNumbers = [...new Set((data || []).map(row => row.part_number).filter(Boolean))];
+    const normalizedPartNumbers = partNumbers.map(normalizePN);
     let stockMap: Record<string, number> = {};
     
     if (partNumbers.length > 0) {
+        // Query with both original and normalized versions to catch more matches
         const { data: stockData } = await supabase
             .from(stockTable)
-            .select('part_number, quantity')
-            .in('part_number', partNumbers);
+            .select('part_number, quantity');
         
         if (stockData) {
-            stockMap = stockData.reduce((acc, item) => {
-                acc[item.part_number] = item.quantity;
+            // Create lookup map using normalized part numbers
+            const stockByNormalized = stockData.reduce((acc, item) => {
+                const normalizedKey = normalizePN(item.part_number);
+                acc[normalizedKey] = item.quantity;
+                acc[item.part_number] = item.quantity; // Also keep original
                 return acc;
             }, {} as Record<string, number>);
+            
+            // Build stockMap matching log part numbers to stock
+            partNumbers.forEach(pn => {
+                const normalized = normalizePN(pn);
+                stockMap[pn] = stockByNormalized[pn] ?? stockByNormalized[normalized] ?? 0;
+            });
         }
     }
     
@@ -1512,20 +1581,31 @@ export const fetchBarangKeluarLog = async (store: string | null, page = 1, limit
     }
 
     // Fetch current quantities from stock table
+    // Normalize part numbers to handle variations (spaces, case differences)
+    const normalizePN = (pn: string): string => pn?.trim().toUpperCase().replace(/\s+/g, ' ') || '';
     const partNumbers = [...new Set((data || []).map(row => row.part_number).filter(Boolean))];
     let stockMap: Record<string, number> = {};
     
     if (partNumbers.length > 0) {
+        // Query all stock data and match using normalized part numbers
         const { data: stockData } = await supabase
             .from(stockTable)
-            .select('part_number, quantity')
-            .in('part_number', partNumbers);
+            .select('part_number, quantity');
         
         if (stockData) {
-            stockMap = stockData.reduce((acc, item) => {
-                acc[item.part_number] = item.quantity;
+            // Create lookup map using normalized part numbers
+            const stockByNormalized = stockData.reduce((acc, item) => {
+                const normalizedKey = normalizePN(item.part_number);
+                acc[normalizedKey] = item.quantity;
+                acc[item.part_number] = item.quantity; // Also keep original
                 return acc;
             }, {} as Record<string, number>);
+            
+            // Build stockMap matching log part numbers to stock
+            partNumbers.forEach(pn => {
+                const normalized = normalizePN(pn);
+                stockMap[pn] = stockByNormalized[pn] ?? stockByNormalized[normalized] ?? 0;
+            });
         }
     }
     
@@ -1819,20 +1899,31 @@ export const fetchHistoryLogsPaginated = async (
     }
     
     // Fetch current quantities from stock table
+    // Normalize part numbers to handle variations (spaces, case differences)
+    const normalizePN = (pn: string): string => pn?.trim().toUpperCase().replace(/\s+/g, ' ') || '';
     const partNumbers = [...new Set((data || []).map(row => row.part_number).filter(Boolean))];
     let stockMap: Record<string, number> = {};
     
     if (partNumbers.length > 0) {
+      // Query all stock data and match using normalized part numbers
       const { data: stockData } = await supabase
         .from(stockTable)
-        .select('part_number, quantity')
-        .in('part_number', partNumbers);
+        .select('part_number, quantity');
       
       if (stockData) {
-        stockMap = stockData.reduce((acc, item) => {
-          acc[item.part_number] = item.quantity;
+        // Create lookup map using normalized part numbers
+        const stockByNormalized = stockData.reduce((acc, item) => {
+          const normalizedKey = normalizePN(item.part_number);
+          acc[normalizedKey] = item.quantity;
+          acc[item.part_number] = item.quantity; // Also keep original
           return acc;
         }, {} as Record<string, number>);
+        
+        // Build stockMap matching log part numbers to stock
+        partNumbers.forEach(pn => {
+          const normalized = normalizePN(pn);
+          stockMap[pn] = stockByNormalized[pn] ?? stockByNormalized[normalized] ?? 0;
+        });
       }
     }
     

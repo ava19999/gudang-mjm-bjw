@@ -2,8 +2,9 @@
 import React, { useEffect, useState } from 'react';
 import { useStore } from '../../context/StoreContext';
 import { fetchBarangMasukLog, deleteBarangLog } from '../../services/supabaseService';
+import { supabase } from '../../services/supabaseClient';
 import { formatRupiah, formatDate } from '../../utils';
-import { Loader2, RefreshCw, ChevronLeft, ChevronRight, PackageOpen, Trash2, Search, X } from 'lucide-react';
+import { Loader2, RefreshCw, ChevronLeft, ChevronRight, PackageOpen, Trash2, Search, X, Edit2, Save, XCircle } from 'lucide-react';
 
 interface Props { 
     refreshTrigger: number; 
@@ -22,50 +23,30 @@ export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger, onRefres
     const [filterPartNumber, setFilterPartNumber] = useState('');
     const [filterCustomer, setFilterCustomer] = useState('');
     const [deletingId, setDeletingId] = useState<number | null>(null);
+    const [editingId, setEditingId] = useState<number | null>(null);
+    const [editForm, setEditForm] = useState<{
+        quantity: string;
+        harga_satuan: string;
+        customer: string;
+        tempo: string;
+    }>({ quantity: '', harga_satuan: '', customer: '', tempo: '' });
+    const [savingId, setSavingId] = useState<number | null>(null);
     const LIMIT = 10;
 
     const loadData = async () => {
         setLoading(true);
         try {
-            const { data: logs, total } = await fetchBarangMasukLog(selectedStore, page, LIMIT);
+            // Build filters object for server-side filtering
+            const filters = {
+                partNumber: filterPartNumber || undefined,
+                customer: filterCustomer || undefined,
+                dateFrom: filterDateFrom || undefined,
+                dateTo: filterDateTo || undefined,
+            };
             
-            // Apply client-side filters
-            let filteredLogs = logs;
+            const { data: logs, total } = await fetchBarangMasukLog(selectedStore, page, LIMIT, filters);
             
-            if (filterDateFrom || filterDateTo || filterPartNumber || filterCustomer) {
-                filteredLogs = logs.filter((item: any) => {
-                    // Date filtering
-                    if (filterDateFrom) {
-                        const itemDate = new Intl.DateTimeFormat('sv-SE', {
-                            timeZone: 'Asia/Jakarta'
-                        }).format(new Date(item.created_at));
-                        if (itemDate < filterDateFrom) return false;
-                    }
-                    if (filterDateTo) {
-                        const itemDate = new Intl.DateTimeFormat('sv-SE', {
-                            timeZone: 'Asia/Jakarta'
-                        }).format(new Date(item.created_at));
-                        if (itemDate > filterDateTo) return false;
-                    }
-                    
-                    // Part number filtering
-                    if (filterPartNumber && !item.part_number?.toLowerCase().includes(filterPartNumber.toLowerCase())) {
-                        return false;
-                    }
-                    
-                    // Customer filtering
-                    if (filterCustomer) {
-                        const customer = item.customer || item.ecommerce || '';
-                        if (!customer.toLowerCase().includes(filterCustomer.toLowerCase())) {
-                            return false;
-                        }
-                    }
-                    
-                    return true;
-                });
-            }
-            
-            setData(filteredLogs);
+            setData(logs);
             setTotalRows(total);
         } catch (e) {
             console.error("Gagal memuat data barang masuk:", e);
@@ -124,6 +105,98 @@ export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger, onRefres
         setFilterPartNumber('');
         setFilterCustomer('');
         setPage(1);
+    };
+
+    const handleEdit = (item: any) => {
+        setEditingId(item.id);
+        setEditForm({
+            quantity: String(item.quantity || item.qty_masuk || 0),
+            harga_satuan: String(item.harga_satuan || 0),
+            customer: item.customer || '',
+            tempo: item.tempo || 'CASH',
+        });
+    };
+
+    const handleCancelEdit = () => {
+        setEditingId(null);
+        setEditForm({ quantity: '', harga_satuan: '', customer: '', tempo: '' });
+    };
+
+    const handleSaveEdit = async (item: any) => {
+        const newQty = parseInt(editForm.quantity);
+        const newHarga = parseFloat(editForm.harga_satuan) || 0;
+        const oldQty = item.quantity || item.qty_masuk || 0;
+
+        if (!newQty || newQty <= 0) {
+            alert('Qty harus lebih dari 0');
+            return;
+        }
+
+        setSavingId(item.id);
+        try {
+            const tableName = selectedStore === 'mjm' ? 'barang_masuk_mjm' : 'barang_masuk_bjw';
+            const inventoryTable = selectedStore === 'mjm' ? 'inventory_mjm' : 'inventory_bjw';
+            const qtyDiff = newQty - oldQty;
+
+            // Update barang_masuk record
+            const { error: updateError } = await supabase
+                .from(tableName)
+                .update({
+                    qty_masuk: newQty,
+                    harga_satuan: newHarga,
+                    harga_total: newQty * newHarga,
+                    customer: editForm.customer || null,
+                    tempo: editForm.tempo || 'CASH',
+                })
+                .eq('id', item.id);
+
+            if (updateError) throw updateError;
+
+            // Update stock in inventory if qty changed
+            if (qtyDiff !== 0) {
+                const { data: inventoryData } = await supabase
+                    .from(inventoryTable)
+                    .select('stok_akhir')
+                    .eq('part_number', item.part_number)
+                    .single();
+
+                if (inventoryData) {
+                    const currentStock = inventoryData.stok_akhir || 0;
+                    const newStock = Math.max(0, currentStock + qtyDiff);
+
+                    await supabase
+                        .from(inventoryTable)
+                        .update({ stok_akhir: newStock })
+                        .eq('part_number', item.part_number);
+                }
+            }
+
+            // Update local state for immediate feedback
+            setData(prevData => prevData.map(d => 
+                d.id === item.id 
+                    ? { 
+                        ...d, 
+                        quantity: newQty,
+                        qty_masuk: newQty,
+                        harga_satuan: newHarga, 
+                        harga_total: newQty * newHarga,
+                        customer: editForm.customer,
+                        tempo: editForm.tempo,
+                        current_qty: (d.current_qty || 0) + qtyDiff
+                    } 
+                    : d
+            ));
+
+            setEditingId(null);
+            setEditForm({ quantity: '', harga_satuan: '', customer: '', tempo: '' });
+            
+            if (onRefresh) onRefresh();
+        } catch (error) {
+            console.error('Error updating barang masuk:', error);
+            alert('Gagal menyimpan perubahan. Silakan coba lagi.');
+        } finally {
+            setSavingId(null);
+        }
     };
 
     useEffect(() => { setPage(1); }, [selectedStore]);
@@ -230,29 +303,118 @@ export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger, onRefres
                             <tr><td colSpan={10} className="py-8 text-center text-gray-600 italic">Belum ada data barang masuk.</td></tr>
                         ) : (
                             data.map((item, idx) => (
-                                <tr key={item.id || idx} className="hover:bg-gray-800/50 transition-colors">
+                                <tr key={item.id || idx} className={`hover:bg-gray-800/50 transition-colors ${editingId === item.id ? 'bg-gray-800/80' : ''}`}>
                                     <td className="px-3 py-2 text-gray-400 font-mono whitespace-nowrap">{formatDate(item.created_at)}</td>
                                     <td className="px-3 py-2 font-bold text-gray-200 font-mono">{item.part_number}</td>
                                     <td className="px-3 py-2 text-gray-300 max-w-[200px] truncate" title={item.name}>{item.name || '-'}</td>
-                                    <td className="px-3 py-2 text-right font-bold text-green-400">+{item.quantity || item.qty_masuk}</td>
+                                    <td className="px-3 py-2 text-right">
+                                        {editingId === item.id ? (
+                                            <input
+                                                type="number"
+                                                value={editForm.quantity}
+                                                onChange={(e) => setEditForm({ ...editForm, quantity: e.target.value })}
+                                                className="w-20 px-2 py-1 text-xs bg-gray-900 border border-green-500 rounded text-green-400 text-right focus:outline-none"
+                                                min="1"
+                                            />
+                                        ) : (
+                                            <span className="font-bold text-green-400">+{item.quantity || item.qty_masuk}</span>
+                                        )}
+                                    </td>
                                     <td className="px-3 py-2 text-right font-bold text-cyan-400">{item.current_qty ?? 0}</td>
-                                    <td className="px-3 py-2 text-right text-gray-400 font-mono">{formatRupiah(item.harga_satuan)}</td>
-                                    <td className="px-3 py-2 text-right text-orange-300 font-mono">{formatRupiah(item.harga_total)}</td>
-                                    <td className="px-3 py-2 text-gray-400">{item.customer && item.customer !== '-' ? item.customer : (item.ecommerce || '-')}</td>
-                                    <td className="px-3 py-2 text-gray-500">{item.tempo || '-'}</td>
+                                    <td className="px-3 py-2 text-right">
+                                        {editingId === item.id ? (
+                                            <input
+                                                type="number"
+                                                value={editForm.harga_satuan}
+                                                onChange={(e) => setEditForm({ ...editForm, harga_satuan: e.target.value })}
+                                                className="w-24 px-2 py-1 text-xs bg-gray-900 border border-orange-500 rounded text-orange-300 text-right focus:outline-none"
+                                                min="0"
+                                            />
+                                        ) : (
+                                            <span className="text-gray-400 font-mono">{formatRupiah(item.harga_satuan)}</span>
+                                        )}
+                                    </td>
+                                    <td className="px-3 py-2 text-right text-orange-300 font-mono">
+                                        {editingId === item.id 
+                                            ? formatRupiah(parseInt(editForm.quantity || '0') * parseFloat(editForm.harga_satuan || '0'))
+                                            : formatRupiah(item.harga_total)
+                                        }
+                                    </td>
+                                    <td className="px-3 py-2">
+                                        {editingId === item.id ? (
+                                            <input
+                                                type="text"
+                                                value={editForm.customer}
+                                                onChange={(e) => setEditForm({ ...editForm, customer: e.target.value })}
+                                                className="w-28 px-2 py-1 text-xs bg-gray-900 border border-gray-500 rounded text-gray-300 focus:outline-none"
+                                                placeholder="Customer..."
+                                            />
+                                        ) : (
+                                            <span className="text-gray-400">{item.customer && item.customer !== '-' ? item.customer : (item.ecommerce || '-')}</span>
+                                        )}
+                                    </td>
+                                    <td className="px-3 py-2">
+                                        {editingId === item.id ? (
+                                            <select
+                                                value={editForm.tempo}
+                                                onChange={(e) => setEditForm({ ...editForm, tempo: e.target.value })}
+                                                className="w-20 px-2 py-1 text-xs bg-gray-900 border border-gray-500 rounded text-gray-300 focus:outline-none"
+                                            >
+                                                <option value="CASH">CASH</option>
+                                                <option value="TEMPO">TEMPO</option>
+                                            </select>
+                                        ) : (
+                                            <span className="text-gray-500">{item.tempo || '-'}</span>
+                                        )}
+                                    </td>
                                     <td className="px-3 py-2 text-center">
-                                        <button
-                                            onClick={() => handleDelete(item)}
-                                            disabled={deletingId === item.id}
-                                            className="p-1 hover:bg-red-900/30 rounded text-red-500 hover:text-red-400 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                                            title="Hapus & Rollback Stok"
-                                        >
-                                            {deletingId === item.id ? (
-                                                <Loader2 size={14} className="animate-spin" />
-                                            ) : (
-                                                <Trash2 size={14} />
-                                            )}
-                                        </button>
+                                        {editingId === item.id ? (
+                                            <div className="flex items-center justify-center gap-1">
+                                                <button
+                                                    onClick={() => handleSaveEdit(item)}
+                                                    disabled={savingId === item.id}
+                                                    className="p-1 hover:bg-green-900/30 rounded text-green-500 hover:text-green-400 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                                    title="Simpan Perubahan"
+                                                >
+                                                    {savingId === item.id ? (
+                                                        <Loader2 size={14} className="animate-spin" />
+                                                    ) : (
+                                                        <Save size={14} />
+                                                    )}
+                                                </button>
+                                                <button
+                                                    onClick={handleCancelEdit}
+                                                    disabled={savingId === item.id}
+                                                    className="p-1 hover:bg-gray-700 rounded text-gray-400 hover:text-gray-300 disabled:opacity-50 transition-colors"
+                                                    title="Batal"
+                                                >
+                                                    <XCircle size={14} />
+                                                </button>
+                                            </div>
+                                        ) : (
+                                            <div className="flex items-center justify-center gap-1">
+                                                <button
+                                                    onClick={() => handleEdit(item)}
+                                                    disabled={editingId !== null}
+                                                    className="p-1 hover:bg-blue-900/30 rounded text-blue-400 hover:text-blue-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                                    title="Edit"
+                                                >
+                                                    <Edit2 size={14} />
+                                                </button>
+                                                <button
+                                                    onClick={() => handleDelete(item)}
+                                                    disabled={deletingId === item.id || editingId !== null}
+                                                    className="p-1 hover:bg-red-900/30 rounded text-red-500 hover:text-red-400 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                                    title="Hapus & Rollback Stok"
+                                                >
+                                                    {deletingId === item.id ? (
+                                                        <Loader2 size={14} className="animate-spin" />
+                                                    ) : (
+                                                        <Trash2 size={14} />
+                                                    )}
+                                                </button>
+                                            </div>
+                                        )}
                                     </td>
                                 </tr>
                             ))

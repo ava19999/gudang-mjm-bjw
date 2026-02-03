@@ -1346,7 +1346,10 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
               namaBase = partInfo.name || '';
            }
            
-           const qty = Number(item.jumlah || item.quantity || 0);
+           // Jika part_number kosong, set qty ke 0 (default)
+           // Jika ada part_number, gunakan qty dari database
+           const rawQty = Number(item.jumlah || item.quantity || 0);
+           const qty = item.part_number ? rawQty : 0;
            const stockValid = qty > 0 ? stock >= qty : true; // Jika qty 0, tidak perlu cek stok
            
            // CHECK 3: Part number belum diisi - CEK INI DULU sebelum stok

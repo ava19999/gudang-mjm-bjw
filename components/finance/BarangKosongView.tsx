@@ -1,26 +1,78 @@
 // FILE: src/components/finance/BarangKosongView.tsx
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
-  PackageX, Search, RefreshCw, ChevronDown, ChevronUp, Camera, 
-  Plus, Minus, ShoppingCart, Check, X, Truck, Package, History,
-  ClipboardList, Send, Trash2, Clock, CheckCircle, AlertCircle,
-  ChevronLeft, ChevronRight, Filter, Download, Copy, Eye
+  PackageX, Search, RefreshCw, ChevronDown, ChevronUp,
+  Plus, Minus, ShoppingCart, X, Truck, Package,
+  Clock, CreditCard, User, Layers, History, Loader2,
+  FileText, Printer, Download, ClipboardList, CheckCircle, Eye, Share2, Image
 } from 'lucide-react';
 import { useStore } from '../../context/StoreContext';
-import { 
-  fetchLowStockItems, 
-  getLowStockGroupedBySupplier,
-  fetchSupplierHistoryForItem,
-  saveSupplierOrder,
-  fetchSupplierOrders,
-  updateSupplierOrderStatus,
-  deleteSupplierOrder,
-  LowStockItem, 
-  SupplierOrderGroup, 
-  SupplierHistory,
-  SupplierOrder,
-  LowStockOrderItem
-} from '../../services/supabaseService';
+import { supabase } from '../../services/supabaseClient';
+
+// Types
+interface SupplierItem {
+  part_number: string;
+  nama_barang: string;
+  current_stock: number;
+  last_price: number;
+  last_order_date: string;
+  tempo: string;
+  brand?: string;
+  application?: string;
+}
+
+interface SupplierGroup {
+  supplier: string;
+  items: SupplierItem[];
+  totalItems: number;
+}
+
+interface CartItem {
+  part_number: string;
+  nama_barang: string;
+  supplier: string;
+  qty: number;
+  price: number;
+  tempo: string;
+  brand?: string;
+  application?: string;
+}
+
+interface PurchaseHistory {
+  id: number;
+  part_number: string;
+  nama_barang: string;
+  customer: string;
+  qty_masuk: number;
+  harga_satuan: number;
+  harga_total: number;
+  tempo: string;
+  created_at: string;
+}
+
+interface SupplierOrder {
+  id: number;
+  po_number: string;
+  supplier: string;
+  store: string;
+  tempo: string;
+  total_items: number;
+  total_value: number;
+  notes: string;
+  status: string;
+  created_at: string;
+  items?: SupplierOrderItem[];
+}
+
+interface SupplierOrderItem {
+  id: number;
+  order_id: number;
+  part_number: string;
+  nama_barang: string;
+  qty: number;
+  harga_satuan: number;
+  harga_total: number;
+}
 
 // Toast Component
 const Toast: React.FC<{ msg: string; type: 'success' | 'error'; onClose: () => void }> = ({ msg, type, onClose }) => (
@@ -42,441 +94,494 @@ const formatDate = (dateStr: string) => {
   return date.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' });
 };
 
-// Supplier Card Component - untuk screenshot dan kirim ke supplier
-interface SupplierCardProps {
-  supplier: string;
-  items: LowStockOrderItem[];
-  selectedItems: Set<string>;
-  orderQtys: Record<string, number>;
-  onToggleItem: (partNumber: string) => void;
-  onQtyChange: (partNumber: string, qty: number) => void;
-  onSelectAll: () => void;
-  onDeselectAll: () => void;
-  onViewHistory: (partNumber: string) => void;
-  cardRef?: React.RefObject<HTMLDivElement>;
-  isExpanded: boolean;
-  onToggleExpand: () => void;
-}
-
-const SupplierCard: React.FC<SupplierCardProps> = ({
-  supplier,
-  items,
-  selectedItems,
-  orderQtys,
-  onToggleItem,
-  onQtyChange,
-  onSelectAll,
-  onDeselectAll,
-  onViewHistory,
-  cardRef,
-  isExpanded,
-  onToggleExpand
-}) => {
-  const selectedCount = items.filter(i => selectedItems.has(i.partNumber)).length;
-  const totalValue = items
-    .filter(i => selectedItems.has(i.partNumber))
-    .reduce((sum, i) => sum + (orderQtys[i.partNumber] || 0) * i.lastPrice, 0);
-
-  return (
-    <div 
-      ref={cardRef}
-      className="bg-gray-800 border border-gray-700 rounded-2xl overflow-hidden shadow-lg"
-    >
-      {/* Supplier Header */}
-      <div 
-        className="bg-gradient-to-r from-blue-900/50 to-purple-900/50 p-4 cursor-pointer"
-        onClick={onToggleExpand}
-      >
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="bg-blue-600 p-2 rounded-xl">
-              <Truck size={20} className="text-white" />
-            </div>
-            <div>
-              <h3 className="font-bold text-lg text-white">{supplier}</h3>
-              <p className="text-xs text-gray-400">{items.length} barang perlu diorder</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-3">
-            {selectedCount > 0 && (
-              <span className="bg-green-600 text-white text-xs font-bold px-2 py-1 rounded-full">
-                {selectedCount} dipilih
-              </span>
-            )}
-            {isExpanded ? <ChevronUp size={20} className="text-gray-400" /> : <ChevronDown size={20} className="text-gray-400" />}
-          </div>
-        </div>
-      </div>
-
-      {/* Expanded Content */}
-      {isExpanded && (
-        <div className="p-4">
-          {/* Action Buttons */}
-          <div className="flex gap-2 mb-4">
-            <button
-              onClick={onSelectAll}
-              className="flex-1 py-2 bg-blue-600/20 text-blue-400 rounded-xl text-xs font-bold hover:bg-blue-600/30 flex items-center justify-center gap-1"
-            >
-              <Check size={14} /> Pilih Semua
-            </button>
-            <button
-              onClick={onDeselectAll}
-              className="flex-1 py-2 bg-gray-700 text-gray-300 rounded-xl text-xs font-bold hover:bg-gray-600 flex items-center justify-center gap-1"
-            >
-              <X size={14} /> Batal Semua
-            </button>
-          </div>
-
-          {/* Items Table */}
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="bg-gray-900 text-gray-400">
-                  <th className="p-2 text-left w-8">
-                    <Check size={12} />
-                  </th>
-                  <th className="p-2 text-left">Part Number</th>
-                  <th className="p-2 text-left">Nama Barang</th>
-                  <th className="p-2 text-center">Stok</th>
-                  <th className="p-2 text-center">Rak</th>
-                  <th className="p-2 text-right">
-                    <span className="text-green-400">CASH</span>
-                  </th>
-                  <th className="p-2 text-right">
-                    <span className="text-orange-400">TEMPO</span>
-                  </th>
-                  <th className="p-2 text-center">Qty Order</th>
-                  <th className="p-2 text-right">Subtotal</th>
-                  <th className="p-2 text-center">Riwayat</th>
-                </tr>
-              </thead>
-              <tbody>
-                {items.map((item, idx) => {
-                  const isSelected = selectedItems.has(item.partNumber);
-                  const qty = orderQtys[item.partNumber] || 0;
-                  // Use the higher of cash or tempo price for subtotal calculation
-                  const activePrice = item.lastPriceCash > 0 ? item.lastPriceCash : item.lastPriceTempo;
-                  const subtotal = qty * activePrice;
-
-                  return (
-                    <tr 
-                      key={item.partNumber}
-                      className={`border-b border-gray-700 hover:bg-gray-700/50 ${isSelected ? 'bg-blue-900/20' : ''}`}
-                    >
-                      <td className="p-2">
-                        <button
-                          onClick={() => onToggleItem(item.partNumber)}
-                          className={`w-5 h-5 rounded flex items-center justify-center ${isSelected ? 'bg-green-600 text-white' : 'bg-gray-700 text-gray-500'}`}
-                        >
-                          {isSelected && <Check size={12} />}
-                        </button>
-                      </td>
-                      <td className="p-2">
-                        <span className="font-mono text-blue-400 font-bold">{item.partNumber}</span>
-                      </td>
-                      <td className="p-2">
-                        <div className="text-white font-medium">{item.name}</div>
-                        {(item.brand || item.application) && (
-                          <div className="text-[10px] text-gray-500">
-                            {item.brand && <span className="text-purple-400">{item.brand}</span>}
-                            {item.brand && item.application && ' • '}
-                            {item.application && <span className="text-green-400">{item.application}</span>}
-                          </div>
-                        )}
-                      </td>
-                      <td className="p-2 text-center">
-                        <span className={`font-bold ${item.currentStock === 0 ? 'text-red-400' : item.currentStock < 3 ? 'text-yellow-400' : 'text-gray-300'}`}>
-                          {item.currentStock}
-                        </span>
-                      </td>
-                      <td className="p-2 text-center text-gray-400">{item.shelf || '-'}</td>
-                      <td className="p-2 text-right">
-                        {item.lastPriceCash > 0 ? (
-                          <span className="text-green-400 font-medium">{formatCurrency(item.lastPriceCash)}</span>
-                        ) : (
-                          <span className="text-gray-600">-</span>
-                        )}
-                      </td>
-                      <td className="p-2 text-right">
-                        {item.lastPriceTempo > 0 ? (
-                          <span className="text-orange-400 font-medium">{formatCurrency(item.lastPriceTempo)}</span>
-                        ) : (
-                          <span className="text-gray-600">-</span>
-                        )}
-                      </td>
-                      <td className="p-2">
-                        <div className="flex items-center justify-center gap-1">
-                          <button
-                            onClick={() => onQtyChange(item.partNumber, Math.max(0, qty - 1))}
-                            className="w-6 h-6 bg-gray-700 hover:bg-gray-600 rounded flex items-center justify-center text-gray-400"
-                          >
-                            <Minus size={12} />
-                          </button>
-                          <input
-                            type="number"
-                            value={qty}
-                            onChange={(e) => onQtyChange(item.partNumber, Math.max(0, parseInt(e.target.value) || 0))}
-                            className="w-12 h-6 bg-gray-900 border border-gray-600 rounded text-center text-white text-xs"
-                          />
-                          <button
-                            onClick={() => onQtyChange(item.partNumber, qty + 1)}
-                            className="w-6 h-6 bg-gray-700 hover:bg-gray-600 rounded flex items-center justify-center text-gray-400"
-                          >
-                            <Plus size={12} />
-                          </button>
-                        </div>
-                      </td>
-                      <td className="p-2 text-right text-yellow-400 font-medium">
-                        {subtotal > 0 ? formatCurrency(subtotal) : '-'}
-                      </td>
-                      <td className="p-2 text-center">
-                        <button
-                          onClick={() => onViewHistory(item.partNumber)}
-                          className="p-1 bg-purple-600/20 hover:bg-purple-600/30 rounded text-purple-400"
-                          title="Lihat Riwayat Supplier"
-                        >
-                          <History size={14} />
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Summary */}
-          {selectedCount > 0 && (
-            <div className="mt-4 p-3 bg-gray-900 rounded-xl flex items-center justify-between">
-              <div className="text-sm text-gray-400">
-                <span className="font-bold text-white">{selectedCount}</span> barang dipilih
-              </div>
-              <div className="text-sm">
-                <span className="text-gray-400">Total Estimasi: </span>
-                <span className="font-bold text-green-400">{formatCurrency(totalValue)}</span>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-};
-
-// Screenshot-ready Order Card for sending to supplier
-interface OrderPreviewCardProps {
-  supplier: string;
-  items: { partNumber: string; name: string; qty: number; price: number }[];
-  storeName: string;
-  date: string;
-}
-
-const OrderPreviewCard: React.FC<OrderPreviewCardProps> = ({ supplier, items, storeName, date }) => {
-  const total = items.reduce((sum, i) => sum + i.qty * i.price, 0);
-  const totalQty = items.reduce((sum, i) => sum + i.qty, 0);
-
-  return (
-    <div className="bg-white text-black p-6 rounded-xl shadow-xl max-w-2xl mx-auto" id="order-preview">
-      {/* Header */}
-      <div className="border-b-2 border-gray-300 pb-4 mb-4">
-        <div className="flex justify-between items-start">
-          <div>
-            <h2 className="text-2xl font-bold text-gray-800">ORDER BARANG</h2>
-            <p className="text-gray-600 text-sm mt-1">{storeName}</p>
-          </div>
-          <div className="text-right">
-            <p className="text-sm text-gray-500">Tanggal</p>
-            <p className="font-bold">{date}</p>
-          </div>
-        </div>
-      </div>
-
-      {/* Supplier Info */}
-      <div className="bg-blue-50 p-3 rounded-lg mb-4">
-        <p className="text-sm text-gray-600">Kepada Supplier:</p>
-        <p className="text-xl font-bold text-blue-800">{supplier}</p>
-      </div>
-
-      {/* Items Table */}
-      <table className="w-full text-sm mb-4">
-        <thead>
-          <tr className="bg-gray-100">
-            <th className="p-2 text-left border">No</th>
-            <th className="p-2 text-left border">Part Number</th>
-            <th className="p-2 text-left border">Nama Barang</th>
-            <th className="p-2 text-center border">Qty</th>
-            <th className="p-2 text-right border">Harga</th>
-            <th className="p-2 text-right border">Subtotal</th>
-          </tr>
-        </thead>
-        <tbody>
-          {items.map((item, idx) => (
-            <tr key={item.partNumber} className="hover:bg-gray-50">
-              <td className="p-2 border text-center">{idx + 1}</td>
-              <td className="p-2 border font-mono font-bold">{item.partNumber}</td>
-              <td className="p-2 border">{item.name}</td>
-              <td className="p-2 border text-center font-bold">{item.qty}</td>
-              <td className="p-2 border text-right">{formatCurrency(item.price)}</td>
-              <td className="p-2 border text-right font-medium">{formatCurrency(item.qty * item.price)}</td>
-            </tr>
-          ))}
-        </tbody>
-        <tfoot>
-          <tr className="bg-gray-100 font-bold">
-            <td colSpan={3} className="p-2 border text-right">TOTAL:</td>
-            <td className="p-2 border text-center">{totalQty}</td>
-            <td className="p-2 border"></td>
-            <td className="p-2 border text-right text-blue-800">{formatCurrency(total)}</td>
-          </tr>
-        </tfoot>
-      </table>
-
-      {/* Footer */}
-      <div className="text-center text-gray-500 text-xs mt-4 pt-4 border-t">
-        <p>Terima kasih atas kerjasama yang baik</p>
-      </div>
-    </div>
-  );
-};
-
-// Supplier History Modal
-interface HistoryModalProps {
-  isOpen: boolean;
+// Purchase History Modal Component
+const PurchaseHistoryModal: React.FC<{
   partNumber: string;
-  itemName: string;
-  history: SupplierHistory[];
+  namaBarang: string;
+  store: string | null;
   onClose: () => void;
-}
-
-const HistoryModal: React.FC<HistoryModalProps> = ({ isOpen, partNumber, itemName, history, onClose }) => {
-  if (!isOpen) return null;
-
+}> = ({ partNumber, namaBarang, store, onClose }) => {
+  const [loading, setLoading] = useState(true);
+  const [history, setHistory] = useState<PurchaseHistory[]>([]);
+  
+  useEffect(() => {
+    const fetchHistory = async () => {
+      setLoading(true);
+      try {
+        const tableMasuk = store === 'bjw' ? 'barang_masuk_bjw' : 'barang_masuk_mjm';
+        
+        const { data, error } = await supabase
+          .from(tableMasuk)
+          .select('id, part_number, nama_barang, customer, qty_masuk, harga_satuan, harga_total, tempo, created_at')
+          .eq('part_number', partNumber)
+          .order('created_at', { ascending: false })
+          .limit(50);
+        
+        if (error) throw error;
+        setHistory(data || []);
+      } catch (err) {
+        console.error('Error fetching purchase history:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    fetchHistory();
+  }, [partNumber, store]);
+  
   return (
-    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <div className="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-lg max-h-[80vh] overflow-hidden">
-        <div className="p-4 border-b border-gray-700 flex justify-between items-center">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm animate-in fade-in">
+      <div className="bg-gray-800 rounded-2xl w-full max-w-4xl max-h-[80vh] flex flex-col border border-gray-700 shadow-2xl m-4">
+        {/* Header */}
+        <div className="p-4 border-b border-gray-700 flex justify-between items-center bg-gray-900/50 rounded-t-2xl">
           <div>
-            <h3 className="font-bold text-white flex items-center gap-2">
-              <History className="text-purple-400" size={20} /> Riwayat Supplier
+            <h3 className="font-bold text-gray-100 flex items-center gap-2">
+              <History className="text-blue-400" size={20} />
+              Riwayat Pembelian
             </h3>
-            <p className="text-xs text-gray-400 mt-1">
-              <span className="text-blue-400 font-mono">{partNumber}</span> - {itemName}
+            <p className="text-sm text-gray-400 mt-1">
+              <span className="font-mono text-blue-400">{partNumber}</span> - {namaBarang}
             </p>
           </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-white">
+          <button onClick={onClose} className="p-2 hover:bg-gray-700 rounded-full transition-colors">
             <X size={20} />
           </button>
         </div>
-
-        <div className="p-4 overflow-y-auto max-h-[60vh]">
-          {history.length === 0 ? (
-            <div className="text-center py-8 text-gray-500">
-              <Package size={40} className="mx-auto mb-2 opacity-50" />
-              <p>Belum ada riwayat pembelian</p>
+        
+        {/* Content */}
+        <div className="flex-1 overflow-auto p-4">
+          {loading ? (
+            <div className="flex flex-col items-center justify-center py-10">
+              <Loader2 className="animate-spin text-blue-500 mb-3" size={32} />
+              <p className="text-gray-400">Memuat riwayat...</p>
+            </div>
+          ) : history.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-10">
+              <History className="text-gray-600 mb-3" size={48} />
+              <p className="text-gray-400">Tidak ada riwayat pembelian</p>
             </div>
           ) : (
-            <div className="space-y-3">
-              {history.map((h, idx) => (
-                <div 
-                  key={h.supplier}
-                  className={`p-3 rounded-xl border ${idx === 0 ? 'bg-blue-900/20 border-blue-700' : 'bg-gray-800 border-gray-700'}`}
-                >
-                  <div className="flex justify-between items-start mb-2">
-                    <div className="flex items-center gap-2">
-                      <Truck size={16} className={idx === 0 ? 'text-blue-400' : 'text-gray-400'} />
-                      <span className="font-bold text-white">{h.supplier}</span>
-                      {idx === 0 && (
-                        <span className="text-[10px] bg-blue-600 text-white px-2 py-0.5 rounded-full">Terakhir</span>
-                      )}
-                    </div>
-                    <span className="text-xs text-gray-400">{formatDate(h.lastDate)}</span>
-                  </div>
-                  <div className="grid grid-cols-4 gap-2 text-xs">
-                    <div className="bg-gray-900 p-2 rounded-lg">
-                      <p className="text-gray-500">Harga CASH</p>
-                      <p className={`font-bold ${h.lastPriceCash > 0 ? 'text-green-400' : 'text-gray-600'}`}>
-                        {h.lastPriceCash > 0 ? formatCurrency(h.lastPriceCash) : '-'}
-                      </p>
-                    </div>
-                    <div className="bg-gray-900 p-2 rounded-lg">
-                      <p className="text-gray-500">Harga TEMPO</p>
-                      <p className={`font-bold ${h.lastPriceTempo > 0 ? 'text-orange-400' : 'text-gray-600'}`}>
-                        {h.lastPriceTempo > 0 ? formatCurrency(h.lastPriceTempo) : '-'}
-                      </p>
-                    </div>
-                    <div className="bg-gray-900 p-2 rounded-lg">
-                      <p className="text-gray-500">Total Qty</p>
-                      <p className="font-bold text-white">{h.totalQtyPurchased} pcs</p>
-                    </div>
-                    <div className="bg-gray-900 p-2 rounded-lg">
-                      <p className="text-gray-500">Transaksi</p>
-                      <p className="font-bold text-white">{h.purchaseCount}x</p>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
+            <table className="w-full">
+              <thead className="bg-gray-900/50 sticky top-0">
+                <tr className="text-xs text-gray-400 uppercase">
+                  <th className="px-3 py-2 text-left">Tanggal</th>
+                  <th className="px-3 py-2 text-left">Supplier</th>
+                  <th className="px-3 py-2 text-center">Qty</th>
+                  <th className="px-3 py-2 text-right">Harga Satuan</th>
+                  <th className="px-3 py-2 text-right">Total</th>
+                  <th className="px-3 py-2 text-center">Tempo</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-700">
+                {history.map((item, idx) => (
+                  <tr key={item.id || idx} className="hover:bg-gray-700/30 transition-colors">
+                    <td className="px-3 py-2 text-sm text-gray-300">
+                      {formatDate(item.created_at)}
+                    </td>
+                    <td className="px-3 py-2 text-sm text-gray-200 font-semibold">
+                      {item.customer || '-'}
+                    </td>
+                    <td className="px-3 py-2 text-center">
+                      <span className="text-green-400 font-bold">+{item.qty_masuk}</span>
+                    </td>
+                    <td className="px-3 py-2 text-right text-sm text-gray-300">
+                      {formatCurrency(item.harga_satuan || 0)}
+                    </td>
+                    <td className="px-3 py-2 text-right text-sm font-bold text-white">
+                      {formatCurrency(item.harga_total || 0)}
+                    </td>
+                    <td className="px-3 py-2 text-center">
+                      <span className={`px-2 py-0.5 rounded text-xs font-bold ${
+                        item.tempo === 'CASH' 
+                          ? 'bg-green-900/30 text-green-400' 
+                          : 'bg-orange-900/30 text-orange-400'
+                      }`}>
+                        {item.tempo || '-'}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           )}
+        </div>
+        
+        {/* Footer */}
+        <div className="p-4 border-t border-gray-700 bg-gray-900/50 rounded-b-2xl flex justify-between items-center">
+          <span className="text-sm text-gray-400">
+            {history.length} transaksi ditemukan
+          </span>
+          <button
+            onClick={onClose}
+            className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-colors"
+          >
+            Tutup
+          </button>
         </div>
       </div>
     </div>
   );
 };
 
-// Order Preview Modal
-interface OrderPreviewModalProps {
-  isOpen: boolean;
+// Purchase Order Preview Modal (for print/download)
+const PurchaseOrderPreview: React.FC<{
   supplier: string;
-  items: { partNumber: string; name: string; qty: number; price: number }[];
-  storeName: string;
+  items: CartItem[];
+  poNumber: string;
+  store: string | null;
   onClose: () => void;
-  onConfirm: () => void;
-  onCopyText: () => void;
-}
-
-const OrderPreviewModal: React.FC<OrderPreviewModalProps> = ({ 
-  isOpen, supplier, items, storeName, onClose, onConfirm, onCopyText 
-}) => {
-  if (!isOpen) return null;
-
-  const date = new Date().toLocaleDateString('id-ID', { 
-    day: '2-digit', month: 'long', year: 'numeric' 
-  });
-
+  onConfirm: (notes: string) => void;
+  saving: boolean;
+}> = ({ supplier, items, poNumber, store, onClose, onConfirm, saving }) => {
+  const printRef = useRef<HTMLDivElement>(null);
+  const [notes, setNotes] = useState('');
+  const [saving2, setSaving2] = useState(false);
+  const today = new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
+  const storeName = store === 'bjw' ? 'BJW AUTOPART' : 'MJMAUTOPART 86';
+  
+  // Generate the PO HTML for print/save
+  const generatePOHTML = () => {
+    const sortedItemsLocal = [...items].sort((a, b) => b.qty - a.qty);
+    return `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Purchase Order - ${poNumber}</title>
+        <style>
+          * { margin: 0; padding: 0; box-sizing: border-box; }
+          body { font-family: Arial, sans-serif; padding: 30px; background: white; color: #000; }
+          .po-container { max-width: 700px; margin: 0 auto; }
+          .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 30px; }
+          .company-name { font-size: 26px; font-weight: bold; color: #1a365d; }
+          .po-title { color: #2563eb; font-size: 22px; font-weight: bold; text-align: right; }
+          .po-info { text-align: right; font-size: 13px; color: #000; margin-top: 8px; }
+          .po-info-row { display: flex; justify-content: flex-end; gap: 10px; margin: 3px 0; }
+          .po-info-label { color: #666; font-weight: 500; }
+          .po-info-value { font-weight: bold; color: #1a365d; }
+          .vendor-section { background: linear-gradient(135deg, #1e40af, #3b82f6); color: white; padding: 10px 15px; font-weight: bold; font-size: 13px; margin: 25px 0 0; border-radius: 4px 4px 0 0; }
+          .vendor-name { padding: 12px 15px; font-weight: bold; color: #1a365d; font-size: 16px; background: #f8fafc; border: 1px solid #e2e8f0; border-top: none; }
+          .items-table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+          .items-table th { background: linear-gradient(135deg, #1e40af, #3b82f6); color: white; padding: 12px 15px; text-align: left; font-size: 12px; font-weight: bold; text-transform: uppercase; }
+          .items-table th.qty { text-align: center; width: 80px; }
+          .items-table td { padding: 10px 15px; border-bottom: 1px solid #e2e8f0; font-size: 12px; color: #000; background: white; }
+          .items-table tr:nth-child(even) td { background: #f8fafc; }
+          .items-table .pn { font-weight: bold; color: #1e40af; font-size: 13px; }
+          .items-table .name { color: #374151; margin-top: 2px; }
+          .items-table .brand { color: #6b7280; font-size: 11px; font-style: italic; margin-top: 2px; }
+          .items-table .qty-cell { text-align: center; font-weight: bold; font-size: 15px; color: #1a365d; }
+          .notes-section { margin-top: 30px; border: 2px solid #3b82f6; border-radius: 8px; overflow: hidden; }
+          .notes-title { background: linear-gradient(135deg, #1e40af, #3b82f6); color: white; padding: 8px 15px; font-size: 12px; font-weight: bold; font-style: italic; }
+          .notes-content { padding: 15px; font-size: 13px; color: #374151; min-height: 60px; white-space: pre-wrap; background: #f8fafc; }
+        </style>
+      </head>
+      <body>
+        <div class="po-container">
+          <div class="header">
+            <div class="company-name">${storeName}</div>
+            <div>
+              <div class="po-title">PURCHASE ORDER</div>
+              <div class="po-info">
+                <div class="po-info-row"><span class="po-info-label">DATE</span><span class="po-info-value">${today}</span></div>
+                <div class="po-info-row"><span class="po-info-label">P.O. #</span><span class="po-info-value">(${poNumber})</span></div>
+              </div>
+            </div>
+          </div>
+          
+          <div class="vendor-section">VENDOR</div>
+          <div class="vendor-name">${supplier}</div>
+          
+          <table class="items-table">
+            <thead>
+              <tr>
+                <th>PART NUMBER / NAMA BARANG / APLIKASI</th>
+                <th class="qty">QTY</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${sortedItemsLocal.map(item => `
+                <tr>
+                  <td>
+                    <div class="pn">${item.part_number}</div>
+                    <div class="name">${item.nama_barang}</div>
+                    ${item.brand || item.application ? `<div class="brand">${item.brand && item.brand !== '-' ? `Brand: ${item.brand}` : ''}${item.brand && item.brand !== '-' && item.application && item.application !== '-' ? ' | ' : ''}${item.application && item.application !== '-' ? `App: ${item.application}` : ''}</div>` : ''}
+                  </td>
+                  <td class="qty-cell">${item.qty}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+          
+          <div class="notes-section">
+            <div class="notes-title">Other Comments or Special Instructions</div>
+            <div class="notes-content">${notes || ''}</div>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+  };
+  
+  const handlePrint = () => {
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) return;
+    
+    printWindow.document.write(generatePOHTML());
+    printWindow.document.close();
+    printWindow.print();
+  };
+  
+  // Save as Image function
+  const handleSaveImage = async () => {
+    setSaving2(true);
+    try {
+      // Create a hidden iframe to render the PO
+      const iframe = document.createElement('iframe');
+      iframe.style.position = 'absolute';
+      iframe.style.left = '-9999px';
+      iframe.style.width = '800px';
+      iframe.style.height = '1200px';
+      document.body.appendChild(iframe);
+      
+      const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+      if (!iframeDoc) throw new Error('Cannot access iframe');
+      
+      iframeDoc.open();
+      iframeDoc.write(generatePOHTML());
+      iframeDoc.close();
+      
+      // Wait for content to render
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      // Use html2canvas via dynamic import
+      const html2canvas = (await import('html2canvas')).default;
+      const canvas = await html2canvas(iframeDoc.body, {
+        backgroundColor: '#ffffff',
+        scale: 2,
+        useCORS: true,
+        logging: false
+      });
+      
+      // Remove iframe
+      document.body.removeChild(iframe);
+      
+      // Convert to blob and download
+      canvas.toBlob((blob) => {
+        if (!blob) return;
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${poNumber}.png`;
+        a.click();
+        URL.revokeObjectURL(url);
+      }, 'image/png');
+      
+    } catch (error) {
+      console.error('Error saving image:', error);
+      alert('Gagal menyimpan gambar. Silakan gunakan Print dan save as PDF.');
+    } finally {
+      setSaving2(false);
+    }
+  };
+  
+  // Share function
+  const handleShare = async () => {
+    setSaving2(true);
+    try {
+      // Create a hidden iframe to render the PO
+      const iframe = document.createElement('iframe');
+      iframe.style.position = 'absolute';
+      iframe.style.left = '-9999px';
+      iframe.style.width = '800px';
+      iframe.style.height = '1200px';
+      document.body.appendChild(iframe);
+      
+      const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+      if (!iframeDoc) throw new Error('Cannot access iframe');
+      
+      iframeDoc.open();
+      iframeDoc.write(generatePOHTML());
+      iframeDoc.close();
+      
+      // Wait for content to render
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      // Use html2canvas via dynamic import
+      const html2canvas = (await import('html2canvas')).default;
+      const canvas = await html2canvas(iframeDoc.body, {
+        backgroundColor: '#ffffff',
+        scale: 2,
+        useCORS: true,
+        logging: false
+      });
+      
+      // Remove iframe
+      document.body.removeChild(iframe);
+      
+      // Convert to blob for sharing
+      const blob = await new Promise<Blob | null>((resolve) => {
+        canvas.toBlob((b) => resolve(b), 'image/png');
+      });
+      
+      if (!blob) throw new Error('Failed to create image');
+      
+      const file = new File([blob], `${poNumber}.png`, { type: 'image/png' });
+      
+      // Check if Web Share API is supported
+      if (navigator.share && navigator.canShare({ files: [file] })) {
+        await navigator.share({
+          title: `Purchase Order - ${poNumber}`,
+          text: `PO ${poNumber} untuk ${supplier}`,
+          files: [file]
+        });
+      } else {
+        // Fallback: download the image
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${poNumber}.png`;
+        a.click();
+        URL.revokeObjectURL(url);
+        alert('Share tidak didukung di browser ini. Gambar telah diunduh.');
+      }
+      
+    } catch (error: any) {
+      if (error.name !== 'AbortError') {
+        console.error('Error sharing:', error);
+        alert('Gagal share gambar.');
+      }
+    } finally {
+      setSaving2(false);
+    }
+  };
+  
+  // Group items by part_number first part (brand identifier if any)
+  const sortedItems = [...items].sort((a, b) => a.qty - b.qty).reverse();
+  
   return (
-    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
-      <div className="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-3xl my-8">
-        <div className="p-4 border-b border-gray-700 flex justify-between items-center sticky top-0 bg-gray-900 z-10">
-          <h3 className="font-bold text-white flex items-center gap-2">
-            <Send className="text-green-400" size={20} /> Preview Order
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm animate-in fade-in">
+      <div className="bg-white rounded-2xl w-full max-w-3xl max-h-[90vh] flex flex-col shadow-2xl m-4">
+        {/* Preview Header */}
+        <div className="p-4 border-b flex justify-between items-center bg-gray-100 rounded-t-2xl">
+          <h3 className="font-bold text-gray-800 flex items-center gap-2">
+            <FileText className="text-blue-600" size={20} />
+            Preview Purchase Order
           </h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-white">
-            <X size={20} />
-          </button>
+          <div className="flex items-center gap-2">
+            <button 
+              onClick={handleSaveImage}
+              disabled={saving2}
+              className="flex items-center gap-1 px-3 py-1.5 bg-green-600 hover:bg-green-500 text-white text-sm font-bold rounded transition-colors disabled:opacity-50"
+              title="Simpan sebagai gambar"
+            >
+              {saving2 ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />} Simpan
+            </button>
+            <button 
+              onClick={handleShare}
+              disabled={saving2}
+              className="flex items-center gap-1 px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white text-sm font-bold rounded transition-colors disabled:opacity-50"
+              title="Share gambar"
+            >
+              {saving2 ? <Loader2 size={16} className="animate-spin" /> : <Share2 size={16} />} Share
+            </button>
+            <button 
+              onClick={handlePrint}
+              className="flex items-center gap-1 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold rounded transition-colors"
+            >
+              <Printer size={16} /> Print
+            </button>
+            <button onClick={onClose} className="p-2 hover:bg-gray-200 rounded-full transition-colors text-gray-600">
+              <X size={20} />
+            </button>
+          </div>
         </div>
-
-        <div className="p-4">
-          <OrderPreviewCard 
-            supplier={supplier}
-            items={items}
-            storeName={storeName}
-            date={date}
-          />
+        
+        {/* PO Preview Content */}
+        <div ref={printRef} className="flex-1 overflow-auto p-6 bg-white">
+          {/* Header */}
+          <div className="flex justify-between items-start mb-6">
+            <div className="text-2xl font-bold text-gray-800">{storeName}</div>
+            <div className="text-right">
+              <div className="text-xl font-bold text-blue-700">PURCHASE ORDER</div>
+              <table className="text-sm mt-2">
+                <tbody>
+                  <tr>
+                    <td className="pr-4 text-gray-500 font-medium">DATE</td>
+                    <td className="font-bold text-gray-800">{today}</td>
+                  </tr>
+                  <tr>
+                    <td className="pr-4 text-gray-500 font-medium">P.O. #</td>
+                    <td className="font-bold text-gray-800">({poNumber})</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+          
+          {/* Vendor */}
+          <div className="bg-blue-800 text-white px-3 py-2 font-bold text-sm">VENDOR</div>
+          <div className="px-3 py-2 font-bold text-gray-800 border-b">{supplier}</div>
+          
+          {/* Items Table */}
+          <table className="w-full mt-4 text-sm">
+            <thead>
+              <tr className="bg-blue-800 text-white">
+                <th className="px-3 py-2 text-left">PART NUMBER / NAMA BARANG / APLIKASI</th>
+                <th className="px-3 py-2 text-center w-20">QTY</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sortedItems.map((item, idx) => (
+                <tr key={idx} className="border-b border-gray-200">
+                  <td className="px-3 py-2">
+                    <div className="font-bold text-gray-900">{item.part_number}</div>
+                    <div className="text-gray-700">{item.nama_barang}</div>
+                    {(item.brand || item.application) && (
+                      <div className="text-xs text-gray-500 italic">
+                        {item.brand && item.brand !== '-' ? `Brand: ${item.brand}` : ''}
+                        {item.brand && item.brand !== '-' && item.application && item.application !== '-' ? ' | ' : ''}
+                        {item.application && item.application !== '-' ? `App: ${item.application}` : ''}
+                      </div>
+                    )}
+                  </td>
+                  <td className="px-3 py-2 text-center font-bold text-lg text-gray-900">{item.qty}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          
+          {/* Notes */}
+          <div className="mt-8 border border-gray-300">
+            <div className="bg-blue-800 text-white px-3 py-1 text-xs font-bold">Other Comments or Special Instructions</div>
+            <textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="Tulis catatan tambahan disini..."
+              className="w-full p-3 min-h-[60px] text-sm text-gray-700 border-0 focus:outline-none focus:ring-2 focus:ring-blue-300 resize-none"
+            />
+          </div>
         </div>
-
-        <div className="p-4 border-t border-gray-700 flex gap-2 sticky bottom-0 bg-gray-900">
-          <button 
-            onClick={onCopyText}
-            className="flex-1 py-3 bg-purple-600 text-white rounded-xl font-bold hover:bg-purple-500 flex items-center justify-center gap-2"
-          >
-            <Copy size={18} /> Copy Text
-          </button>
-          <button 
-            onClick={onConfirm}
-            className="flex-1 py-3 bg-green-600 text-white rounded-xl font-bold hover:bg-green-500 flex items-center justify-center gap-2"
-          >
-            <Check size={18} /> Simpan Order
-          </button>
+        
+        {/* Footer */}
+        <div className="p-4 border-t bg-gray-100 rounded-b-2xl flex justify-between items-center">
+          <span className="text-sm text-gray-600">
+            {items.length} item, Total Qty: {items.reduce((sum, i) => sum + i.qty, 0)}
+          </span>
+          <div className="flex gap-2">
+            <button
+              onClick={onClose}
+              className="px-4 py-2 bg-gray-300 hover:bg-gray-400 text-gray-800 rounded-lg transition-colors"
+            >
+              Batal
+            </button>
+            <button
+              onClick={() => onConfirm(notes)}
+              disabled={saving}
+              className="px-4 py-2 bg-green-600 hover:bg-green-500 text-white font-bold rounded-lg transition-colors flex items-center gap-2 disabled:opacity-50"
+            >
+              {saving ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle size={16} />}
+              Simpan & Kirim
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -484,226 +589,787 @@ const OrderPreviewModal: React.FC<OrderPreviewModalProps> = ({
 };
 
 // Order History Modal
-interface OrderHistoryModalProps {
-  isOpen: boolean;
-  orders: SupplierOrder[];
+const OrderHistoryModal: React.FC<{
+  store: string | null;
   onClose: () => void;
-  onUpdateStatus: (orderId: number, status: 'PENDING' | 'ORDERED' | 'RECEIVED') => void;
-  onDelete: (orderId: number) => void;
-  onViewOrder: (order: SupplierOrder) => void;
-}
-
-const OrderHistoryModal: React.FC<OrderHistoryModalProps> = ({ 
-  isOpen, orders, onClose, onUpdateStatus, onDelete, onViewOrder 
-}) => {
-  if (!isOpen) return null;
-
+}> = ({ store, onClose }) => {
+  const [loading, setLoading] = useState(true);
+  const [orders, setOrders] = useState<SupplierOrder[]>([]);
+  const [selectedOrder, setSelectedOrder] = useState<SupplierOrder | null>(null);
+  
+  useEffect(() => {
+    const fetchOrders = async () => {
+      setLoading(true);
+      try {
+        const { data, error } = await supabase
+          .from('supplier_orders')
+          .select('*')
+          .eq('store', store || 'mjm')
+          .order('created_at', { ascending: false })
+          .limit(100);
+        
+        if (error) throw error;
+        
+        // Check status for pending orders - compare with current stock
+        const ordersWithUpdatedStatus = await Promise.all(
+          (data || []).map(async (order) => {
+            if (order.status !== 'PENDING') return order;
+            
+            // Fetch order items
+            const { data: items } = await supabase
+              .from('supplier_order_items')
+              .select('*')
+              .eq('order_id', order.id);
+            
+            if (!items || items.length === 0) return order;
+            
+            // Fetch current stock for these items
+            const tableBase = store === 'bjw' ? 'base_bjw' : 'base_mjm';
+            const partNumbers = items.map(i => i.part_number);
+            
+            const { data: stockData } = await supabase
+              .from(tableBase)
+              .select('part_number, quantity')
+              .in('part_number', partNumbers);
+            
+            if (!stockData) return order;
+            
+            // Create stock map
+            const stockMap: Record<string, number> = {};
+            stockData.forEach(s => { stockMap[s.part_number] = s.quantity || 0; });
+            
+            // Check if ALL items have stock >= ordered qty
+            const allItemsReceived = items.every(item => {
+              const currentStock = stockMap[item.part_number] || 0;
+              return currentStock >= item.qty;
+            });
+            
+            if (allItemsReceived) {
+              // Update status to OK in database
+              await supabase
+                .from('supplier_orders')
+                .update({ status: 'OK' })
+                .eq('id', order.id);
+              
+              return { ...order, status: 'OK' };
+            }
+            
+            return order;
+          })
+        );
+        
+        setOrders(ordersWithUpdatedStatus);
+      } catch (err) {
+        console.error('Error fetching orders:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    fetchOrders();
+  }, [store]);
+  
+  const fetchOrderItems = async (orderId: number) => {
+    const { data } = await supabase
+      .from('supplier_order_items')
+      .select('*')
+      .eq('order_id', orderId);
+    return data || [];
+  };
+  
+  const handleViewOrder = async (order: SupplierOrder) => {
+    const items = await fetchOrderItems(order.id);
+    setSelectedOrder({ ...order, items });
+  };
+  
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'PENDING': return 'bg-yellow-600 text-yellow-100';
-      case 'ORDERED': return 'bg-blue-600 text-blue-100';
-      case 'RECEIVED': return 'bg-green-600 text-green-100';
-      default: return 'bg-gray-600 text-gray-100';
+      case 'OK': return 'bg-green-900/30 text-green-400';
+      case 'RECEIVED': return 'bg-green-900/30 text-green-400';
+      case 'SENT': return 'bg-blue-900/30 text-blue-400';
+      case 'CANCELLED': return 'bg-red-900/30 text-red-400';
+      default: return 'bg-yellow-900/30 text-yellow-400';
     }
   };
-
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case 'PENDING': return <Clock size={12} />;
-      case 'ORDERED': return <Truck size={12} />;
-      case 'RECEIVED': return <CheckCircle size={12} />;
-      default: return <AlertCircle size={12} />;
-    }
-  };
-
+  
   return (
-    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <div className="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-2xl max-h-[80vh] overflow-hidden">
-        <div className="p-4 border-b border-gray-700 flex justify-between items-center">
-          <h3 className="font-bold text-white flex items-center gap-2">
-            <ClipboardList className="text-blue-400" size={20} /> Riwayat Order Supplier
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm animate-in fade-in">
+      <div className="bg-gray-800 rounded-2xl w-full max-w-5xl max-h-[85vh] flex flex-col border border-gray-700 shadow-2xl m-4">
+        {/* Header */}
+        <div className="p-4 border-b border-gray-700 flex justify-between items-center bg-gray-900/50 rounded-t-2xl">
+          <h3 className="font-bold text-gray-100 flex items-center gap-2">
+            <ClipboardList className="text-purple-400" size={20} />
+            Riwayat Purchase Order
           </h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-white">
+          <button onClick={onClose} className="p-2 hover:bg-gray-700 rounded-full transition-colors">
             <X size={20} />
           </button>
         </div>
-
-        <div className="p-4 overflow-y-auto max-h-[60vh]">
-          {orders.length === 0 ? (
-            <div className="text-center py-8 text-gray-500">
-              <ClipboardList size={40} className="mx-auto mb-2 opacity-50" />
-              <p>Belum ada order tersimpan</p>
+        
+        {/* Content */}
+        <div className="flex-1 overflow-auto p-4">
+          {loading ? (
+            <div className="flex flex-col items-center justify-center py-10">
+              <Loader2 className="animate-spin text-blue-500 mb-3" size={32} />
+              <p className="text-gray-400">Memuat riwayat order...</p>
+            </div>
+          ) : orders.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-10">
+              <ClipboardList className="text-gray-600 mb-3" size={48} />
+              <p className="text-gray-400">Belum ada riwayat order</p>
             </div>
           ) : (
-            <div className="space-y-3">
-              {orders.map((order) => (
-                <div 
-                  key={order.id}
-                  className="p-4 bg-gray-800 border border-gray-700 rounded-xl"
-                >
-                  <div className="flex justify-between items-start mb-3">
-                    <div>
-                      <div className="flex items-center gap-2 mb-1">
-                        <Truck size={16} className="text-blue-400" />
-                        <span className="font-bold text-white">{order.supplier}</span>
-                        <span className={`text-[10px] px-2 py-0.5 rounded-full flex items-center gap-1 ${getStatusColor(order.status)}`}>
-                          {getStatusIcon(order.status)} {order.status}
-                        </span>
-                      </div>
-                      <p className="text-xs text-gray-400">
-                        {formatDate(order.created_at || '')} • {order.total_items} barang • {formatCurrency(order.total_value)}
-                      </p>
-                    </div>
-                    <div className="flex gap-1">
+            <table className="w-full">
+              <thead className="bg-gray-900/50 sticky top-0">
+                <tr className="text-xs text-gray-400 uppercase">
+                  <th className="px-3 py-2 text-left">P.O. Number</th>
+                  <th className="px-3 py-2 text-left">Supplier</th>
+                  <th className="px-3 py-2 text-center">Items</th>
+                  <th className="px-3 py-2 text-right">Estimasi</th>
+                  <th className="px-3 py-2 text-center">Status</th>
+                  <th className="px-3 py-2 text-center">Tanggal</th>
+                  <th className="px-3 py-2 text-center">Aksi</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-700">
+                {orders.map((order) => (
+                  <tr key={order.id} className="hover:bg-gray-700/30 transition-colors">
+                    <td className="px-3 py-2">
+                      <span className="font-mono text-sm text-blue-400">{order.po_number}</span>
+                    </td>
+                    <td className="px-3 py-2 text-sm text-gray-200 font-semibold">
+                      {order.supplier}
+                    </td>
+                    <td className="px-3 py-2 text-center">
+                      <span className="text-white font-bold">{order.total_items}</span>
+                    </td>
+                    <td className="px-3 py-2 text-right text-sm text-gray-300">
+                      {formatCurrency(order.total_value || 0)}
+                    </td>
+                    <td className="px-3 py-2 text-center">
+                      <span className={`px-2 py-0.5 rounded text-xs font-bold ${getStatusColor(order.status)}`}>
+                        {order.status}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 text-center text-xs text-gray-400">
+                      {formatDate(order.created_at)}
+                    </td>
+                    <td className="px-3 py-2 text-center">
                       <button
-                        onClick={() => onViewOrder(order)}
-                        className="p-2 bg-purple-600/20 hover:bg-purple-600/30 rounded-lg text-purple-400"
+                        onClick={() => handleViewOrder(order)}
+                        className="p-1.5 bg-gray-700 hover:bg-blue-600 text-gray-300 hover:text-white rounded transition-colors"
                         title="Lihat Detail"
                       >
                         <Eye size={14} />
                       </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+        
+        {/* Footer */}
+        <div className="p-4 border-t border-gray-700 bg-gray-900/50 rounded-b-2xl flex justify-between items-center">
+          <span className="text-sm text-gray-400">
+            {orders.length} order ditemukan
+          </span>
+          <button
+            onClick={onClose}
+            className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-colors"
+          >
+            Tutup
+          </button>
+        </div>
+      </div>
+      
+      {/* Order Detail Modal with Print */}
+      {selectedOrder && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50">
+          <div className="bg-gray-800 rounded-xl w-full max-w-3xl max-h-[85vh] flex flex-col border border-gray-700 shadow-2xl m-4">
+            <div className="p-4 border-b border-gray-700 flex justify-between items-center bg-gray-900/50 rounded-t-xl">
+              <div>
+                <h4 className="font-bold text-white flex items-center gap-2">
+                  <FileText className="text-blue-400" size={18} />
+                  {selectedOrder.po_number}
+                </h4>
+                <p className="text-sm text-gray-400">Supplier: {selectedOrder.supplier}</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button 
+                  onClick={() => {
+                    const storeName = store === 'bjw' ? 'BJW AUTOPART' : 'MJMAUTOPART 86';
+                    const printWindow = window.open('', '_blank');
+                    if (!printWindow) return;
+                    printWindow.document.write(`
+                      <!DOCTYPE html>
+                      <html>
+                      <head>
+                        <title>Purchase Order - ${selectedOrder.po_number}</title>
+                        <style>
+                          * { margin: 0; padding: 0; box-sizing: border-box; }
+                          body { font-family: Arial, sans-serif; padding: 20px; background: white; color: #000; }
+                          .po-container { max-width: 800px; margin: 0 auto; }
+                          .header { display: flex; justify-content: space-between; margin-bottom: 20px; }
+                          .company-name { font-size: 24px; font-weight: bold; color: #000; }
+                          .po-title { color: #1a365d; font-size: 20px; font-weight: bold; }
+                          .po-info { text-align: right; font-size: 12px; color: #000; }
+                          .po-info td { padding: 2px 8px; }
+                          .vendor-section { background: #1a365d; color: white; padding: 8px 12px; font-weight: bold; margin: 20px 0 10px; }
+                          .vendor-name { padding: 8px 12px; font-weight: bold; color: #000; font-size: 14px; border-bottom: 2px solid #1a365d; }
+                          .items-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+                          .items-table th { background: #1a365d; color: white; padding: 10px; text-align: left; font-size: 12px; font-weight: bold; }
+                          .items-table td { padding: 8px 10px; border-bottom: 1px solid #ccc; font-size: 11px; color: #000; }
+                          .items-table .pn { font-weight: bold; color: #000; }
+                          .items-table .name { color: #333; }
+                          .items-table .qty { text-align: center; font-weight: bold; font-size: 13px; color: #000; }
+                          .notes-section { margin-top: 30px; border: 2px solid #1a365d; padding: 10px; min-height: 80px; }
+                          .notes-title { background: #1a365d; color: white; padding: 5px 10px; font-size: 11px; font-weight: bold; margin: -10px -10px 10px; }
+                          .notes-content { padding: 10px 0; font-size: 12px; color: #000; white-space: pre-wrap; }
+                          @media print { body { padding: 0; } }
+                        </style>
+                      </head>
+                      <body>
+                        <div class="po-container">
+                          <div class="header">
+                            <div class="company-name">${storeName}</div>
+                            <div>
+                              <div class="po-title">PURCHASE ORDER</div>
+                              <table class="po-info">
+                                <tr><td style="color:#333;">DATE</td><td style="font-weight:bold;color:#000;">${formatDate(selectedOrder.created_at)}</td></tr>
+                                <tr><td style="color:#333;">P.O. #</td><td style="font-weight:bold;color:#000;">(${selectedOrder.po_number})</td></tr>
+                              </table>
+                            </div>
+                          </div>
+                          
+                          <div class="vendor-section">VENDOR</div>
+                          <div class="vendor-name">${selectedOrder.supplier}</div>
+                          
+                          <table class="items-table">
+                            <thead>
+                              <tr>
+                                <th style="width: 65%;">PART NUMBER / NAMA BARANG</th>
+                                <th class="qty" style="width: 15%;">QTY</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              ${(selectedOrder.items || []).map(item => `
+                                <tr>
+                                  <td>
+                                    <div class="pn">${item.part_number}</div>
+                                    <div class="name">${item.nama_barang}</div>
+                                  </td>
+                                  <td class="qty">${item.qty}</td>
+                                </tr>
+                              `).join('')}
+                            </tbody>
+                          </table>
+                          
+                          <div class="notes-section">
+                            <div class="notes-title">Other Comments or Special Instructions</div>
+                            <div class="notes-content">${selectedOrder.notes || ''}</div>
+                          </div>
+                        </div>
+                      </body>
+                      </html>
+                    `);
+                    printWindow.document.close();
+                    printWindow.print();
+                  }}
+                  className="flex items-center gap-1 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold rounded transition-colors"
+                >
+                  <Printer size={14} /> Print
+                </button>
+                <button onClick={() => setSelectedOrder(null)} className="p-2 hover:bg-gray-700 rounded-full">
+                  <X size={18} />
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 overflow-auto p-4">
+              {/* Status Badge */}
+              <div className="mb-4 flex items-center gap-4">
+                <span className={`px-3 py-1 rounded-full text-sm font-bold ${getStatusColor(selectedOrder.status)}`}>
+                  {selectedOrder.status}
+                </span>
+                <span className="text-sm text-gray-400">
+                  {selectedOrder.total_items} item | Estimasi: {formatCurrency(selectedOrder.total_value || 0)}
+                </span>
+              </div>
+              
+              <table className="w-full text-sm">
+                <thead className="bg-gray-900/50">
+                  <tr className="text-xs text-gray-400 uppercase">
+                    <th className="px-3 py-2 text-left">Part Number</th>
+                    <th className="px-3 py-2 text-left">Nama Barang</th>
+                    <th className="px-3 py-2 text-center">Qty</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-700">
+                  {selectedOrder.items?.map((item, idx) => (
+                    <tr key={idx}>
+                      <td className="px-3 py-2 font-mono text-blue-400">{item.part_number}</td>
+                      <td className="px-3 py-2 text-gray-200">{item.nama_barang}</td>
+                      <td className="px-3 py-2 text-center font-bold text-white">{item.qty}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              
+              {/* Notes Section */}
+              {selectedOrder.notes && (
+                <div className="mt-4 p-3 bg-gray-900/50 rounded-lg border border-gray-700">
+                  <div className="text-xs text-gray-400 mb-1">Catatan:</div>
+                  <div className="text-sm text-gray-200 whitespace-pre-wrap">{selectedOrder.notes}</div>
+                </div>
+              )}
+            </div>
+            <div className="p-3 border-t border-gray-700 flex justify-between items-center">
+              <span className="text-sm text-gray-400">
+                Dibuat: {formatDate(selectedOrder.created_at)}
+              </span>
+              <button 
+                onClick={() => setSelectedOrder(null)}
+                className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-colors"
+              >
+                Tutup
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// Supplier Card Component
+const SupplierCard: React.FC<{
+  group: SupplierGroup;
+  isExpanded: boolean;
+  onToggle: () => void;
+  cart: CartItem[];
+  onAddToCart: (item: SupplierItem, supplier: string) => void;
+  onRemoveFromCart: (partNumber: string) => void;
+  onUpdateQty: (partNumber: string, qty: number) => void;
+  onViewHistory: (item: SupplierItem) => void;
+}> = ({ group, isExpanded, onToggle, cart, onAddToCart, onRemoveFromCart, onUpdateQty, onViewHistory }) => {
+  const cartItemsFromSupplier = cart.filter(c => c.supplier === group.supplier);
+  const totalInCart = cartItemsFromSupplier.reduce((sum, c) => sum + c.qty, 0);
+  
+  return (
+    <div className="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden">
+      {/* Header */}
+      <button
+        onClick={onToggle}
+        className="w-full p-4 flex items-center justify-between hover:bg-gray-750 transition-colors"
+      >
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center">
+            <User size={20} className="text-white" />
+          </div>
+          <div className="text-left">
+            <h3 className="font-bold text-white text-lg">{group.supplier}</h3>
+            <p className="text-xs text-gray-400">{group.totalItems} item tersedia</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-3">
+          {totalInCart > 0 && (
+            <span className="bg-green-600 text-white text-xs font-bold px-2 py-1 rounded-full">
+              {totalInCart} di keranjang
+            </span>
+          )}
+          {isExpanded ? <ChevronUp size={20} className="text-gray-400" /> : <ChevronDown size={20} className="text-gray-400" />}
+        </div>
+      </button>
+      
+      {/* Items List */}
+      {isExpanded && (
+        <div className="border-t border-gray-700">
+          <div className="max-h-[400px] overflow-y-auto">
+            <table className="w-full">
+              <thead className="bg-gray-900/50 sticky top-0">
+                <tr className="text-xs text-gray-400 uppercase">
+                  <th className="px-4 py-2 text-left">Part Number</th>
+                  <th className="px-4 py-2 text-left">Nama / Brand / Aplikasi</th>
+                  <th className="px-4 py-2 text-center">Stok</th>
+                  <th className="px-4 py-2 text-right">Harga Terakhir</th>
+                  <th className="px-4 py-2 text-center">Order Terakhir</th>
+                  <th className="px-4 py-2 text-center w-32">Aksi</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-700">
+                {group.items.map((item) => {
+                  const inCart = cart.find(c => c.part_number === item.part_number);
+                  const stockColor = item.current_stock === 0 
+                    ? 'text-red-400 bg-red-900/30' 
+                    : item.current_stock <= 5 
+                      ? 'text-yellow-400 bg-yellow-900/30' 
+                      : 'text-green-400 bg-green-900/30';
+                  
+                  return (
+                    <tr key={item.part_number} className="hover:bg-gray-700/30 transition-colors">
+                      <td className="px-4 py-3">
+                        <span className="font-mono text-sm text-blue-400">{item.part_number}</span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex flex-col">
+                          <span className="text-sm text-gray-200 font-semibold">{item.nama_barang}</span>
+                          <span className="text-xs text-gray-400">
+                            {item.brand && item.brand !== '-' ? `Brand: ${item.brand}` : ''} 
+                            {item.brand && item.brand !== '-' && item.application && item.application !== '-' ? ' | ' : ''}
+                            {item.application && item.application !== '-' ? `App: ${item.application}` : ''}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <span className={`px-2 py-1 rounded text-xs font-bold ${stockColor}`}>
+                          {item.current_stock}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center justify-end gap-2">
+                          <span className="text-sm text-gray-300">{formatCurrency(item.last_price)}</span>
+                          <button
+                            onClick={() => onViewHistory(item)}
+                            className="p-1 bg-gray-700 hover:bg-blue-600 text-gray-400 hover:text-white rounded transition-colors"
+                            title="Lihat riwayat harga"
+                          >
+                            <History size={14} />
+                          </button>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <span className="text-xs text-gray-400">{formatDate(item.last_order_date)}</span>
+                      </td>
+                      <td className="px-4 py-3">
+                        {inCart ? (
+                          <div className="flex items-center justify-center gap-1">
+                            <button
+                              onClick={() => onUpdateQty(item.part_number, inCart.qty - 1)}
+                              className="p-1 bg-gray-600 hover:bg-gray-500 rounded transition-colors"
+                            >
+                              <Minus size={14} />
+                            </button>
+                            <span className="w-8 text-center font-bold text-white">{inCart.qty}</span>
+                            <button
+                              onClick={() => onUpdateQty(item.part_number, inCart.qty + 1)}
+                              className="p-1 bg-gray-600 hover:bg-gray-500 rounded transition-colors"
+                            >
+                              <Plus size={14} />
+                            </button>
+                            <button
+                              onClick={() => onRemoveFromCart(item.part_number)}
+                              className="p-1 bg-red-600/30 hover:bg-red-600 text-red-400 hover:text-white rounded transition-colors ml-1"
+                            >
+                              <X size={14} />
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => onAddToCart(item, group.supplier)}
+                            className="w-full flex items-center justify-center gap-1 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded transition-colors"
+                          >
+                            <Plus size={14} /> Keranjang
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// Cart Sidebar Component
+const CartSidebar: React.FC<{
+  cart: CartItem[];
+  onUpdateQty: (partNumber: string, qty: number) => void;
+  onRemove: (partNumber: string) => void;
+  onClear: () => void;
+  onCheckoutSupplier: (supplier: string) => void;
+}> = ({ cart, onUpdateQty, onRemove, onClear, onCheckoutSupplier }) => {
+  const groupedBySupplier = useMemo(() => {
+    const groups: Record<string, CartItem[]> = {};
+    cart.forEach(item => {
+      if (!groups[item.supplier]) groups[item.supplier] = [];
+      groups[item.supplier].push(item);
+    });
+    return groups;
+  }, [cart]);
+  
+  const totalItems = cart.reduce((sum, c) => sum + c.qty, 0);
+  const totalValue = cart.reduce((sum, c) => sum + (c.qty * c.price), 0);
+  
+  if (cart.length === 0) {
+    return (
+      <div className="bg-gray-800 rounded-xl border border-gray-700 p-6 text-center">
+        <ShoppingCart size={48} className="mx-auto text-gray-600 mb-3" />
+        <p className="text-gray-400">Keranjang kosong</p>
+        <p className="text-xs text-gray-500 mt-1">Tambahkan item untuk order ke supplier</p>
+      </div>
+    );
+  }
+  
+  return (
+    <div className="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden">
+      <div className="p-4 border-b border-gray-700 flex items-center justify-between">
+        <h3 className="font-bold text-white flex items-center gap-2">
+          <ShoppingCart size={18} className="text-green-400" />
+          Keranjang Order
+        </h3>
+        <button
+          onClick={onClear}
+          className="text-xs text-red-400 hover:text-red-300 transition-colors"
+        >
+          Kosongkan
+        </button>
+      </div>
+      
+      <div className="max-h-[400px] overflow-y-auto p-3 space-y-4">
+        {Object.entries(groupedBySupplier).map(([supplier, items]) => {
+          const supplierTotal = items.reduce((sum, i) => sum + i.qty, 0);
+          const supplierValue = items.reduce((sum, i) => sum + (i.qty * i.price), 0);
+          
+          return (
+            <div key={supplier} className="bg-gray-900/50 rounded-lg p-3">
+              <h4 className="font-bold text-sm text-blue-400 mb-2 flex items-center gap-2">
+                <Truck size={14} /> {supplier}
+              </h4>
+              <div className="space-y-2">
+                {items.map(item => (
+                  <div key={item.part_number} className="flex items-center justify-between text-xs">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-gray-300 truncate">{item.nama_barang}</p>
+                      <p className="text-gray-500 font-mono">{item.part_number}</p>
+                    </div>
+                    <div className="flex items-center gap-2 ml-2">
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => onUpdateQty(item.part_number, item.qty - 1)}
+                          className="p-0.5 bg-gray-700 hover:bg-gray-600 rounded"
+                        >
+                          <Minus size={10} />
+                        </button>
+                        <span className="w-6 text-center font-bold">{item.qty}</span>
+                        <button
+                          onClick={() => onUpdateQty(item.part_number, item.qty + 1)}
+                          className="p-0.5 bg-gray-700 hover:bg-gray-600 rounded"
+                        >
+                          <Plus size={10} />
+                        </button>
+                      </div>
                       <button
-                        onClick={() => onDelete(order.id!)}
-                        className="p-2 bg-red-600/20 hover:bg-red-600/30 rounded-lg text-red-400"
-                        title="Hapus"
+                        onClick={() => onRemove(item.part_number)}
+                        className="p-1 text-red-400 hover:text-red-300"
                       >
-                        <Trash2 size={14} />
+                        <X size={12} />
                       </button>
                     </div>
                   </div>
-
-                  {/* Status Buttons */}
-                  <div className="flex gap-2 mt-3">
-                    <button
-                      onClick={() => onUpdateStatus(order.id!, 'PENDING')}
-                      className={`flex-1 py-1.5 text-xs font-medium rounded-lg flex items-center justify-center gap-1 ${order.status === 'PENDING' ? 'bg-yellow-600 text-white' : 'bg-gray-700 text-gray-400 hover:bg-gray-600'}`}
-                    >
-                      <Clock size={12} /> Pending
-                    </button>
-                    <button
-                      onClick={() => onUpdateStatus(order.id!, 'ORDERED')}
-                      className={`flex-1 py-1.5 text-xs font-medium rounded-lg flex items-center justify-center gap-1 ${order.status === 'ORDERED' ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-400 hover:bg-gray-600'}`}
-                    >
-                      <Truck size={12} /> Dipesan
-                    </button>
-                    <button
-                      onClick={() => onUpdateStatus(order.id!, 'RECEIVED')}
-                      className={`flex-1 py-1.5 text-xs font-medium rounded-lg flex items-center justify-center gap-1 ${order.status === 'RECEIVED' ? 'bg-green-600 text-white' : 'bg-gray-700 text-gray-400 hover:bg-gray-600'}`}
-                    >
-                      <CheckCircle size={12} /> Diterima
-                    </button>
-                  </div>
+                ))}
+              </div>
+              {/* Per-supplier checkout button */}
+              <div className="mt-3 pt-3 border-t border-gray-700">
+                <div className="flex justify-between text-xs mb-2">
+                  <span className="text-gray-400">{supplierTotal} item</span>
+                  <span className="text-green-400 font-bold">{formatCurrency(supplierValue)}</span>
                 </div>
-              ))}
+                <button
+                  onClick={() => onCheckoutSupplier(supplier)}
+                  className="w-full py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1"
+                >
+                  <FileText size={14} /> Buat PO {supplier}
+                </button>
+              </div>
             </div>
-          )}
+          );
+        })}
+      </div>
+      
+      <div className="p-4 border-t border-gray-700 bg-gray-900/50">
+        <div className="flex justify-between text-sm mb-3">
+          <span className="text-gray-400">Total Item:</span>
+          <span className="font-bold text-white">{totalItems} pcs</span>
         </div>
+        <div className="flex justify-between text-sm mb-2">
+          <span className="text-gray-400">Estimasi Total:</span>
+          <span className="font-bold text-green-400">{formatCurrency(totalValue)}</span>
+        </div>
+        <p className="text-xs text-gray-500 text-center mt-2">
+          Klik "Buat PO" per supplier untuk proses order
+        </p>
       </div>
     </div>
   );
 };
 
 // Main Component
-interface BarangKosongViewProps {
-  refreshTrigger?: number;
-}
-
-export const BarangKosongView: React.FC<BarangKosongViewProps> = ({ refreshTrigger }) => {
-  const { selectedStore, getStoreConfig } = useStore();
-  const storeConfig = getStoreConfig();
-
+export const BarangKosongView: React.FC = () => {
+  const { selectedStore } = useStore();
+  
   // State
-  const [loading, setLoading] = useState(true);
-  const [loadProgress, setLoadProgress] = useState(0);
-  const [loadStatus, setLoadStatus] = useState('');
-  const [supplierGroups, setSupplierGroups] = useState<SupplierOrderGroup[]>([]);
+  const [activeTab, setActiveTab] = useState<'TEMPO' | 'CASH'>('TEMPO');
+  const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
-  const [stockThreshold, setStockThreshold] = useState(5);
-  const [priceType, setPriceType] = useState<'cash' | 'tempo'>('cash');
+  const [supplierGroups, setSupplierGroups] = useState<SupplierGroup[]>([]);
   const [expandedSuppliers, setExpandedSuppliers] = useState<Set<string>>(new Set());
-  const [selectedItems, setSelectedItems] = useState<Record<string, Set<string>>>({});
-  const [orderQtys, setOrderQtys] = useState<Record<string, Record<string, number>>>({});
+  const [cart, setCart] = useState<CartItem[]>([]);
   const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
-
-  // History Modal
-  const [historyModal, setHistoryModal] = useState<{
-    isOpen: boolean;
-    partNumber: string;
-    itemName: string;
-    history: SupplierHistory[];
-  }>({ isOpen: false, partNumber: '', itemName: '', history: [] });
-
-  // Order Preview Modal
-  const [orderPreview, setOrderPreview] = useState<{
-    isOpen: boolean;
-    supplier: string;
-    items: { partNumber: string; name: string; qty: number; price: number }[];
-  }>({ isOpen: false, supplier: '', items: [] });
-
-  // Order History Modal
-  const [orderHistoryModal, setOrderHistoryModal] = useState(false);
-  const [savedOrders, setSavedOrders] = useState<SupplierOrder[]>([]);
-
-  // View Order Detail Modal
-  const [viewOrderDetail, setViewOrderDetail] = useState<SupplierOrder | null>(null);
-
-  // Load data
-  const loadData = async () => {
+  const [showCart, setShowCart] = useState(false);
+  const [historyItem, setHistoryItem] = useState<SupplierItem | null>(null);
+  const [showPOPreview, setShowPOPreview] = useState(false);
+  const [showOrderHistory, setShowOrderHistory] = useState(false);
+  const [savingOrder, setSavingOrder] = useState(false);
+  const [currentPONumber, setCurrentPONumber] = useState('');
+  const [currentSupplier, setCurrentSupplier] = useState<string>('');
+  
+  // Tempo values for filtering
+  const TEMPO_VALUES = ['3 BLN', '2 BLN', '1 BLN'];
+  
+  // Fetch data
+  const fetchData = async () => {
     setLoading(true);
-    setLoadProgress(0);
-    setLoadStatus('Memulai...');
     try {
-      const groups = await getLowStockGroupedBySupplier(
-        selectedStore, 
-        stockThreshold,
-        (progress, status) => {
-          setLoadProgress(progress);
-          setLoadStatus(status);
-        }
-      );
-      setSupplierGroups(groups);
+      const tableMasuk = selectedStore === 'bjw' ? 'barang_masuk_bjw' : 'barang_masuk_mjm';
+      const tableBase = selectedStore === 'bjw' ? 'base_bjw' : 'base_mjm';
       
-      // Initialize selected items and quantities
-      const initialSelected: Record<string, Set<string>> = {};
-      const initialQtys: Record<string, Record<string, number>> = {};
+      // Fetch all barang masuk with the selected tempo type
+      // TEMPO = 3 BLN, 2 BLN, 1 BLN | CASH = CASH
+      let query = supabase
+        .from(tableMasuk)
+        .select('part_number, nama_barang, customer, harga_satuan, tempo, created_at')
+        .order('created_at', { ascending: false });
       
-      groups.forEach(group => {
-        initialSelected[group.supplier] = new Set();
-        initialQtys[group.supplier] = {};
-        group.items.forEach(item => {
-          initialQtys[group.supplier][item.partNumber] = 0;
-        });
+      if (activeTab === 'TEMPO') {
+        // Filter by tempo values: 3 BLN, 2 BLN, 1 BLN
+        query = query.in('tempo', TEMPO_VALUES);
+      } else {
+        // Filter by CASH
+        query = query.eq('tempo', 'CASH');
+      }
+      
+      const { data: masukData, error: masukError } = await query;
+      
+      if (masukError) throw masukError;
+      
+      // Fetch ALL items from base table with full details (name, brand, application)
+      const { data: baseData } = await supabase
+        .from(tableBase)
+        .select('part_number, name, quantity, brand, application');
+      
+      // Create lookup maps from base data
+      const normalizePN = (pn: string): string => pn?.trim().toUpperCase().replace(/\s+/g, ' ') || '';
+      
+      interface BaseItemInfo {
+        quantity: number;
+        name: string;
+        brand: string;
+        application: string;
+      }
+      
+      const baseItemMap: Record<string, BaseItemInfo> = {};
+      const baseItemMapNormalized: Record<string, BaseItemInfo> = {};
+      
+      (baseData || []).forEach(item => {
+        const info: BaseItemInfo = {
+          quantity: item.quantity || 0,
+          name: item.name || '-',
+          brand: item.brand || '-',
+          application: item.application || '-'
+        };
+        baseItemMap[item.part_number] = info;
+        baseItemMapNormalized[normalizePN(item.part_number)] = info;
       });
       
-      setSelectedItems(initialSelected);
-      setOrderQtys(initialQtys);
+      // Helper to get base item info
+      const getBaseInfo = (pn: string): BaseItemInfo | null => {
+        return baseItemMap[pn] || baseItemMapNormalized[normalizePN(pn)] || null;
+      };
+      
+      // Group by customer (supplier) - ONLY include items that exist in base table
+      const supplierMap: Record<string, Map<string, SupplierItem>> = {};
+      
+      (masukData || []).forEach(row => {
+        const supplier = row.customer?.trim() || 'UNKNOWN';
+        const pn = row.part_number;
+        
+        if (!pn) return;
+        
+        // Check if item exists in base table - skip if not
+        const baseInfo = getBaseInfo(pn);
+        if (!baseInfo) return; // Skip items not in base table
+        
+        if (!supplierMap[supplier]) {
+          supplierMap[supplier] = new Map();
+        }
+        
+        // Only keep the latest entry per part_number
+        if (!supplierMap[supplier].has(pn)) {
+          supplierMap[supplier].set(pn, {
+            part_number: pn,
+            nama_barang: baseInfo.name || row.nama_barang || '-',
+            current_stock: baseInfo.quantity,
+            last_price: row.harga_satuan || 0,
+            last_order_date: row.created_at,
+            tempo: row.tempo,
+            brand: baseInfo.brand,
+            application: baseInfo.application
+          });
+        }
+      });
+      
+      // Convert to array and sort
+      const groups: SupplierGroup[] = Object.entries(supplierMap)
+        .map(([supplier, itemsMap]) => {
+          const items = Array.from(itemsMap.values())
+            .sort((a, b) => a.current_stock - b.current_stock); // Sort by stock ascending
+          return {
+            supplier,
+            items,
+            totalItems: items.length
+          };
+        })
+        .filter(g => g.totalItems > 0)
+        .sort((a, b) => b.totalItems - a.totalItems); // Sort suppliers by item count
+      
+      setSupplierGroups(groups);
+      
     } catch (error) {
-      console.error('Error loading data:', error);
-      showToast('Gagal memuat data', 'error');
+      console.error('Error fetching data:', error);
+      setToast({ msg: 'Gagal memuat data', type: 'error' });
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
-
-  const loadSavedOrders = async () => {
-    const orders = await fetchSupplierOrders(selectedStore);
-    setSavedOrders(orders);
-  };
-
+  
   useEffect(() => {
-    if (selectedStore) {
-      loadData();
-      loadSavedOrders();
-    }
-  }, [selectedStore, stockThreshold, refreshTrigger]);
-
-  // Toast helper
-  const showToast = (msg: string, type: 'success' | 'error') => {
-    setToast({ msg, type });
-    setTimeout(() => setToast(null), 3000);
-  };
-
-  // Handlers
-  const toggleExpand = (supplier: string) => {
+    fetchData();
+  }, [selectedStore, activeTab]);
+  
+  // Filter suppliers by search
+  const filteredGroups = useMemo(() => {
+    if (!searchTerm.trim()) return supplierGroups;
+    
+    const search = searchTerm.toLowerCase();
+    return supplierGroups
+      .map(group => ({
+        ...group,
+        items: group.items.filter(item => 
+          item.part_number.toLowerCase().includes(search) ||
+          item.nama_barang.toLowerCase().includes(search) ||
+          group.supplier.toLowerCase().includes(search)
+        )
+      }))
+      .filter(g => g.items.length > 0 || g.supplier.toLowerCase().includes(search));
+  }, [supplierGroups, searchTerm]);
+  
+  // Toggle supplier expansion
+  const toggleSupplier = (supplier: string) => {
     setExpandedSuppliers(prev => {
       const next = new Set(prev);
       if (next.has(supplier)) {
@@ -714,409 +1380,334 @@ export const BarangKosongView: React.FC<BarangKosongViewProps> = ({ refreshTrigg
       return next;
     });
   };
-
-  const toggleItem = (supplier: string, partNumber: string) => {
-    setSelectedItems(prev => {
-      const supplierSet = new Set(prev[supplier] || []);
-      if (supplierSet.has(partNumber)) {
-        supplierSet.delete(partNumber);
-      } else {
-        supplierSet.add(partNumber);
+  
+  // Cart functions
+  const addToCart = (item: SupplierItem, supplier: string) => {
+    setCart(prev => {
+      const existing = prev.find(c => c.part_number === item.part_number);
+      if (existing) {
+        return prev.map(c => 
+          c.part_number === item.part_number 
+            ? { ...c, qty: c.qty + 1 } 
+            : c
+        );
       }
-      return { ...prev, [supplier]: supplierSet };
+      return [...prev, {
+        part_number: item.part_number,
+        nama_barang: item.nama_barang,
+        supplier,
+        qty: 1,
+        price: item.last_price,
+        tempo: item.tempo,
+        brand: item.brand,
+        application: item.application
+      }];
     });
+    setToast({ msg: `${item.nama_barang} ditambahkan ke keranjang`, type: 'success' });
   };
-
-  const selectAll = (supplier: string) => {
-    const group = supplierGroups.find(g => g.supplier === supplier);
-    if (!group) return;
-    
-    setSelectedItems(prev => ({
-      ...prev,
-      [supplier]: new Set(group.items.map(i => i.partNumber))
-    }));
-
-    // Also set default qty of 1 for all items
-    setOrderQtys(prev => {
-      const newQtys = { ...prev[supplier] };
-      group.items.forEach(item => {
-        if (newQtys[item.partNumber] === 0) {
-          newQtys[item.partNumber] = 1;
-        }
-      });
-      return { ...prev, [supplier]: newQtys };
-    });
+  
+  const removeFromCart = (partNumber: string) => {
+    setCart(prev => prev.filter(c => c.part_number !== partNumber));
   };
-
-  const deselectAll = (supplier: string) => {
-    setSelectedItems(prev => ({
-      ...prev,
-      [supplier]: new Set()
-    }));
-  };
-
-  const updateQty = (supplier: string, partNumber: string, qty: number) => {
-    setOrderQtys(prev => ({
-      ...prev,
-      [supplier]: {
-        ...prev[supplier],
-        [partNumber]: qty
-      }
-    }));
-
-    // Auto-select if qty > 0
-    if (qty > 0) {
-      setSelectedItems(prev => {
-        const supplierSet = new Set(prev[supplier] || []);
-        supplierSet.add(partNumber);
-        return { ...prev, [supplier]: supplierSet };
-      });
-    }
-  };
-
-  const viewHistory = async (partNumber: string) => {
-    const group = supplierGroups.find(g => g.items.some(i => i.partNumber === partNumber));
-    const item = group?.items.find(i => i.partNumber === partNumber);
-    
-    if (!item) return;
-
-    const history = await fetchSupplierHistoryForItem(selectedStore, partNumber);
-    setHistoryModal({
-      isOpen: true,
-      partNumber,
-      itemName: item.name,
-      history
-    });
-  };
-
-  const createOrder = (supplier: string) => {
-    const group = supplierGroups.find(g => g.supplier === supplier);
-    if (!group) return;
-
-    const selected = selectedItems[supplier] || new Set();
-    const qtys = orderQtys[supplier] || {};
-
-    const items = group.items
-      .filter(i => selected.has(i.partNumber) && qtys[i.partNumber] > 0)
-      .map(i => ({
-        partNumber: i.partNumber,
-        name: i.name,
-        qty: qtys[i.partNumber],
-        price: i.lastPrice
-      }));
-
-    if (items.length === 0) {
-      showToast('Pilih barang dan isi qty terlebih dahulu', 'error');
+  
+  const updateCartQty = (partNumber: string, qty: number) => {
+    if (qty <= 0) {
+      removeFromCart(partNumber);
       return;
     }
-
-    setOrderPreview({ isOpen: true, supplier, items });
+    setCart(prev => prev.map(c => 
+      c.part_number === partNumber ? { ...c, qty } : c
+    ));
   };
-
-  const confirmOrder = async () => {
-    const order: SupplierOrder = {
-      supplier: orderPreview.supplier,
-      items: orderPreview.items,
-      status: 'PENDING',
-      notes: '',
-      total_items: orderPreview.items.length,
-      total_value: orderPreview.items.reduce((sum, i) => sum + i.qty * i.price, 0)
-    };
-
-    const result = await saveSupplierOrder(selectedStore, order);
+  
+  const clearCart = () => {
+    setCart([]);
+    setToast({ msg: 'Keranjang dikosongkan', type: 'success' });
+  };
+  
+  // Generate PO Number
+  const generatePONumber = () => {
+    const store = selectedStore || 'mjm';
+    const date = new Date();
+    const yearMonth = `${String(date.getFullYear()).slice(-2)}${String(date.getMonth() + 1).padStart(2, '0')}`;
+    const random = String(Math.floor(Math.random() * 10000)).padStart(4, '0');
+    return `PO-${store.toUpperCase()}-${yearMonth}-${random}`;
+  };
+  
+  // Checkout per supplier
+  const handleCheckoutSupplier = (supplier: string) => {
+    const supplierItems = cart.filter(c => c.supplier === supplier);
+    if (supplierItems.length === 0) {
+      setToast({ msg: 'Tidak ada item untuk supplier ini!', type: 'error' });
+      return;
+    }
+    const poNum = generatePONumber();
+    setCurrentPONumber(poNum);
+    setCurrentSupplier(supplier);
+    setShowPOPreview(true);
+  };
+  
+  const handleConfirmOrder = async (notes: string = '') => {
+    if (!currentSupplier) return;
     
-    if (result.success) {
-      showToast('Order berhasil disimpan!', 'success');
-      setOrderPreview({ isOpen: false, supplier: '', items: [] });
+    const supplierItems = cart.filter(c => c.supplier === currentSupplier);
+    if (supplierItems.length === 0) return;
+    
+    setSavingOrder(true);
+    try {
+      // Get items for the current supplier only
+      const totalItems = supplierItems.reduce((sum, i) => sum + i.qty, 0);
+      const totalValue = supplierItems.reduce((sum, i) => sum + (i.qty * i.price), 0);
       
-      // Reset selection for this supplier
-      setSelectedItems(prev => ({
-        ...prev,
-        [orderPreview.supplier]: new Set()
+      // Insert order header
+      const { data: orderData, error: orderError } = await supabase
+        .from('supplier_orders')
+        .insert({
+          po_number: currentPONumber,
+          supplier: currentSupplier,
+          store: selectedStore || 'mjm',
+          tempo: activeTab,
+          total_items: totalItems,
+          total_value: totalValue,
+          notes: notes,
+          status: 'PENDING'
+        })
+        .select('id')
+        .single();
+      
+      if (orderError) throw orderError;
+      
+      // Insert order items
+      const orderItems = supplierItems.map(item => ({
+        order_id: orderData.id,
+        part_number: item.part_number,
+        nama_barang: item.nama_barang,
+        qty: item.qty,
+        harga_satuan: item.price,
+        harga_total: item.qty * item.price
       }));
       
-      loadSavedOrders();
-    } else {
-      showToast(result.msg, 'error');
+      const { error: itemsError } = await supabase
+        .from('supplier_order_items')
+        .insert(orderItems);
+      
+      if (itemsError) throw itemsError;
+      
+      setToast({ msg: `PO untuk ${currentSupplier} berhasil disimpan!`, type: 'success' });
+      setShowPOPreview(false);
+      
+      // Remove only the items for this supplier from cart
+      setCart(prev => prev.filter(c => c.supplier !== currentSupplier));
+      setCurrentSupplier('');
+      
+    } catch (error: any) {
+      console.error('Error saving order:', error);
+      setToast({ msg: `Gagal menyimpan: ${error.message}`, type: 'error' });
+    } finally {
+      setSavingOrder(false);
     }
   };
-
-  const copyOrderText = () => {
-    const { supplier, items } = orderPreview;
-    const storeName = storeConfig?.displayName || selectedStore?.toUpperCase() || 'Toko';
-    const date = new Date().toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' });
-    
-    let text = `*ORDER BARANG - ${storeName}*\n`;
-    text += `Tanggal: ${date}\n`;
-    text += `Kepada: ${supplier}\n\n`;
-    text += `─────────────────\n`;
-    
-    items.forEach((item, idx) => {
-      text += `${idx + 1}. ${item.partNumber}\n`;
-      text += `   ${item.name}\n`;
-      text += `   Qty: ${item.qty} pcs\n`;
-      if (item.price > 0) {
-        text += `   Harga: ${formatCurrency(item.price)}\n`;
-      }
-      text += `\n`;
-    });
-
-    const total = items.reduce((sum, i) => sum + i.qty * i.price, 0);
-    const totalQty = items.reduce((sum, i) => sum + i.qty, 0);
-    
-    text += `─────────────────\n`;
-    text += `Total: ${totalQty} pcs\n`;
-    if (total > 0) {
-      text += `Estimasi: ${formatCurrency(total)}\n`;
-    }
-    text += `\nTerima kasih 🙏`;
-
-    navigator.clipboard.writeText(text);
-    showToast('Text berhasil di-copy!', 'success');
-  };
-
-  const handleUpdateOrderStatus = async (orderId: number, status: 'PENDING' | 'ORDERED' | 'RECEIVED') => {
-    const result = await updateSupplierOrderStatus(selectedStore, orderId, status);
-    if (result.success) {
-      showToast('Status diupdate', 'success');
-      loadSavedOrders();
-    } else {
-      showToast(result.msg, 'error');
-    }
-  };
-
-  const handleDeleteOrder = async (orderId: number) => {
-    if (!confirm('Hapus order ini?')) return;
-    
-    const result = await deleteSupplierOrder(selectedStore, orderId);
-    if (result.success) {
-      showToast('Order dihapus', 'success');
-      loadSavedOrders();
-    } else {
-      showToast(result.msg, 'error');
-    }
-  };
-
-  // Filtered groups
-  const filteredGroups = useMemo(() => {
-    if (!searchTerm) return supplierGroups;
-    
-    const term = searchTerm.toLowerCase();
-    return supplierGroups.map(group => ({
-      ...group,
-      items: group.items.filter(item => 
-        item.partNumber.toLowerCase().includes(term) ||
-        item.name.toLowerCase().includes(term) ||
-        (item.brand && item.brand.toLowerCase().includes(term)) ||
-        (item.application && item.application.toLowerCase().includes(term))
-      )
-    })).filter(group => group.items.length > 0);
-  }, [supplierGroups, searchTerm]);
-
+  
   // Stats
-  const totalLowStock = supplierGroups.reduce((sum, g) => sum + g.items.length, 0);
-  const totalEmpty = supplierGroups.reduce((sum, g) => sum + g.items.filter(i => i.currentStock === 0).length, 0);
-  const totalSuppliers = supplierGroups.filter(g => g.supplier !== 'TANPA SUPPLIER').length;
-  const pendingOrders = savedOrders.filter(o => o.status === 'PENDING').length;
-
+  const totalSuppliers = filteredGroups.length;
+  const totalItems = filteredGroups.reduce((sum, g) => sum + g.items.length, 0);
+  const lowStockItems = filteredGroups.reduce((sum, g) => 
+    sum + g.items.filter(i => i.current_stock <= 5).length, 0
+  );
+  const emptyStockItems = filteredGroups.reduce((sum, g) => 
+    sum + g.items.filter(i => i.current_stock === 0).length, 0
+  );
+  
   return (
-    <div className="min-h-screen bg-gray-900 pb-24 md:pb-4">
-      {toast && <Toast {...toast} onClose={() => setToast(null)} />}
-
+    <div className="flex-1 flex flex-col bg-gray-900 overflow-hidden">
+      {/* Toast */}
+      {toast && (
+        <Toast 
+          msg={toast.msg} 
+          type={toast.type} 
+          onClose={() => setToast(null)} 
+        />
+      )}
+      
       {/* Header */}
-      <div className="sticky top-0 z-40 bg-gray-900/95 backdrop-blur-sm border-b border-gray-800">
-        <div className="p-4">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-3">
-              <div className="bg-red-600/20 p-2 rounded-xl">
-                <PackageX size={24} className="text-red-400" />
-              </div>
-              <div>
-                <h1 className="text-xl font-bold text-white">Barang Kosong</h1>
-                <p className="text-xs text-gray-400">Kelola order ke supplier</p>
-              </div>
-            </div>
-            <div className="flex gap-2">
-              <button
-                onClick={() => setOrderHistoryModal(true)}
-                className="relative p-2 bg-purple-600/20 text-purple-400 rounded-xl hover:bg-purple-600/30"
-                title="Riwayat Order"
-              >
-                <ClipboardList size={20} />
-                {pendingOrders > 0 && (
-                  <span className="absolute -top-1 -right-1 bg-red-600 text-white text-[10px] w-4 h-4 rounded-full flex items-center justify-center">
-                    {pendingOrders}
-                  </span>
-                )}
-              </button>
-              <button
-                onClick={loadData}
-                disabled={loading}
-                className="p-2 bg-blue-600/20 text-blue-400 rounded-xl hover:bg-blue-600/30"
-              >
-                <RefreshCw size={20} className={loading ? 'animate-spin' : ''} />
-              </button>
-            </div>
+      <div className="p-4 border-b border-gray-700 bg-gray-800">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-xl font-bold text-white flex items-center gap-2">
+            <PackageX className="text-red-400" />
+            Barang Kosong / Re-Order
+          </h2>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowOrderHistory(true)}
+              className="flex items-center gap-1 px-3 py-2 bg-purple-600/20 hover:bg-purple-600 text-purple-400 hover:text-white rounded-lg transition-colors text-sm font-bold"
+              title="Riwayat Order"
+            >
+              <ClipboardList size={18} />
+              <span className="hidden md:inline">Riwayat PO</span>
+            </button>
+            <button
+              onClick={() => setShowCart(!showCart)}
+              className="relative p-2 bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors"
+            >
+              <ShoppingCart size={20} className={cart.length > 0 ? 'text-green-400' : 'text-gray-400'} />
+              {cart.length > 0 && (
+                <span className="absolute -top-1 -right-1 w-5 h-5 bg-green-500 text-white text-xs font-bold rounded-full flex items-center justify-center">
+                  {cart.reduce((sum, c) => sum + c.qty, 0)}
+                </span>
+              )}
+            </button>
+            <button
+              onClick={fetchData}
+              disabled={loading}
+              className="p-2 bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors"
+            >
+              <RefreshCw size={20} className={`text-gray-400 ${loading ? 'animate-spin' : ''}`} />
+            </button>
           </div>
-
-          {/* Stats Cards */}
-          <div className="grid grid-cols-4 gap-2 mb-4">
-            <div className="bg-gray-800 p-3 rounded-xl border border-gray-700">
-              <p className="text-[10px] text-gray-400 uppercase">Stok Rendah</p>
-              <p className="text-xl font-bold text-yellow-400">{totalLowStock}</p>
-            </div>
-            <div className="bg-gray-800 p-3 rounded-xl border border-gray-700">
-              <p className="text-[10px] text-gray-400 uppercase">Stok Habis</p>
-              <p className="text-xl font-bold text-red-400">{totalEmpty}</p>
-            </div>
-            <div className="bg-gray-800 p-3 rounded-xl border border-gray-700">
-              <p className="text-[10px] text-gray-400 uppercase">Supplier</p>
-              <p className="text-xl font-bold text-blue-400">{totalSuppliers}</p>
-            </div>
-            <div className="bg-gray-800 p-3 rounded-xl border border-gray-700">
-              <p className="text-[10px] text-gray-400 uppercase">Order Pending</p>
-              <p className="text-xl font-bold text-purple-400">{pendingOrders}</p>
-            </div>
+        </div>
+        
+        {/* Tabs */}
+        <div className="flex gap-2 mb-4">
+          <button
+            onClick={() => setActiveTab('TEMPO')}
+            className={`flex-1 py-3 px-4 rounded-lg font-bold transition-all flex items-center justify-center gap-2 ${
+              activeTab === 'TEMPO'
+                ? 'bg-gradient-to-r from-orange-600 to-amber-600 text-white shadow-lg'
+                : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
+            }`}
+          >
+            <Clock size={18} />
+            Barang Tempo
+          </button>
+          <button
+            onClick={() => setActiveTab('CASH')}
+            className={`flex-1 py-3 px-4 rounded-lg font-bold transition-all flex items-center justify-center gap-2 ${
+              activeTab === 'CASH'
+                ? 'bg-gradient-to-r from-green-600 to-emerald-600 text-white shadow-lg'
+                : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
+            }`}
+          >
+            <CreditCard size={18} />
+            Barang Cash
+          </button>
+        </div>
+        
+        {/* Search */}
+        <div className="relative">
+          <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+          <input
+            type="text"
+            placeholder="Cari supplier, part number, atau nama barang..."
+            className="w-full pl-10 pr-4 py-3 bg-gray-900 border border-gray-700 rounded-lg text-gray-200 focus:border-blue-500 outline-none transition-colors"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+          />
+        </div>
+        
+        {/* Stats */}
+        <div className="grid grid-cols-4 gap-3 mt-4">
+          <div className="bg-gray-900/50 rounded-lg p-3 text-center">
+            <User size={20} className="mx-auto text-blue-400 mb-1" />
+            <p className="text-lg font-bold text-white">{totalSuppliers}</p>
+            <p className="text-xs text-gray-400">Supplier</p>
           </div>
-
-          {/* Search & Filter */}
-          <div className="flex gap-2">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
-              <input
-                type="text"
-                placeholder="Cari part number, nama barang..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-10 pr-4 py-2.5 bg-gray-800 border border-gray-700 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none text-white placeholder-gray-500"
-              />
-            </div>
-            <div className="relative">
-              <Filter className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={14} />
-              <select
-                value={stockThreshold}
-                onChange={(e) => setStockThreshold(Number(e.target.value))}
-                className="pl-9 pr-8 py-2.5 bg-gray-800 border border-gray-700 rounded-xl text-sm text-white appearance-none cursor-pointer"
-              >
-                <option value={3}>Stok &lt; 3</option>
-                <option value={5}>Stok &lt; 5</option>
-                <option value={10}>Stok &lt; 10</option>
-                <option value={20}>Stok &lt; 20</option>
-              </select>
-            </div>
+          <div className="bg-gray-900/50 rounded-lg p-3 text-center">
+            <Package size={20} className="mx-auto text-purple-400 mb-1" />
+            <p className="text-lg font-bold text-white">{totalItems}</p>
+            <p className="text-xs text-gray-400">Total Item</p>
+          </div>
+          <div className="bg-gray-900/50 rounded-lg p-3 text-center">
+            <Layers size={20} className="mx-auto text-yellow-400 mb-1" />
+            <p className="text-lg font-bold text-yellow-400">{lowStockItems}</p>
+            <p className="text-xs text-gray-400">Stok Menipis</p>
+          </div>
+          <div className="bg-gray-900/50 rounded-lg p-3 text-center">
+            <PackageX size={20} className="mx-auto text-red-400 mb-1" />
+            <p className="text-lg font-bold text-red-400">{emptyStockItems}</p>
+            <p className="text-xs text-gray-400">Stok Habis</p>
           </div>
         </div>
       </div>
-
+      
       {/* Content */}
-      <div className="p-4 space-y-4">
-        {loading ? (
-          <div className="flex flex-col items-center justify-center py-20">
-            {/* Progress Bar */}
-            <div className="w-full max-w-md mb-6">
-              <div className="flex justify-between items-center mb-2">
-                <span className="text-sm font-medium text-blue-400">Loading Data...</span>
-                <span className="text-sm font-bold text-white">{loadProgress}%</span>
-              </div>
-              <div className="w-full bg-gray-700 rounded-full h-3 overflow-hidden">
-                <div 
-                  className="bg-gradient-to-r from-blue-600 to-purple-600 h-full rounded-full transition-all duration-300 ease-out"
-                  style={{ width: `${loadProgress}%` }}
-                />
-              </div>
-              <p className="text-xs text-gray-400 mt-2 text-center">{loadStatus}</p>
+      <div className="flex-1 flex overflow-hidden">
+        {/* Supplier List */}
+        <div className={`flex-1 overflow-y-auto p-4 space-y-3 ${showCart ? 'pr-2' : ''}`}>
+          {loading ? (
+            <div className="flex flex-col items-center justify-center py-20">
+              <RefreshCw size={40} className="text-blue-500 animate-spin mb-4" />
+              <p className="text-gray-400">Memuat data supplier...</p>
             </div>
-            
-            {/* Animated Icon */}
-            <div className="relative">
-              <div className="absolute inset-0 bg-blue-500/20 rounded-full animate-ping" />
-              <div className="bg-gray-800 p-4 rounded-full border border-gray-700">
-                <RefreshCw size={28} className="animate-spin text-blue-500" />
-              </div>
+          ) : filteredGroups.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-20">
+              <PackageX size={60} className="text-gray-600 mb-4" />
+              <p className="text-gray-400 text-lg">Tidak ada data</p>
+              <p className="text-gray-500 text-sm">Tidak ditemukan supplier dengan tipe {activeTab}</p>
             </div>
+          ) : (
+            filteredGroups.map(group => (
+              <SupplierCard
+                key={group.supplier}
+                group={group}
+                isExpanded={expandedSuppliers.has(group.supplier)}
+                onToggle={() => toggleSupplier(group.supplier)}
+                cart={cart}
+                onAddToCart={addToCart}
+                onRemoveFromCart={removeFromCart}
+                onUpdateQty={updateCartQty}
+                onViewHistory={setHistoryItem}
+              />
+            ))
+          )}
+        </div>
+        
+        {/* Cart Sidebar */}
+        {showCart && (
+          <div className="w-80 border-l border-gray-700 p-4 overflow-y-auto bg-gray-900/50">
+            <CartSidebar
+              cart={cart}
+              onUpdateQty={updateCartQty}
+              onRemove={removeFromCart}
+              onClear={clearCart}
+              onCheckoutSupplier={handleCheckoutSupplier}
+            />
           </div>
-        ) : filteredGroups.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-20 text-gray-500">
-            <Package size={48} className="mb-3 opacity-50" />
-            <p className="text-lg font-medium text-gray-400">
-              {searchTerm ? 'Tidak ada hasil' : 'Semua stok aman!'}
-            </p>
-            <p className="text-sm">
-              {searchTerm ? 'Coba kata kunci lain' : `Tidak ada barang dengan stok < ${stockThreshold}`}
-            </p>
-          </div>
-        ) : (
-          <>
-            {filteredGroups.map(group => (
-              <div key={group.supplier}>
-                <SupplierCard
-                  supplier={group.supplier}
-                  items={group.items}
-                  selectedItems={selectedItems[group.supplier] || new Set()}
-                  orderQtys={orderQtys[group.supplier] || {}}
-                  onToggleItem={(pn) => toggleItem(group.supplier, pn)}
-                  onQtyChange={(pn, qty) => updateQty(group.supplier, pn, qty)}
-                  onSelectAll={() => selectAll(group.supplier)}
-                  onDeselectAll={() => deselectAll(group.supplier)}
-                  onViewHistory={viewHistory}
-                  isExpanded={expandedSuppliers.has(group.supplier)}
-                  onToggleExpand={() => toggleExpand(group.supplier)}
-                />
-
-                {/* Create Order Button */}
-                {expandedSuppliers.has(group.supplier) && 
-                 (selectedItems[group.supplier]?.size || 0) > 0 && 
-                 group.supplier !== 'TANPA SUPPLIER' && (
-                  <div className="mt-2 flex justify-end">
-                    <button
-                      onClick={() => createOrder(group.supplier)}
-                      className="px-6 py-3 bg-green-600 text-white rounded-xl font-bold hover:bg-green-500 flex items-center gap-2 shadow-lg shadow-green-900/50"
-                    >
-                      <Send size={18} />
-                      Buat Order ke {group.supplier}
-                    </button>
-                  </div>
-                )}
-              </div>
-            ))}
-          </>
         )}
       </div>
-
-      {/* Modals */}
-      <HistoryModal
-        isOpen={historyModal.isOpen}
-        partNumber={historyModal.partNumber}
-        itemName={historyModal.itemName}
-        history={historyModal.history}
-        onClose={() => setHistoryModal({ isOpen: false, partNumber: '', itemName: '', history: [] })}
-      />
-
-      <OrderPreviewModal
-        isOpen={orderPreview.isOpen}
-        supplier={orderPreview.supplier}
-        items={orderPreview.items}
-        storeName={storeConfig?.displayName || selectedStore?.toUpperCase() || 'Toko'}
-        onClose={() => setOrderPreview({ isOpen: false, supplier: '', items: [] })}
-        onConfirm={confirmOrder}
-        onCopyText={copyOrderText}
-      />
-
-      <OrderHistoryModal
-        isOpen={orderHistoryModal}
-        orders={savedOrders}
-        onClose={() => setOrderHistoryModal(false)}
-        onUpdateStatus={handleUpdateOrderStatus}
-        onDelete={handleDeleteOrder}
-        onViewOrder={(order) => {
-          setOrderPreview({
-            isOpen: true,
-            supplier: order.supplier,
-            items: order.items
-          });
-          setOrderHistoryModal(false);
-        }}
-      />
+      
+      {/* Purchase History Modal */}
+      {historyItem && (
+        <PurchaseHistoryModal
+          partNumber={historyItem.part_number}
+          namaBarang={historyItem.nama_barang}
+          store={selectedStore}
+          onClose={() => setHistoryItem(null)}
+        />
+      )}
+      
+      {/* Purchase Order Preview Modal */}
+      {showPOPreview && currentSupplier && (
+        <PurchaseOrderPreview
+          supplier={currentSupplier}
+          items={cart.filter(c => c.supplier === currentSupplier)}
+          poNumber={currentPONumber}
+          store={selectedStore}
+          onClose={() => {
+            setShowPOPreview(false);
+            setCurrentSupplier('');
+          }}
+          onConfirm={handleConfirmOrder}
+          saving={savingOrder}
+        />
+      )}
+      
+      {/* Order History Modal */}
+      {showOrderHistory && (
+        <OrderHistoryModal
+          store={selectedStore}
+          onClose={() => setShowOrderHistory(false)}
+        />
+      )}
     </div>
   );
 };
