@@ -26,6 +26,9 @@ interface OrderCartItem {
   qty: number;
   current_stock: number;
   imageUrl?: string;
+  supplier: string;
+  price: number;
+  tempo: string;
 }
 
 export const FloatingQuickAccess: React.FC<FloatingQuickAccessProps> = ({
@@ -65,9 +68,12 @@ export const FloatingQuickAccess: React.FC<FloatingQuickAccessProps> = ({
   // Supplier search state for order tab
   const [orderSearchQuery, setOrderSearchQuery] = useState('');
   const [orderSearchLoading, setOrderSearchLoading] = useState(false);
+  const [orderSearchResults, setOrderSearchResults] = useState<InventoryItem[]>([]);
   const [supplierPrices, setSupplierPrices] = useState<SupplierPriceInfo[]>([]);
   const [selectedOrderItem, setSelectedOrderItem] = useState<InventoryItem | null>(null);
+  const [selectedSupplier, setSelectedSupplier] = useState<string>('Supplier Tidak Diketahui');
   const orderSearchInputRef = useRef<HTMLInputElement>(null);
+  const orderListRef = useRef<HTMLDivElement>(null);
   
   // Price history state for search tab
   const [priceHistory, setPriceHistory] = useState<PriceHistoryItem[]>([]);
@@ -252,9 +258,10 @@ export const FloatingQuickAccess: React.FC<FloatingQuickAccessProps> = ({
     return () => clearTimeout(timer);
   }, [partNumberSearch, nameSearch, brandSearch, appSearch, selectedStore]);
 
-  // Order search - fetch supplier prices when searching
+  // Order search - fetch items and supplier prices when searching
   useEffect(() => {
     if (!orderSearchQuery || orderSearchQuery.length < 2) {
+      setOrderSearchResults([]);
       setSupplierPrices([]);
       setSelectedOrderItem(null);
       return;
@@ -263,16 +270,12 @@ export const FloatingQuickAccess: React.FC<FloatingQuickAccessProps> = ({
     const timer = setTimeout(async () => {
       setOrderSearchLoading(true);
       try {
-        // First, search for the item to get its details
-        const { data: items } = await fetchShopItems(1, 1, { searchTerm: orderSearchQuery }, selectedStore);
+        // Search for items matching the query
+        const { data: items } = await fetchShopItems(1, 20, { searchTerm: orderSearchQuery }, selectedStore);
         if (items && items.length > 0) {
-          setSelectedOrderItem(items[0]);
-          // Fetch supplier prices for this part number
-          const prices = await fetchSupplierPricesByPartNumber(selectedStore, items[0].partNumber);
-          setSupplierPrices(prices);
+          setOrderSearchResults(items);
         } else {
-          setSelectedOrderItem(null);
-          setSupplierPrices([]);
+          setOrderSearchResults([]);
         }
       } catch (err) {
         console.error('Order search error:', err);
@@ -283,6 +286,31 @@ export const FloatingQuickAccess: React.FC<FloatingQuickAccessProps> = ({
 
     return () => clearTimeout(timer);
   }, [orderSearchQuery, selectedStore]);
+
+  // Fetch supplier prices when item is selected
+  useEffect(() => {
+    if (!selectedOrderItem) {
+      setSupplierPrices([]);
+      return;
+    }
+    
+    const fetchPrices = async () => {
+      try {
+        const prices = await fetchSupplierPricesByPartNumber(selectedStore, selectedOrderItem.partNumber);
+        setSupplierPrices(prices);
+        // Auto-select first supplier if available
+        if (prices.length > 0) {
+          setSelectedSupplier(prices[0].supplier);
+        } else {
+          setSelectedSupplier('Supplier Tidak Diketahui');
+        }
+      } catch (err) {
+        console.error('Error fetching supplier prices:', err);
+      }
+    };
+    
+    fetchPrices();
+  }, [selectedOrderItem, selectedStore]);
 
   // Scroll highlighted item into view
   useEffect(() => {
@@ -370,11 +398,11 @@ export const FloatingQuickAccess: React.FC<FloatingQuickAccessProps> = ({
   };
 
   // ========== ORDER CART FUNCTIONS ==========
-  const addToOrderCart = (item: InventoryItem) => {
-    const existing = orderCart.find(c => c.part_number === item.partNumber);
+  const addToOrderCart = (item: InventoryItem, supplier: string, price: number = 0, tempo: string = 'CASH') => {
+    const existing = orderCart.find(c => c.part_number === item.partNumber && c.supplier === supplier);
     if (existing) {
       setOrderCart(prev => prev.map(c => 
-        c.part_number === item.partNumber 
+        c.part_number === item.partNumber && c.supplier === supplier
           ? { ...c, qty: c.qty + 1 }
           : c
       ));
@@ -384,21 +412,24 @@ export const FloatingQuickAccess: React.FC<FloatingQuickAccessProps> = ({
         nama_barang: item.name,
         qty: 1,
         current_stock: item.quantity,
-        imageUrl: item.imageUrl || item.images?.[0]
+        imageUrl: item.imageUrl || item.images?.[0],
+        supplier: supplier,
+        price: price,
+        tempo: tempo
       }]);
     }
   };
 
-  const updateOrderQty = (partNumber: string, delta: number) => {
+  const updateOrderQty = (partNumber: string, supplier: string, delta: number) => {
     setOrderCart(prev => prev.map(c => 
-      c.part_number === partNumber 
+      c.part_number === partNumber && c.supplier === supplier
         ? { ...c, qty: Math.max(1, c.qty + delta) }
         : c
     ));
   };
 
-  const removeFromOrderCart = (partNumber: string) => {
-    setOrderCart(prev => prev.filter(c => c.part_number !== partNumber));
+  const removeFromOrderCart = (partNumber: string, supplier: string) => {
+    setOrderCart(prev => prev.filter(c => !(c.part_number === partNumber && c.supplier === supplier)));
   };
 
   const submitOrderToBarangKosong = async () => {
@@ -406,26 +437,48 @@ export const FloatingQuickAccess: React.FC<FloatingQuickAccessProps> = ({
     
     setSubmittingOrder(true);
     try {
-      // Insert to pending_supplier_orders table
-      const { error } = await supabase
-        .from('pending_supplier_orders')
-        .insert(orderCart.map(item => ({
-          store: selectedStore,
-          part_number: item.part_number,
-          nama_barang: item.nama_barang,
-          qty_requested: item.qty,
-          current_stock: item.current_stock,
-          requested_by: userName || 'Admin',
-          status: 'pending',
-          created_at: new Date().toISOString()
-        })));
-
-      if (error) throw error;
+      // Get existing cart from localStorage
+      const storageKey = `barangKosongCart_${selectedStore || 'mjm'}`;
+      const existingCartStr = localStorage.getItem(storageKey);
+      const existingCart = existingCartStr ? JSON.parse(existingCartStr) : [];
+      
+      // Convert order cart items to BarangKosong cart format
+      const newCartItems = orderCart.map(item => ({
+        part_number: item.part_number,
+        nama_barang: item.nama_barang,
+        supplier: item.supplier,
+        qty: item.qty,
+        price: item.price, // Use the price from cart item
+        tempo: item.tempo, // Use the tempo from cart item
+        brand: '',
+        application: ''
+      }));
+      
+      // Merge with existing cart (update qty if same part_number & supplier, else add)
+      const mergedCart = [...existingCart];
+      newCartItems.forEach(newItem => {
+        const existingIdx = mergedCart.findIndex(
+          (c: any) => c.part_number === newItem.part_number && c.supplier === newItem.supplier
+        );
+        if (existingIdx >= 0) {
+          mergedCart[existingIdx].qty += newItem.qty;
+        } else {
+          mergedCart.push(newItem);
+        }
+      });
+      
+      // Save to localStorage
+      localStorage.setItem(storageKey, JSON.stringify(mergedCart));
+      
+      // Dispatch custom event to notify BarangKosongView
+      window.dispatchEvent(new CustomEvent('barangKosongCartUpdated', { 
+        detail: { store: selectedStore || 'mjm' } 
+      }));
 
       // Clear cart
       setOrderCart([]);
       setShowOrderCart(false);
-      alert('Order berhasil dikirim! Silakan cek di menu Barang Kosong untuk approval.');
+      alert('Order berhasil ditambahkan ke keranjang Barang Kosong!');
     } catch (err) {
       console.error('Error submitting order:', err);
       alert('Gagal mengirim order. Silakan coba lagi.');
@@ -862,7 +915,8 @@ export const FloatingQuickAccess: React.FC<FloatingQuickAccessProps> = ({
                 </button>
                 <button
                   onClick={() => {
-                    addToOrderCart(previewItem);
+                    // For preview item, price is 0 since no supplier selected
+                    addToOrderCart(previewItem, 'Supplier Tidak Diketahui', 0, 'CASH');
                     setPreviewItem(null);
                   }}
                   className="flex-1 bg-purple-600 hover:bg-purple-500 text-white py-2.5 rounded-xl text-sm font-medium transition-colors flex items-center justify-center gap-2"
@@ -1335,10 +1389,10 @@ export const FloatingQuickAccess: React.FC<FloatingQuickAccessProps> = ({
 
                 {activeTab === 'order' && (
                   <div className="space-y-3">
-                    {/* Search for Supplier Prices */}
+                    {/* Search Input */}
                     <div>
                       <label className="text-xs text-gray-400 mb-1 flex items-center gap-1">
-                        <Search size={12} /> Cari Part Number untuk lihat harga importir
+                        <Search size={12} /> Cari barang untuk order
                       </label>
                       <div className="relative">
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
@@ -1346,8 +1400,11 @@ export const FloatingQuickAccess: React.FC<FloatingQuickAccessProps> = ({
                           ref={orderSearchInputRef}
                           type="text"
                           value={orderSearchQuery}
-                          onChange={(e) => setOrderSearchQuery(e.target.value)}
-                          placeholder="Ketik part number..."
+                          onChange={(e) => {
+                            setOrderSearchQuery(e.target.value);
+                            setSelectedOrderItem(null);
+                          }}
+                          placeholder="Ketik part number atau nama barang..."
                           className="w-full pl-10 pr-10 py-2.5 bg-gray-700 border border-gray-600 rounded-xl text-sm text-white placeholder-gray-400 focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500 outline-none"
                           autoComplete="off"
                         />
@@ -1357,10 +1414,57 @@ export const FloatingQuickAccess: React.FC<FloatingQuickAccessProps> = ({
                       </div>
                     </div>
 
-                    {/* Selected Item Info */}
+                    {/* Scrollable Search Results */}
+                    {orderSearchResults.length > 0 && !selectedOrderItem && (
+                      <div ref={orderListRef} className="max-h-48 overflow-y-auto rounded-xl border border-gray-700 bg-gray-750 space-y-1 p-2">
+                        {orderSearchResults.map((item, idx) => (
+                          <div
+                            key={item.id || idx}
+                            onClick={() => {
+                              setSelectedOrderItem(item);
+                              setOrderSearchResults([]);
+                            }}
+                            className="flex items-center gap-2 p-2 rounded-lg cursor-pointer transition-colors hover:bg-gray-700"
+                          >
+                            {/* Image */}
+                            <div className="w-10 h-10 bg-gray-800 rounded-lg overflow-hidden flex-shrink-0">
+                              {item.imageUrl || item.images?.[0] ? (
+                                <img 
+                                  src={item.imageUrl || item.images?.[0]} 
+                                  alt={item.name}
+                                  className="w-full h-full object-cover"
+                                />
+                              ) : (
+                                <div className="w-full h-full flex items-center justify-center">
+                                  <Package size={16} className="text-gray-600" />
+                                </div>
+                              )}
+                            </div>
+                            
+                            {/* Info */}
+                            <div className="flex-1 min-w-0">
+                              <p className="text-white text-xs font-medium truncate">{item.name}</p>
+                              <p className="text-gray-400 text-[10px] font-mono truncate">{item.partNumber}</p>
+                            </div>
+                            
+                            {/* Stock Badge */}
+                            <div className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                              item.quantity > 5 ? 'bg-green-900/50 text-green-400' :
+                              item.quantity > 0 ? 'bg-yellow-900/50 text-yellow-400' :
+                              'bg-red-900/50 text-red-400'
+                            }`}>
+                              {item.quantity}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Selected Item with Supplier Selection */}
                     {selectedOrderItem && (
-                      <div className="bg-gray-750 rounded-xl p-3 border border-gray-600">
-                        <div className="flex items-center gap-3">
+                      <div className="bg-gray-750 rounded-xl p-3 border border-purple-600/50">
+                        {/* Item Info */}
+                        <div className="flex items-center gap-3 mb-3">
                           <div className="w-12 h-12 bg-gray-700 rounded-lg overflow-hidden flex-shrink-0">
                             {selectedOrderItem.imageUrl || selectedOrderItem.images?.[0] ? (
                               <img 
@@ -1375,80 +1479,95 @@ export const FloatingQuickAccess: React.FC<FloatingQuickAccessProps> = ({
                           <div className="flex-1 min-w-0">
                             <p className="text-white text-sm font-medium truncate">{selectedOrderItem.name}</p>
                             <p className="text-gray-400 text-xs font-mono">{selectedOrderItem.partNumber}</p>
-                            <div className="flex items-center gap-2 mt-1">
-                              <span className={`text-xs px-2 py-0.5 rounded ${
-                                selectedOrderItem.quantity === 0 ? 'bg-red-900/50 text-red-400' :
-                                selectedOrderItem.quantity < 4 ? 'bg-yellow-900/50 text-yellow-400' :
-                                'bg-green-900/50 text-green-400'
-                              }`}>
-                                Stok: {selectedOrderItem.quantity}
-                              </span>
-                              <button
-                                onClick={() => {
-                                  addToOrderCart(selectedOrderItem);
-                                  setOrderSearchQuery('');
-                                  setSelectedOrderItem(null);
-                                  setSupplierPrices([]);
-                                }}
-                                className="text-xs bg-purple-600 hover:bg-purple-500 text-white px-2 py-0.5 rounded flex items-center gap-1"
-                              >
-                                <Plus size={12} /> Order
-                              </button>
-                            </div>
+                            <span className={`text-xs px-2 py-0.5 rounded inline-block mt-1 ${
+                              selectedOrderItem.quantity === 0 ? 'bg-red-900/50 text-red-400' :
+                              selectedOrderItem.quantity < 4 ? 'bg-yellow-900/50 text-yellow-400' :
+                              'bg-green-900/50 text-green-400'
+                            }`}>
+                              Stok: {selectedOrderItem.quantity}
+                            </span>
                           </div>
+                          <button
+                            onClick={() => {
+                              setSelectedOrderItem(null);
+                              setSupplierPrices([]);
+                            }}
+                            className="p-1 rounded bg-gray-700 text-gray-400 hover:bg-gray-600 hover:text-white"
+                          >
+                            <X size={14} />
+                          </button>
                         </div>
-                      </div>
-                    )}
 
-                    {/* Supplier Prices List */}
-                    {supplierPrices.length > 0 && (
-                      <div className="bg-gray-750 rounded-xl border border-gray-600 overflow-hidden">
-                        <div className="px-3 py-2 bg-gray-700 border-b border-gray-600 flex items-center gap-2">
-                          <Store size={14} className="text-blue-400" />
-                          <span className="text-xs font-medium text-gray-300">Daftar Importir & Harga</span>
-                          <span className="ml-auto text-xs text-gray-500">{supplierPrices.length} importir</span>
+                        {/* Supplier Selection */}
+                        <div className="mb-3">
+                          <label className="text-xs text-gray-400 mb-1 block">Pilih Supplier:</label>
+                          <select
+                            value={selectedSupplier}
+                            onChange={(e) => setSelectedSupplier(e.target.value)}
+                            className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-sm text-white focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500 outline-none"
+                          >
+                            <option value="Supplier Tidak Diketahui">Supplier Tidak Diketahui</option>
+                            {supplierPrices.map((sp) => (
+                              <option key={sp.supplier} value={sp.supplier}>
+                                {sp.supplier} - {formatPrice(sp.harga_satuan)} ({sp.tempo})
+                              </option>
+                            ))}
+                          </select>
                         </div>
-                        <div className="max-h-40 overflow-y-auto">
-                          {supplierPrices.map((sp, idx) => (
-                            <div 
-                              key={sp.supplier} 
-                              className={`px-3 py-2 flex items-center gap-2 ${idx !== supplierPrices.length - 1 ? 'border-b border-gray-700' : ''} ${idx === 0 ? 'bg-green-900/20' : 'hover:bg-gray-700/50'}`}
-                            >
-                              <div className="flex-1 min-w-0">
-                                <p className="text-white text-xs font-medium truncate flex items-center gap-1">
-                                  {idx === 0 && <TrendingDown size={12} className="text-green-400" />}
-                                  {sp.supplier}
-                                </p>
-                                <div className="flex items-center gap-2 text-[10px] text-gray-500 mt-0.5">
-                                  <span className="flex items-center gap-0.5">
-                                    <Clock size={10} /> {sp.tempo}
+
+                        {/* Supplier Prices Info */}
+                        {supplierPrices.length > 0 && (
+                          <div className="bg-gray-800 rounded-lg p-2 mb-3 max-h-24 overflow-y-auto">
+                            <p className="text-[10px] text-gray-400 mb-1">Riwayat harga dari importir:</p>
+                            <div className="space-y-1">
+                              {supplierPrices.slice(0, 5).map((sp, idx) => (
+                                <div 
+                                  key={sp.supplier} 
+                                  className={`flex items-center justify-between text-[10px] ${
+                                    selectedSupplier === sp.supplier ? 'text-purple-400 font-bold' : 'text-gray-400'
+                                  }`}
+                                >
+                                  <span className="flex items-center gap-1 truncate">
+                                    {idx === 0 && <TrendingDown size={10} className="text-green-400" />}
+                                    {sp.supplier}
                                   </span>
-                                  <span>•</span>
-                                  <span>
-                                    {new Date(sp.last_order_date).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: '2-digit' })}
+                                  <span className={idx === 0 ? 'text-green-400' : ''}>
+                                    {formatPrice(sp.harga_satuan)}
                                   </span>
                                 </div>
-                              </div>
-                              <div className="text-right">
-                                <p className={`text-sm font-bold ${idx === 0 ? 'text-green-400' : 'text-blue-400'}`}>
-                                  {formatPrice(sp.harga_satuan)}
-                                </p>
-                              </div>
+                              ))}
                             </div>
-                          ))}
-                        </div>
+                          </div>
+                        )}
+
+                        {/* Add to Cart Button */}
+                        <button
+                          onClick={() => {
+                            // Get price and tempo from selected supplier
+                            const supplierInfo = supplierPrices.find(sp => sp.supplier === selectedSupplier);
+                            const price = supplierInfo?.harga_satuan || 0;
+                            const tempo = supplierInfo?.tempo || 'CASH';
+                            addToOrderCart(selectedOrderItem, selectedSupplier, price, tempo);
+                            setOrderSearchQuery('');
+                            setSelectedOrderItem(null);
+                            setSupplierPrices([]);
+                          }}
+                          className="w-full py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-lg font-bold text-xs flex items-center justify-center gap-2 transition-colors"
+                        >
+                          <Plus size={14} /> Tambah ke Keranjang
+                        </button>
                       </div>
                     )}
 
-                    {/* Empty state for supplier search */}
-                    {orderSearchQuery && !orderSearchLoading && supplierPrices.length === 0 && !selectedOrderItem && (
+                    {/* Empty state for search */}
+                    {orderSearchQuery && !orderSearchLoading && orderSearchResults.length === 0 && !selectedOrderItem && (
                       <div className="text-center py-4 text-gray-500">
                         <Package size={24} className="mx-auto mb-2 opacity-50" />
-                        <p className="text-xs">Tidak ditemukan data pembelian untuk part number ini</p>
+                        <p className="text-xs">Tidak ditemukan barang dengan kata kunci tersebut</p>
                       </div>
                     )}
 
-                    {/* Divider */}
+                    {/* Cart Section */}
                     {orderCart.length > 0 && (
                       <div className="border-t border-gray-700 pt-3">
                         <h4 className="text-white text-sm font-medium mb-2 flex items-center gap-2">
@@ -1456,7 +1575,7 @@ export const FloatingQuickAccess: React.FC<FloatingQuickAccessProps> = ({
                         </h4>
                         <div className="space-y-2 max-h-32 overflow-y-auto">
                           {orderCart.map((item) => (
-                            <div key={item.part_number} className="flex items-center gap-2 bg-gray-800 rounded-lg p-2">
+                            <div key={`${item.part_number}_${item.supplier}`} className="flex items-center gap-2 bg-gray-800 rounded-lg p-2">
                               <div className="w-8 h-8 bg-gray-700 rounded overflow-hidden flex-shrink-0">
                                 {item.imageUrl ? (
                                   <img src={item.imageUrl} alt={item.nama_barang} className="w-full h-full object-cover" />
@@ -1467,13 +1586,19 @@ export const FloatingQuickAccess: React.FC<FloatingQuickAccessProps> = ({
                               <div className="flex-1 min-w-0">
                                 <p className="text-white text-[10px] font-medium truncate">{item.nama_barang}</p>
                                 <p className="text-gray-500 text-[9px] font-mono truncate">{item.part_number}</p>
+                                <div className="flex items-center gap-1">
+                                  <span className="text-purple-400 text-[9px] truncate">{item.supplier}</span>
+                                  {item.price > 0 && (
+                                    <span className="text-green-400 text-[9px]">• {formatPrice(item.price)}</span>
+                                  )}
+                                </div>
                               </div>
                               <div className="flex items-center gap-1">
-                                <button onClick={() => updateOrderQty(item.part_number, -1)} className="p-0.5 rounded bg-gray-700 text-gray-300 hover:bg-gray-600"><Minus size={10} /></button>
+                                <button onClick={() => updateOrderQty(item.part_number, item.supplier, -1)} className="p-0.5 rounded bg-gray-700 text-gray-300 hover:bg-gray-600"><Minus size={10} /></button>
                                 <span className="px-1.5 text-[10px] font-bold text-purple-400">{item.qty}</span>
-                                <button onClick={() => updateOrderQty(item.part_number, 1)} className="p-0.5 rounded bg-gray-700 text-gray-300 hover:bg-gray-600"><Plus size={10} /></button>
+                                <button onClick={() => updateOrderQty(item.part_number, item.supplier, 1)} className="p-0.5 rounded bg-gray-700 text-gray-300 hover:bg-gray-600"><Plus size={10} /></button>
                               </div>
-                              <button onClick={() => removeFromOrderCart(item.part_number)} className="p-0.5 rounded bg-red-700/50 text-red-400 hover:bg-red-700"><X size={10} /></button>
+                              <button onClick={() => removeFromOrderCart(item.part_number, item.supplier)} className="p-0.5 rounded bg-red-700/50 text-red-400 hover:bg-red-700"><X size={10} /></button>
                             </div>
                           ))}
                         </div>
@@ -1483,16 +1608,16 @@ export const FloatingQuickAccess: React.FC<FloatingQuickAccessProps> = ({
                           className="w-full mt-2 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold flex items-center justify-center gap-2 text-xs transition-colors disabled:opacity-50"
                         >
                           <Send size={14} />
-                          {submittingOrder ? 'Mengirim...' : 'Kirim Order'}
+                          {submittingOrder ? 'Mengirim...' : 'Kirim ke Barang Kosong'}
                         </button>
                       </div>
                     )}
 
                     {/* Initial state when no search and no cart */}
-                    {!orderSearchQuery && orderCart.length === 0 && (
+                    {!orderSearchQuery && orderCart.length === 0 && !selectedOrderItem && (
                       <div className="text-center py-6 text-gray-500">
                         <PackageX size={28} className="mx-auto mb-2 opacity-50" />
-                        <p className="text-xs">Cari part number diatas untuk melihat harga dari berbagai importir</p>
+                        <p className="text-xs">Cari barang untuk menambahkan ke order</p>
                       </div>
                     )}
                   </div>

@@ -1,15 +1,29 @@
 // FILE: src/components/quickInput/BarangMasukTableView.tsx
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { useStore } from '../../context/StoreContext';
 import { fetchBarangMasukLog, deleteBarangLog } from '../../services/supabaseService';
 import { supabase } from '../../services/supabaseClient';
 import { formatRupiah, formatDate } from '../../utils';
-import { Loader2, RefreshCw, ChevronLeft, ChevronRight, PackageOpen, Trash2, Search, X, Edit2, Save, XCircle } from 'lucide-react';
+import { Loader2, RefreshCw, ChevronLeft, ChevronRight, PackageOpen, Trash2, Search, X, Edit2, Save, XCircle, Image } from 'lucide-react';
+import { ImageViewer } from '../common/ImageViewer';
 
 interface Props { 
     refreshTrigger: number; 
     onRefresh?: () => void;
 }
+
+// Helper to extract all photo URLs from foto row
+const extractPhotoUrls = (fotoRow: any): string[] => {
+    if (!fotoRow) return [];
+    const urls: string[] = [];
+    for (let i = 1; i <= 10; i++) {
+        const url = fotoRow[`foto_${i}`];
+        if (url && typeof url === 'string' && url.trim()) {
+            urls.push(url.trim());
+        }
+    }
+    return urls;
+};
 
 export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger, onRefresh }) => {
     const { selectedStore } = useStore();
@@ -31,7 +45,82 @@ export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger, onRefres
         tempo: string;
     }>({ quantity: '', harga_satuan: '', customer: '', tempo: '' });
     const [savingId, setSavingId] = useState<number | null>(null);
+    
+    // Photo hover & viewer states
+    const [hoverPartNumber, setHoverPartNumber] = useState<string | null>(null);
+    const [hoverPhotoUrl, setHoverPhotoUrl] = useState<string | null>(null);
+    const [hoverLoading, setHoverLoading] = useState(false);
+    const [hoverPosition, setHoverPosition] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+    const [photoCache, setPhotoCache] = useState<Record<string, string[]>>({});
+    const [viewerImages, setViewerImages] = useState<string[]>([]);
+    const [viewerOpen, setViewerOpen] = useState(false);
+    
     const LIMIT = 10;
+
+    // Fetch photos for a part number
+    const fetchPhotosForPartNumber = useCallback(async (partNumber: string): Promise<string[]> => {
+        // Check cache first
+        if (photoCache[partNumber]) {
+            return photoCache[partNumber];
+        }
+        
+        try {
+            // Use ilike for case-insensitive matching
+            const { data: fotoData, error } = await supabase
+                .from('foto')
+                .select('*')
+                .ilike('part_number', partNumber)
+                .limit(1)
+                .single();
+            
+            if (error) {
+                console.log('[Photo] No photo found for:', partNumber);
+                setPhotoCache(prev => ({ ...prev, [partNumber]: [] }));
+                return [];
+            }
+            
+            const urls = extractPhotoUrls(fotoData);
+            console.log('[Photo] Found', urls.length, 'photos for:', partNumber);
+            setPhotoCache(prev => ({ ...prev, [partNumber]: urls }));
+            return urls;
+        } catch (e) {
+            console.error('[Photo] Error fetching:', e);
+            setPhotoCache(prev => ({ ...prev, [partNumber]: [] }));
+            return [];
+        }
+    }, [photoCache]);
+
+    // Handle mouse enter on part number
+    const handlePartNumberMouseEnter = async (e: React.MouseEvent, partNumber: string) => {
+        const rect = (e.target as HTMLElement).getBoundingClientRect();
+        setHoverPosition({ x: rect.left, y: rect.bottom + 5 });
+        setHoverPartNumber(partNumber);
+        setHoverLoading(true);
+        setHoverPhotoUrl(null);
+        
+        const photos = await fetchPhotosForPartNumber(partNumber);
+        setHoverLoading(false);
+        if (photos.length > 0) {
+            // Set photo URL langsung tanpa cek state karena state async
+            setHoverPhotoUrl(photos[0]);
+        }
+    };
+
+    // Handle mouse leave on part number
+    const handlePartNumberMouseLeave = () => {
+        setHoverPartNumber(null);
+        setHoverPhotoUrl(null);
+        setHoverLoading(false);
+    };
+
+    // Handle click on part number to open viewer
+    const handlePartNumberClick = async (partNumber: string) => {
+        const photos = await fetchPhotosForPartNumber(partNumber);
+        if (photos.length > 0) {
+            setViewerImages(photos);
+            setViewerOpen(true);
+        }
+    };
 
     const loadData = async () => {
         setLoading(true);
@@ -305,7 +394,18 @@ export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger, onRefres
                             data.map((item, idx) => (
                                 <tr key={item.id || idx} className={`hover:bg-gray-800/50 transition-colors ${editingId === item.id ? 'bg-gray-800/80' : ''}`}>
                                     <td className="px-3 py-2 text-gray-400 font-mono whitespace-nowrap">{formatDate(item.created_at)}</td>
-                                    <td className="px-3 py-2 font-bold text-gray-200 font-mono">{item.part_number}</td>
+                                    <td className="px-3 py-2 font-bold font-mono">
+                                        <span 
+                                            className="text-blue-400 underline decoration-dotted cursor-pointer hover:text-blue-300 transition-colors inline-flex items-center gap-1"
+                                            onMouseEnter={(e) => handlePartNumberMouseEnter(e, item.part_number)}
+                                            onMouseLeave={handlePartNumberMouseLeave}
+                                            onClick={() => handlePartNumberClick(item.part_number)}
+                                            title="Hover untuk preview, klik untuk lihat semua foto"
+                                        >
+                                            {item.part_number}
+                                            <Image size={12} className="opacity-50" />
+                                        </span>
+                                    </td>
                                     <td className="px-3 py-2 text-gray-300 max-w-[200px] truncate" title={item.name}>{item.name || '-'}</td>
                                     <td className="px-3 py-2 text-right">
                                         {editingId === item.id ? (
@@ -430,6 +530,52 @@ export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger, onRefres
                     <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page >= totalPages} className="p-1 rounded hover:bg-gray-700 disabled:opacity-30 text-gray-300"><ChevronRight size={16}/></button>
                 </div>
             </div>
+
+            {/* Photo Hover Tooltip - Show when hovering */}
+            {hoverPartNumber && (
+                <div 
+                    className="fixed z-[9999] bg-gray-900 border border-gray-600 rounded-lg shadow-2xl p-2 pointer-events-none"
+                    style={{ 
+                        left: Math.min(hoverPosition.x, window.innerWidth - 220), 
+                        top: Math.min(hoverPosition.y, window.innerHeight - 220) 
+                    }}
+                >
+                    {hoverLoading ? (
+                        <div className="w-48 h-48 flex items-center justify-center bg-gray-800 rounded-lg">
+                            <Loader2 size={24} className="animate-spin text-blue-400" />
+                        </div>
+                    ) : hoverPhotoUrl ? (
+                        <img 
+                            src={hoverPhotoUrl} 
+                            alt={hoverPartNumber}
+                            className="w-48 h-48 object-contain rounded-lg bg-gray-800"
+                            onError={(e) => {
+                                (e.target as HTMLImageElement).src = '';
+                                (e.target as HTMLImageElement).alt = 'Gagal memuat';
+                            }}
+                        />
+                    ) : (
+                        <div className="w-48 h-32 flex items-center justify-center bg-gray-800 rounded-lg text-gray-500 text-xs">
+                            <div className="text-center">
+                                <Image size={24} className="mx-auto mb-2 opacity-50" />
+                                Tidak ada foto
+                            </div>
+                        </div>
+                    )}
+                    {hoverPhotoUrl && (
+                        <div className="text-[10px] text-gray-400 text-center mt-1">
+                            Klik untuk lihat semua foto
+                        </div>
+                    )}
+                </div>
+            )}
+
+            {/* Image Viewer Modal */}
+            <ImageViewer 
+                images={viewerImages}
+                isOpen={viewerOpen}
+                onClose={() => setViewerOpen(false)}
+            />
         </div>
     );
 };

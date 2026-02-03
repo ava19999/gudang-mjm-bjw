@@ -1142,10 +1142,17 @@ const CartSidebar: React.FC<{
               </h4>
               <div className="space-y-2">
                 {items.map(item => (
-                  <div key={item.part_number} className="flex items-center justify-between text-xs">
+                  <div key={item.part_number} className="flex items-center justify-between text-xs bg-gray-800/50 rounded-lg p-2">
                     <div className="flex-1 min-w-0">
-                      <p className="text-gray-300 truncate">{item.nama_barang}</p>
-                      <p className="text-gray-500 font-mono">{item.part_number}</p>
+                      <p className="text-gray-300 truncate font-medium">{item.nama_barang}</p>
+                      <p className="text-gray-500 font-mono text-[10px]">{item.part_number}</p>
+                      <div className="flex items-center gap-2 mt-1">
+                        <span className="text-green-400 font-bold">{item.price > 0 ? formatCurrency(item.price) : 'Harga belum ada'}</span>
+                        <span className="text-gray-500">×</span>
+                        <span className="text-blue-400">{item.qty}</span>
+                        <span className="text-gray-500">=</span>
+                        <span className="text-yellow-400 font-bold">{formatCurrency(item.price * item.qty)}</span>
+                      </div>
                     </div>
                     <div className="flex items-center gap-2 ml-2">
                       <div className="flex items-center gap-1">
@@ -1216,6 +1223,8 @@ export const BarangKosongView: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'TEMPO' | 'CASH'>('TEMPO');
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [selectedSupplierFilter, setSelectedSupplierFilter] = useState<string>('');
+  const [selectedPartNoFilter, setSelectedPartNoFilter] = useState<string>('');
   const [supplierGroups, setSupplierGroups] = useState<SupplierGroup[]>([]);
   const [expandedSuppliers, setExpandedSuppliers] = useState<Set<string>>(new Set());
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -1351,22 +1360,101 @@ export const BarangKosongView: React.FC = () => {
     fetchData();
   }, [selectedStore, activeTab]);
   
-  // Filter suppliers by search
-  const filteredGroups = useMemo(() => {
-    if (!searchTerm.trim()) return supplierGroups;
+  // Load cart from localStorage on mount and listen for updates
+  useEffect(() => {
+    const loadCartFromStorage = () => {
+      const storageKey = `barangKosongCart_${selectedStore || 'mjm'}`;
+      const savedCart = localStorage.getItem(storageKey);
+      if (savedCart) {
+        try {
+          const cartItems = JSON.parse(savedCart) as CartItem[];
+          if (cartItems.length > 0) {
+            setCart(cartItems);
+            setShowCart(true);
+            setToast({ msg: `${cartItems.length} item dimuat ke keranjang`, type: 'success' });
+          }
+        } catch (e) {
+          console.error('Error loading cart from storage:', e);
+        }
+      }
+    };
     
-    const search = searchTerm.toLowerCase();
-    return supplierGroups
-      .map(group => ({
-        ...group,
-        items: group.items.filter(item => 
-          item.part_number.toLowerCase().includes(search) ||
-          item.nama_barang.toLowerCase().includes(search) ||
-          group.supplier.toLowerCase().includes(search)
-        )
-      }))
-      .filter(g => g.items.length > 0 || g.supplier.toLowerCase().includes(search));
-  }, [supplierGroups, searchTerm]);
+    loadCartFromStorage();
+    
+    // Listen for cart updates from floating widget
+    const handleCartUpdate = (event: CustomEvent) => {
+      if (event.detail.store === (selectedStore || 'mjm')) {
+        loadCartFromStorage();
+      }
+    };
+    
+    window.addEventListener('barangKosongCartUpdated', handleCartUpdate as EventListener);
+    
+    return () => {
+      window.removeEventListener('barangKosongCartUpdated', handleCartUpdate as EventListener);
+    };
+  }, [selectedStore]);
+  
+  // Save cart to localStorage when it changes
+  useEffect(() => {
+    const storageKey = `barangKosongCart_${selectedStore || 'mjm'}`;
+    if (cart.length > 0) {
+      localStorage.setItem(storageKey, JSON.stringify(cart));
+    } else {
+      localStorage.removeItem(storageKey);
+    }
+  }, [cart, selectedStore]);
+  
+  // Get unique supplier list
+  const allSuppliers = useMemo(() => {
+    return supplierGroups.map(g => g.supplier).sort((a, b) => a.localeCompare(b));
+  }, [supplierGroups]);
+  
+  // Get unique part numbers list
+  const allPartNumbers = useMemo(() => {
+    const parts = new Set<string>();
+    supplierGroups.forEach(group => {
+      group.items.forEach(item => parts.add(item.part_number));
+    });
+    return Array.from(parts).sort((a, b) => a.localeCompare(b));
+  }, [supplierGroups]);
+  
+  // Filter suppliers by search, selected supplier, and selected part number
+  const filteredGroups = useMemo(() => {
+    let result = supplierGroups;
+    
+    // Filter by selected supplier
+    if (selectedSupplierFilter) {
+      result = result.filter(g => g.supplier === selectedSupplierFilter);
+    }
+    
+    // Filter by selected part number
+    if (selectedPartNoFilter) {
+      result = result
+        .map(group => ({
+          ...group,
+          items: group.items.filter(item => item.part_number === selectedPartNoFilter)
+        }))
+        .filter(g => g.items.length > 0);
+    }
+    
+    // Filter by search term
+    if (searchTerm.trim()) {
+      const search = searchTerm.toLowerCase();
+      result = result
+        .map(group => ({
+          ...group,
+          items: group.items.filter(item => 
+            item.part_number.toLowerCase().includes(search) ||
+            item.nama_barang.toLowerCase().includes(search) ||
+            group.supplier.toLowerCase().includes(search)
+          )
+        }))
+        .filter(g => g.items.length > 0 || g.supplier.toLowerCase().includes(search));
+    }
+    
+    return result;
+  }, [supplierGroups, searchTerm, selectedSupplierFilter, selectedPartNoFilter]);
   
   // Toggle supplier expansion
   const toggleSupplier = (supplier: string) => {
@@ -1422,6 +1510,9 @@ export const BarangKosongView: React.FC = () => {
   
   const clearCart = () => {
     setCart([]);
+    // Also clear from localStorage
+    const storageKey = `barangKosongCart_${selectedStore || 'mjm'}`;
+    localStorage.removeItem(storageKey);
     setToast({ msg: 'Keranjang dikosongkan', type: 'success' });
   };
   
@@ -1592,17 +1683,87 @@ export const BarangKosongView: React.FC = () => {
           </button>
         </div>
         
-        {/* Search */}
-        <div className="relative">
-          <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
-          <input
-            type="text"
-            placeholder="Cari supplier, part number, atau nama barang..."
-            className="w-full pl-10 pr-4 py-3 bg-gray-900 border border-gray-700 rounded-lg text-gray-200 focus:border-blue-500 outline-none transition-colors"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-          />
+        {/* Filter Dropdowns */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          {/* Supplier Dropdown */}
+          <div className="relative">
+            <User size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+            <select
+              value={selectedSupplierFilter}
+              onChange={(e) => setSelectedSupplierFilter(e.target.value)}
+              className="w-full pl-10 pr-8 py-3 bg-gray-900 border border-gray-700 rounded-lg text-gray-200 focus:border-blue-500 outline-none transition-colors appearance-none cursor-pointer"
+            >
+              <option value="">Semua Supplier ({allSuppliers.length})</option>
+              {allSuppliers.map(s => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
+            <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" />
+          </div>
+          
+          {/* Part Number Dropdown */}
+          <div className="relative">
+            <Package size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+            <select
+              value={selectedPartNoFilter}
+              onChange={(e) => setSelectedPartNoFilter(e.target.value)}
+              className="w-full pl-10 pr-8 py-3 bg-gray-900 border border-gray-700 rounded-lg text-gray-200 focus:border-blue-500 outline-none transition-colors appearance-none cursor-pointer"
+            >
+              <option value="">Semua Part Number ({allPartNumbers.length})</option>
+              {allPartNumbers.map(p => (
+                <option key={p} value={p}>{p}</option>
+              ))}
+            </select>
+            <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" />
+          </div>
+          
+          {/* Search Input */}
+          <div className="relative">
+            <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+            <input
+              type="text"
+              placeholder="Cari nama barang..."
+              className="w-full pl-10 pr-10 py-3 bg-gray-900 border border-gray-700 rounded-lg text-gray-200 focus:border-blue-500 outline-none transition-colors"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+            {(searchTerm || selectedSupplierFilter || selectedPartNoFilter) && (
+              <button
+                onClick={() => {
+                  setSearchTerm('');
+                  setSelectedSupplierFilter('');
+                  setSelectedPartNoFilter('');
+                }}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300"
+                title="Reset filter"
+              >
+                <X size={16} />
+              </button>
+            )}
+          </div>
         </div>
+        
+        {/* Active Filters Badge */}
+        {(selectedSupplierFilter || selectedPartNoFilter) && (
+          <div className="flex flex-wrap gap-2 mt-2">
+            {selectedSupplierFilter && (
+              <span className="inline-flex items-center gap-1 px-2 py-1 bg-blue-600/20 text-blue-400 rounded-full text-xs">
+                <User size={12} /> {selectedSupplierFilter}
+                <button onClick={() => setSelectedSupplierFilter('')} className="hover:text-blue-200">
+                  <X size={12} />
+                </button>
+              </span>
+            )}
+            {selectedPartNoFilter && (
+              <span className="inline-flex items-center gap-1 px-2 py-1 bg-purple-600/20 text-purple-400 rounded-full text-xs">
+                <Package size={12} /> {selectedPartNoFilter}
+                <button onClick={() => setSelectedPartNoFilter('')} className="hover:text-purple-200">
+                  <X size={12} />
+                </button>
+              </span>
+            )}
+          </div>
+        )}
         
         {/* Stats */}
         <div className="grid grid-cols-4 gap-3 mt-4">
@@ -1663,7 +1824,7 @@ export const BarangKosongView: React.FC = () => {
         
         {/* Cart Sidebar */}
         {showCart && (
-          <div className="w-80 border-l border-gray-700 p-4 overflow-y-auto bg-gray-900/50">
+          <div className="w-[420px] border-l border-gray-700 p-4 overflow-y-auto bg-gray-900/50">
             <CartSidebar
               cart={cart}
               onUpdateQty={updateCartQty}

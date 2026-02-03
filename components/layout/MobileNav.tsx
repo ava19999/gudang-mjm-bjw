@@ -5,9 +5,10 @@ import { ActiveView } from '../../types/ui';
 import { FinanceMenu } from '../finance/FinanceMenu';
 import { OnlineMenu } from '../online/OnlineMenu';
 import { ScanResiMenu } from '../scanResi/ScanResiMenu';
+import { GudangMenu } from '../gudang/GudangMenu';
 import { NotificationBadge } from '../common/NotificationBadge';
 
-type OpenMenu = 'none' | 'finance' | 'online' | 'scanresi';
+type OpenMenu = 'none' | 'finance' | 'online' | 'scanresi' | 'gudang';
 
 interface MobileNavProps {
   isAdmin: boolean;
@@ -76,16 +77,16 @@ export const MobileNav: React.FC<MobileNavProps> = ({
                       <span className={`text-[9px] font-medium transition-all ${activeView==='shop'?'text-purple-300':'text-gray-500'}`}>Beranda</span>
                   </button>
                   
-                  <button 
-                      onClick={()=>setActiveView('inventory')} 
-                      className={`flex flex-col items-center justify-center gap-0.5 transition-all duration-200 active:scale-95 relative ${activeView==='inventory'?'text-purple-400':'text-gray-500 hover:text-gray-300'}`}
-                  >
-                      {activeView==='inventory' && <div className="absolute top-0 left-1/2 -translate-x-1/2 w-10 h-0.5 bg-gradient-to-r from-transparent via-purple-400 to-transparent rounded-full"></div>}
-                      <div className={`p-1.5 rounded-lg transition-all duration-200 ${activeView==='inventory'?'bg-purple-900/30 shadow-lg shadow-purple-900/20':'bg-transparent'}`}>
-                          <Package size={18} className={`transition-all duration-200 ${activeView==='inventory'?'fill-purple-900/50 drop-shadow-sm':''}`} />
-                      </div>
-                      <span className={`text-[9px] font-medium transition-all ${activeView==='inventory'?'text-purple-300':'text-gray-500'}`}>Gudang</span>
-                  </button>
+                  <GudangMenu 
+                    activeView={activeView} 
+                    setActiveView={setActiveView} 
+                    isMobile={true}
+                    isOpen={openMenu === 'gudang'}
+                    onToggle={(e) => {
+                      e.stopPropagation();
+                      setOpenMenu(openMenu === 'gudang' ? 'none' : 'gudang');
+                    }}
+                  />
                   
                   <button 
                       onClick={()=>setActiveView('quick_input')} 
