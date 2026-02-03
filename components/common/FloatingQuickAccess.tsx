@@ -1,7 +1,8 @@
 // FILE: components/common/FloatingQuickAccess.tsx
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Search, Plus, X, Package, ArrowRight, Loader2, Sparkles, Edit3, MapPin, Tag, Hash, Layers, Image as ImageIcon, Calculator, RefreshCw, ArrowRightLeft } from 'lucide-react';
-import { fetchSearchSuggestions, fetchInventoryByPartNumber } from '../../services/supabaseService';
+import { Search, Plus, X, Package, ArrowRight, Loader2, Sparkles, Edit3, MapPin, Tag, Hash, Layers, Image as ImageIcon, Calculator, RefreshCw, ArrowRightLeft, ShoppingCart, Send, Minus, PackageX, DollarSign, Store, Clock, TrendingDown, History, TrendingUp, PenTool } from 'lucide-react';
+import { fetchSearchSuggestions, fetchInventoryByPartNumber, fetchShopItems, fetchSupplierPricesByPartNumber, SupplierPriceInfo, fetchPriceHistoryByPartNumber, PriceHistoryItem, fetchAllDistinctValues } from '../../services/supabaseService';
+import { supabase } from '../../services/supabaseClient';
 import { useStore } from '../../context/StoreContext';
 import { InventoryItem } from '../../types';
 
@@ -19,22 +20,59 @@ interface ExchangeRates {
   lastUpdated: string;
 }
 
+interface OrderCartItem {
+  part_number: string;
+  nama_barang: string;
+  qty: number;
+  current_stock: number;
+  imageUrl?: string;
+}
+
 export const FloatingQuickAccess: React.FC<FloatingQuickAccessProps> = ({
   onAddNew,
   onViewItem,
   isAdmin = false
 }) => {
-  const { selectedStore } = useStore();
+  const { selectedStore, userName } = useStore();
   const [isExpanded, setIsExpanded] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<string[]>([]);
+  
+  // 4-field search state
+  const [partNumberSearch, setPartNumberSearch] = useState('');
+  const [nameSearch, setNameSearch] = useState('');
+  const [brandSearch, setBrandSearch] = useState('');
+  const [appSearch, setAppSearch] = useState('');
+  
+  // Autocomplete options state
+  const [partNumberOptions, setPartNumberOptions] = useState<string[]>([]);
+  const [nameOptions, setNameOptions] = useState<string[]>([]);
+  const [brandOptions, setBrandOptions] = useState<string[]>([]);
+  const [appOptions, setAppOptions] = useState<string[]>([]);
+  
+  const [searchResults, setSearchResults] = useState<InventoryItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadingItem, setLoadingItem] = useState(false);
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
-  const [activeTab, setActiveTab] = useState<'search' | 'add' | 'calc' | 'currency'>('search');
+  const [activeTab, setActiveTab] = useState<'search' | 'add' | 'order' | 'calc' | 'currency'>('search');
   
   // Preview item state
   const [previewItem, setPreviewItem] = useState<InventoryItem | null>(null);
+  
+  // Order cart state
+  const [orderCart, setOrderCart] = useState<OrderCartItem[]>([]);
+  const [showOrderCart, setShowOrderCart] = useState(false);
+  const [submittingOrder, setSubmittingOrder] = useState(false);
+  
+  // Supplier search state for order tab
+  const [orderSearchQuery, setOrderSearchQuery] = useState('');
+  const [orderSearchLoading, setOrderSearchLoading] = useState(false);
+  const [supplierPrices, setSupplierPrices] = useState<SupplierPriceInfo[]>([]);
+  const [selectedOrderItem, setSelectedOrderItem] = useState<InventoryItem | null>(null);
+  const orderSearchInputRef = useRef<HTMLInputElement>(null);
+  
+  // Price history state for search tab
+  const [priceHistory, setPriceHistory] = useState<PriceHistoryItem[]>([]);
+  const [loadingPriceHistory, setLoadingPriceHistory] = useState(false);
+  const [priceHistoryFilter, setPriceHistoryFilter] = useState<'all' | 'modal' | 'jual'>('all');
   
   // Calculator state
   const [calcDisplay, setCalcDisplay] = useState('0');
@@ -159,16 +197,36 @@ export const FloatingQuickAccess: React.FC<FloatingQuickAccessProps> = ({
 
   // Removed: Close when clicking outside - user requested to keep panel open
 
-  // Focus input when expanded
+  // Load autocomplete options when expanded
   useEffect(() => {
-    if (isExpanded && activeTab === 'search' && inputRef.current) {
-      setTimeout(() => inputRef.current?.focus(), 100);
+    if (isExpanded && activeTab === 'search') {
+      const loadOptions = async () => {
+        try {
+          const [pnOpts, nameOpts, brandOpts, appOpts] = await Promise.all([
+            fetchAllDistinctValues(selectedStore, 'part_number'),
+            fetchAllDistinctValues(selectedStore, 'name'),
+            fetchAllDistinctValues(selectedStore, 'brand'),
+            fetchAllDistinctValues(selectedStore, 'application')
+          ]);
+          setPartNumberOptions(pnOpts);
+          setNameOptions(nameOpts);
+          setBrandOptions(brandOpts);
+          setAppOptions(appOpts);
+        } catch (err) {
+          console.error('Error loading autocomplete options:', err);
+        }
+      };
+      // Only load if options are empty
+      if (partNumberOptions.length === 0) {
+        loadOptions();
+      }
     }
-  }, [isExpanded, activeTab]);
+  }, [isExpanded, activeTab, selectedStore]);
 
-  // Search suggestions
+  // Search with 4-field filters
   useEffect(() => {
-    if (!searchQuery || searchQuery.length < 1) {
+    const hasAnySearch = partNumberSearch || nameSearch || brandSearch || appSearch;
+    if (!hasAnySearch) {
       setSearchResults([]);
       return;
     }
@@ -176,24 +234,55 @@ export const FloatingQuickAccess: React.FC<FloatingQuickAccessProps> = ({
     const timer = setTimeout(async () => {
       setLoading(true);
       try {
-        // Search in multiple fields
-        const [partNumbers, names] = await Promise.all([
-          fetchSearchSuggestions(selectedStore, 'part_number', searchQuery),
-          fetchSearchSuggestions(selectedStore, 'name', searchQuery)
-        ]);
-        
-        // Combine and dedupe
-        const combined = [...new Set([...partNumbers, ...names])].slice(0, 10);
-        setSearchResults(combined);
+        // Fetch items with 4-field filters
+        const { data: items } = await fetchShopItems(1, 15, { 
+          partNumberSearch, 
+          nameSearch, 
+          brandSearch, 
+          applicationSearch: appSearch 
+        }, selectedStore);
+        setSearchResults(items);
       } catch (err) {
         console.error('Search error:', err);
       } finally {
         setLoading(false);
       }
-    }, 250);
+    }, 300);
 
     return () => clearTimeout(timer);
-  }, [searchQuery, selectedStore]);
+  }, [partNumberSearch, nameSearch, brandSearch, appSearch, selectedStore]);
+
+  // Order search - fetch supplier prices when searching
+  useEffect(() => {
+    if (!orderSearchQuery || orderSearchQuery.length < 2) {
+      setSupplierPrices([]);
+      setSelectedOrderItem(null);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      setOrderSearchLoading(true);
+      try {
+        // First, search for the item to get its details
+        const { data: items } = await fetchShopItems(1, 1, { searchTerm: orderSearchQuery }, selectedStore);
+        if (items && items.length > 0) {
+          setSelectedOrderItem(items[0]);
+          // Fetch supplier prices for this part number
+          const prices = await fetchSupplierPricesByPartNumber(selectedStore, items[0].partNumber);
+          setSupplierPrices(prices);
+        } else {
+          setSelectedOrderItem(null);
+          setSupplierPrices([]);
+        }
+      } catch (err) {
+        console.error('Order search error:', err);
+      } finally {
+        setOrderSearchLoading(false);
+      }
+    }, 400);
+
+    return () => clearTimeout(timer);
+  }, [orderSearchQuery, selectedStore]);
 
   // Scroll highlighted item into view
   useEffect(() => {
@@ -231,19 +320,26 @@ export const FloatingQuickAccess: React.FC<FloatingQuickAccessProps> = ({
     }
   };
 
-  const handleSelectResult = async (result: string) => {
-    setLoadingItem(true);
+  const handleSelectResult = async (item: InventoryItem) => {
+    setPreviewItem(item);
+    // Clear all search fields
+    setPartNumberSearch('');
+    setNameSearch('');
+    setBrandSearch('');
+    setAppSearch('');
+    setSearchResults([]);
+    setPriceHistoryFilter('all');
+    
+    // Fetch price history for the selected item
+    setLoadingPriceHistory(true);
     try {
-      const item = await fetchInventoryByPartNumber(selectedStore, result);
-      if (item) {
-        setPreviewItem(item);
-        setSearchQuery('');
-        setSearchResults([]);
-      }
+      const history = await fetchPriceHistoryByPartNumber(selectedStore, item.partNumber);
+      setPriceHistory(history);
     } catch (err) {
-      console.error('Error fetching item:', err);
+      console.error('Error fetching price history:', err);
+      setPriceHistory([]);
     } finally {
-      setLoadingItem(false);
+      setLoadingPriceHistory(false);
     }
   };
 
@@ -264,11 +360,78 @@ export const FloatingQuickAccess: React.FC<FloatingQuickAccessProps> = ({
     if (!isDragging) {
       setIsExpanded(!isExpanded);
       setPreviewItem(null);
+      setPriceHistory([]);
+      setShowOrderCart(false);
     }
   };
 
   const formatPrice = (price: number) => {
     return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(price);
+  };
+
+  // ========== ORDER CART FUNCTIONS ==========
+  const addToOrderCart = (item: InventoryItem) => {
+    const existing = orderCart.find(c => c.part_number === item.partNumber);
+    if (existing) {
+      setOrderCart(prev => prev.map(c => 
+        c.part_number === item.partNumber 
+          ? { ...c, qty: c.qty + 1 }
+          : c
+      ));
+    } else {
+      setOrderCart(prev => [...prev, {
+        part_number: item.partNumber,
+        nama_barang: item.name,
+        qty: 1,
+        current_stock: item.quantity,
+        imageUrl: item.imageUrl || item.images?.[0]
+      }]);
+    }
+  };
+
+  const updateOrderQty = (partNumber: string, delta: number) => {
+    setOrderCart(prev => prev.map(c => 
+      c.part_number === partNumber 
+        ? { ...c, qty: Math.max(1, c.qty + delta) }
+        : c
+    ));
+  };
+
+  const removeFromOrderCart = (partNumber: string) => {
+    setOrderCart(prev => prev.filter(c => c.part_number !== partNumber));
+  };
+
+  const submitOrderToBarangKosong = async () => {
+    if (orderCart.length === 0) return;
+    
+    setSubmittingOrder(true);
+    try {
+      // Insert to pending_supplier_orders table
+      const { error } = await supabase
+        .from('pending_supplier_orders')
+        .insert(orderCart.map(item => ({
+          store: selectedStore,
+          part_number: item.part_number,
+          nama_barang: item.nama_barang,
+          qty_requested: item.qty,
+          current_stock: item.current_stock,
+          requested_by: userName || 'Admin',
+          status: 'pending',
+          created_at: new Date().toISOString()
+        })));
+
+      if (error) throw error;
+
+      // Clear cart
+      setOrderCart([]);
+      setShowOrderCart(false);
+      alert('Order berhasil dikirim! Silakan cek di menu Barang Kosong untuk approval.');
+    } catch (err) {
+      console.error('Error submitting order:', err);
+      alert('Gagal mengirim order. Silakan coba lagi.');
+    } finally {
+      setSubmittingOrder(false);
+    }
   };
 
   // ========== CALCULATOR FUNCTIONS ==========
@@ -345,6 +508,80 @@ export const FloatingQuickAccess: React.FC<FloatingQuickAccessProps> = ({
     const value = parseFloat(calcDisplay);
     setCalcDisplay(String(-value));
   };
+
+  // Calculator keyboard handler
+  const handleCalcKeyDown = useCallback((e: KeyboardEvent) => {
+    // Only handle if calculator tab is active
+    if (activeTab !== 'calc' || !isExpanded) return;
+    
+    // Prevent default for calculator keys
+    const calcKeys = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '.', ',', '+', '-', '*', '/', 'Enter', 'Escape', 'Backspace', 'Delete', '%'];
+    if (calcKeys.includes(e.key)) {
+      e.preventDefault();
+    }
+    
+    switch (e.key) {
+      // Digits
+      case '0': case '1': case '2': case '3': case '4':
+      case '5': case '6': case '7': case '8': case '9':
+        calcInputDigit(e.key);
+        break;
+      
+      // Decimal
+      case '.':
+      case ',':
+        calcInputDecimal();
+        break;
+      
+      // Operators
+      case '+':
+        calcPerformOperation('+');
+        break;
+      case '-':
+        calcPerformOperation('-');
+        break;
+      case '*':
+        calcPerformOperation('×');
+        break;
+      case '/':
+        calcPerformOperation('÷');
+        break;
+      
+      // Equals
+      case 'Enter':
+      case '=':
+        calcEquals();
+        break;
+      
+      // Clear
+      case 'Escape':
+      case 'Delete':
+        calcClear();
+        break;
+      
+      // Backspace - remove last digit
+      case 'Backspace':
+        if (calcDisplay.length > 1) {
+          setCalcDisplay(calcDisplay.slice(0, -1));
+        } else {
+          setCalcDisplay('0');
+        }
+        break;
+      
+      // Percent
+      case '%':
+        calcPercent();
+        break;
+    }
+  }, [activeTab, isExpanded, calcDisplay, calcInputDigit, calcInputDecimal, calcPerformOperation, calcEquals, calcClear, calcPercent]);
+
+  // Add keyboard listener for calculator
+  useEffect(() => {
+    if (activeTab === 'calc' && isExpanded) {
+      window.addEventListener('keydown', handleCalcKeyDown);
+      return () => window.removeEventListener('keydown', handleCalcKeyDown);
+    }
+  }, [activeTab, isExpanded, handleCalcKeyDown]);
 
   // ========== CURRENCY CONVERTER FUNCTIONS ==========
   const fetchExchangeRates = useCallback(async () => {
@@ -526,6 +763,95 @@ export const FloatingQuickAccess: React.FC<FloatingQuickAccessProps> = ({
                 </div>
               </div>
               
+              {/* Price History Section */}
+              <div className="mt-3 bg-gray-750 rounded-xl border border-gray-600 overflow-hidden">
+                <div className="px-3 py-2 bg-gray-700 border-b border-gray-600 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <History size={14} className="text-blue-400" />
+                    <span className="text-xs font-medium text-gray-300">Riwayat Harga</span>
+                  </div>
+                  {/* Filter buttons */}
+                  <div className="flex gap-1">
+                    <button 
+                      onClick={() => setPriceHistoryFilter('all')}
+                      className={`text-[9px] px-1.5 py-0.5 rounded ${priceHistoryFilter === 'all' ? 'bg-blue-600 text-white' : 'bg-gray-600 text-gray-400 hover:bg-gray-500'}`}
+                    >
+                      Semua
+                    </button>
+                    <button 
+                      onClick={() => setPriceHistoryFilter('modal')}
+                      className={`text-[9px] px-1.5 py-0.5 rounded ${priceHistoryFilter === 'modal' ? 'bg-red-600 text-white' : 'bg-gray-600 text-gray-400 hover:bg-gray-500'}`}
+                    >
+                      Modal
+                    </button>
+                    <button 
+                      onClick={() => setPriceHistoryFilter('jual')}
+                      className={`text-[9px] px-1.5 py-0.5 rounded ${priceHistoryFilter === 'jual' ? 'bg-green-600 text-white' : 'bg-gray-600 text-gray-400 hover:bg-gray-500'}`}
+                    >
+                      Jual
+                    </button>
+                  </div>
+                </div>
+                
+                {loadingPriceHistory ? (
+                  <div className="py-4 flex items-center justify-center">
+                    <Loader2 size={16} className="animate-spin text-blue-400" />
+                    <span className="text-xs text-gray-400 ml-2">Memuat riwayat...</span>
+                  </div>
+                ) : priceHistory.filter(p => priceHistoryFilter === 'all' || p.type === priceHistoryFilter).length === 0 ? (
+                  <div className="py-4 text-center text-gray-500">
+                    <DollarSign size={20} className="mx-auto mb-1 opacity-50" />
+                    <p className="text-[10px]">Belum ada riwayat harga</p>
+                  </div>
+                ) : (
+                  <div className="max-h-40 overflow-y-auto">
+                    {priceHistory
+                      .filter(p => priceHistoryFilter === 'all' || p.type === priceHistoryFilter)
+                      .map((item, idx) => (
+                        <div 
+                          key={`${item.type}-${item.date}-${idx}`}
+                          className={`px-3 py-2 flex items-center gap-2 border-b border-gray-700 last:border-b-0 ${
+                            item.type === 'modal' ? 'bg-red-900/10' : 'bg-green-900/10'
+                          }`}
+                        >
+                          <div className={`w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 ${
+                            item.type === 'modal' ? 'bg-red-900/50' : 'bg-green-900/50'
+                          }`}>
+                            {item.type === 'modal' ? (
+                              <TrendingDown size={10} className="text-red-400" />
+                            ) : (
+                              <TrendingUp size={10} className="text-green-400" />
+                            )}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className={`text-[9px] px-1 py-0.5 rounded font-bold ${
+                                item.type === 'modal' ? 'bg-red-900/50 text-red-400' : 'bg-green-900/50 text-green-400'
+                              }`}>
+                                {item.type === 'modal' ? 'MODAL' : 'JUAL'}
+                              </span>
+                              <span className="text-white text-xs font-bold">
+                                {formatPrice(item.harga)}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2 text-[9px] text-gray-500 mt-0.5">
+                              <span>{item.customer}</span>
+                              <span>•</span>
+                              <span>{item.qty} pcs</span>
+                              {item.tempo && <><span>•</span><span>{item.tempo}</span></>}
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-[9px] text-gray-500">
+                              {new Date(item.date).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: '2-digit' })}
+                            </p>
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                )}
+              </div>
+              
               {/* Actions */}
               <div className="flex gap-2 mt-3">
                 <button
@@ -533,6 +859,16 @@ export const FloatingQuickAccess: React.FC<FloatingQuickAccessProps> = ({
                   className="flex-1 bg-gray-700 hover:bg-gray-600 text-gray-300 py-2.5 rounded-xl text-sm font-medium transition-colors"
                 >
                   Cari Lagi
+                </button>
+                <button
+                  onClick={() => {
+                    addToOrderCart(previewItem);
+                    setPreviewItem(null);
+                  }}
+                  className="flex-1 bg-purple-600 hover:bg-purple-500 text-white py-2.5 rounded-xl text-sm font-medium transition-colors flex items-center justify-center gap-2"
+                >
+                  <ShoppingCart size={16} />
+                  + Order
                 </button>
                 {isAdmin && (
                   <button
@@ -574,6 +910,22 @@ export const FloatingQuickAccess: React.FC<FloatingQuickAccessProps> = ({
                   </button>
                 )}
                 <button
+                  onClick={() => setActiveTab('order')}
+                  className={`flex-1 min-w-0 px-2 py-2.5 text-xs font-medium flex items-center justify-center gap-1 transition-colors relative ${
+                    activeTab === 'order'
+                      ? 'bg-gray-700 text-purple-400 border-b-2 border-purple-400'
+                      : 'text-gray-400 hover:text-gray-200 hover:bg-gray-750'
+                  }`}
+                >
+                  <PackageX size={14} />
+                  <span className="hidden sm:inline">Order</span>
+                  {orderCart.length > 0 && (
+                    <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center">
+                      {orderCart.length}
+                    </span>
+                  )}
+                </button>
+                <button
                   onClick={() => setActiveTab('calc')}
                   className={`flex-1 min-w-0 px-2 py-2.5 text-xs font-medium flex items-center justify-center gap-1 transition-colors ${
                     activeTab === 'calc'
@@ -600,64 +952,172 @@ export const FloatingQuickAccess: React.FC<FloatingQuickAccessProps> = ({
               {/* Content */}
               <div className="p-4">
                 {activeTab === 'search' && (
-                  <div>
-                    {/* Search Input */}
-                    <div className="relative">
-                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
-                      <input
-                        ref={inputRef}
-                        type="text"
-                        value={searchQuery}
-                        onChange={(e) => {
-                          setSearchQuery(e.target.value);
-                          setHighlightedIndex(-1);
-                        }}
-                        onKeyDown={handleKeyDown}
-                        placeholder="Ketik part number atau nama..."
-                        className="w-full pl-10 pr-10 py-3 bg-gray-700 border border-gray-600 rounded-xl text-sm text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none"
-                        autoComplete="off"
-                      />
-                      {(loading || loadingItem) && (
-                        <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 text-blue-400 animate-spin" size={18} />
-                      )}
+                  <div className="space-y-2">
+                    {/* 4 Search Inputs */}
+                    <div className="grid grid-cols-2 gap-2">
+                      {/* Part Number Search */}
+                      <div className="relative">
+                        <Hash className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" size={14} />
+                        <input
+                          ref={inputRef}
+                          type="text"
+                          value={partNumberSearch}
+                          onChange={(e) => {
+                            setPartNumberSearch(e.target.value);
+                            setHighlightedIndex(-1);
+                          }}
+                          onKeyDown={handleKeyDown}
+                          placeholder="Part Number..."
+                          className="w-full pl-8 pr-2 py-2 bg-gray-700 border border-gray-600 rounded-lg text-xs text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none"
+                          autoComplete="off"
+                          list="pn-options"
+                        />
+                        <datalist id="pn-options">
+                          {partNumberOptions.filter(o => o.toLowerCase().includes(partNumberSearch.toLowerCase())).slice(0, 10).map((opt, i) => (
+                            <option key={i} value={opt} />
+                          ))}
+                        </datalist>
+                      </div>
+                      
+                      {/* Name Search */}
+                      <div className="relative">
+                        <Package className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" size={14} />
+                        <input
+                          type="text"
+                          value={nameSearch}
+                          onChange={(e) => {
+                            setNameSearch(e.target.value);
+                            setHighlightedIndex(-1);
+                          }}
+                          onKeyDown={handleKeyDown}
+                          placeholder="Nama Barang..."
+                          className="w-full pl-8 pr-2 py-2 bg-gray-700 border border-gray-600 rounded-lg text-xs text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none"
+                          autoComplete="off"
+                          list="name-options"
+                        />
+                        <datalist id="name-options">
+                          {nameOptions.filter(o => o.toLowerCase().includes(nameSearch.toLowerCase())).slice(0, 10).map((opt, i) => (
+                            <option key={i} value={opt} />
+                          ))}
+                        </datalist>
+                      </div>
                     </div>
+                    
+                    <div className="grid grid-cols-2 gap-2">
+                      {/* Brand Search */}
+                      <div className="relative">
+                        <Tag className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" size={14} />
+                        <input
+                          type="text"
+                          value={brandSearch}
+                          onChange={(e) => {
+                            setBrandSearch(e.target.value);
+                            setHighlightedIndex(-1);
+                          }}
+                          onKeyDown={handleKeyDown}
+                          placeholder="Filter Brand..."
+                          className="w-full pl-8 pr-2 py-2 bg-gray-700 border border-gray-600 rounded-lg text-xs text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none"
+                          autoComplete="off"
+                          list="brand-options"
+                        />
+                        <datalist id="brand-options">
+                          {brandOptions.filter(o => o.toLowerCase().includes(brandSearch.toLowerCase())).slice(0, 10).map((opt, i) => (
+                            <option key={i} value={opt} />
+                          ))}
+                        </datalist>
+                      </div>
+                      
+                      {/* Application Search */}
+                      <div className="relative">
+                        <PenTool className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" size={14} />
+                        <input
+                          type="text"
+                          value={appSearch}
+                          onChange={(e) => {
+                            setAppSearch(e.target.value);
+                            setHighlightedIndex(-1);
+                          }}
+                          onKeyDown={handleKeyDown}
+                          placeholder="Filter Aplikasi..."
+                          className="w-full pl-8 pr-2 py-2 bg-gray-700 border border-gray-600 rounded-lg text-xs text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none"
+                          autoComplete="off"
+                          list="app-options"
+                        />
+                        <datalist id="app-options">
+                          {appOptions.filter(o => o.toLowerCase().includes(appSearch.toLowerCase())).slice(0, 10).map((opt, i) => (
+                            <option key={i} value={opt} />
+                          ))}
+                        </datalist>
+                      </div>
+                    </div>
+                    
+                    {/* Loading indicator */}
+                    {loading && (
+                      <div className="flex items-center justify-center py-2">
+                        <Loader2 className="text-blue-400 animate-spin" size={16} />
+                        <span className="text-xs text-gray-400 ml-2">Mencari...</span>
+                      </div>
+                    )}
 
-                    {/* Search Results */}
+                    {/* Search Results with Images */}
                     {searchResults.length > 0 && (
-                      <div ref={listRef} className="mt-3 max-h-60 overflow-y-auto rounded-xl border border-gray-700 bg-gray-750">
-                        {searchResults.map((result, idx) => (
-                          <button
-                            key={idx}
-                            onClick={() => handleSelectResult(result)}
-                            disabled={loadingItem}
-                            className={`w-full px-4 py-3 text-left text-sm flex items-center justify-between gap-2 transition-colors ${
+                      <div ref={listRef} className="max-h-52 overflow-y-auto rounded-xl border border-gray-700 bg-gray-750 space-y-1 p-2">
+                        {searchResults.map((item, idx) => (
+                          <div
+                            key={item.id || idx}
+                            onClick={() => handleSelectResult(item)}
+                            className={`flex items-center gap-2 p-2 rounded-lg cursor-pointer transition-colors ${
                               idx === highlightedIndex
-                                ? 'bg-blue-600 text-white'
-                                : 'text-gray-200 hover:bg-gray-700'
-                            } ${idx === 0 ? 'rounded-t-xl' : ''} ${idx === searchResults.length - 1 ? 'rounded-b-xl' : ''}`}
+                                ? 'bg-blue-600'
+                                : 'hover:bg-gray-700'
+                            }`}
                             onMouseEnter={() => setHighlightedIndex(idx)}
                           >
-                            <span className="flex items-center gap-2">
-                              <Package size={14} className="text-gray-400" />
-                              <span className="truncate">{result}</span>
-                            </span>
-                            <ArrowRight size={14} className="text-gray-500 flex-shrink-0" />
-                          </button>
+                            {/* Image */}
+                            <div className="w-10 h-10 bg-gray-800 rounded-lg overflow-hidden flex-shrink-0">
+                              {item.imageUrl || item.images?.[0] ? (
+                                <img 
+                                  src={item.imageUrl || item.images?.[0]} 
+                                  alt={item.name}
+                                  className="w-full h-full object-cover"
+                                />
+                              ) : (
+                                <div className="w-full h-full flex items-center justify-center">
+                                  <Package size={16} className="text-gray-600" />
+                                </div>
+                              )}
+                            </div>
+                            
+                            {/* Info */}
+                            <div className="flex-1 min-w-0">
+                              <p className="text-white text-xs font-medium truncate">{item.name}</p>
+                              <p className="text-gray-400 text-[10px] font-mono truncate">{item.partNumber}</p>
+                            </div>
+                            
+                            {/* Stock Badge */}
+                            <div className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                              item.quantity > 5 ? 'bg-green-900/50 text-green-400' :
+                              item.quantity > 0 ? 'bg-yellow-900/50 text-yellow-400' :
+                              'bg-red-900/50 text-red-400'
+                            }`}>
+                              {item.quantity}
+                            </div>
+                          </div>
                         ))}
                       </div>
                     )}
 
                     {/* Empty State */}
-                    {searchQuery && !loading && searchResults.length === 0 && (
-                      <div className="mt-4 text-center py-6 text-gray-400">
-                        <Package size={32} className="mx-auto mb-2 opacity-50" />
-                        <p className="text-sm">Tidak ada hasil ditemukan</p>
+                    {(partNumberSearch || nameSearch || brandSearch || appSearch) && !loading && searchResults.length === 0 && (
+                      <div className="text-center py-4 text-gray-400">
+                        <Package size={24} className="mx-auto mb-2 opacity-50" />
+                        <p className="text-xs">Tidak ada hasil ditemukan</p>
                         {isAdmin && (
                           <button
                             onClick={handleAddNew}
-                            className="mt-3 text-blue-400 hover:text-blue-300 text-sm font-medium flex items-center gap-1 mx-auto"
+                            className="mt-2 text-blue-400 hover:text-blue-300 text-xs font-medium flex items-center gap-1 mx-auto"
                           >
-                            <Plus size={14} />
+                            <Plus size={12} />
                             Tambah barang baru
                           </button>
                         )}
@@ -665,10 +1125,10 @@ export const FloatingQuickAccess: React.FC<FloatingQuickAccessProps> = ({
                     )}
 
                     {/* Initial State */}
-                    {!searchQuery && (
-                      <div className="mt-4 text-center py-4 text-gray-500">
-                        <Sparkles size={24} className="mx-auto mb-2 opacity-50" />
-                        <p className="text-xs">Ketik untuk mencari barang</p>
+                    {!partNumberSearch && !nameSearch && !brandSearch && !appSearch && (
+                      <div className="text-center py-3 text-gray-500">
+                        <Sparkles size={20} className="mx-auto mb-1 opacity-50" />
+                        <p className="text-[10px]">Ketik untuk mencari barang</p>
                       </div>
                     )}
                   </div>
@@ -872,6 +1332,172 @@ export const FloatingQuickAccess: React.FC<FloatingQuickAccessProps> = ({
                     )}
                   </div>
                 )}
+
+                {activeTab === 'order' && (
+                  <div className="space-y-3">
+                    {/* Search for Supplier Prices */}
+                    <div>
+                      <label className="text-xs text-gray-400 mb-1 flex items-center gap-1">
+                        <Search size={12} /> Cari Part Number untuk lihat harga importir
+                      </label>
+                      <div className="relative">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
+                        <input
+                          ref={orderSearchInputRef}
+                          type="text"
+                          value={orderSearchQuery}
+                          onChange={(e) => setOrderSearchQuery(e.target.value)}
+                          placeholder="Ketik part number..."
+                          className="w-full pl-10 pr-10 py-2.5 bg-gray-700 border border-gray-600 rounded-xl text-sm text-white placeholder-gray-400 focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500 outline-none"
+                          autoComplete="off"
+                        />
+                        {orderSearchLoading && (
+                          <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 text-purple-400 animate-spin" size={16} />
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Selected Item Info */}
+                    {selectedOrderItem && (
+                      <div className="bg-gray-750 rounded-xl p-3 border border-gray-600">
+                        <div className="flex items-center gap-3">
+                          <div className="w-12 h-12 bg-gray-700 rounded-lg overflow-hidden flex-shrink-0">
+                            {selectedOrderItem.imageUrl || selectedOrderItem.images?.[0] ? (
+                              <img 
+                                src={selectedOrderItem.imageUrl || selectedOrderItem.images?.[0]} 
+                                alt={selectedOrderItem.name}
+                                className="w-full h-full object-cover"
+                              />
+                            ) : (
+                              <Package size={24} className="text-gray-600 m-auto mt-3" />
+                            )}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-white text-sm font-medium truncate">{selectedOrderItem.name}</p>
+                            <p className="text-gray-400 text-xs font-mono">{selectedOrderItem.partNumber}</p>
+                            <div className="flex items-center gap-2 mt-1">
+                              <span className={`text-xs px-2 py-0.5 rounded ${
+                                selectedOrderItem.quantity === 0 ? 'bg-red-900/50 text-red-400' :
+                                selectedOrderItem.quantity < 4 ? 'bg-yellow-900/50 text-yellow-400' :
+                                'bg-green-900/50 text-green-400'
+                              }`}>
+                                Stok: {selectedOrderItem.quantity}
+                              </span>
+                              <button
+                                onClick={() => {
+                                  addToOrderCart(selectedOrderItem);
+                                  setOrderSearchQuery('');
+                                  setSelectedOrderItem(null);
+                                  setSupplierPrices([]);
+                                }}
+                                className="text-xs bg-purple-600 hover:bg-purple-500 text-white px-2 py-0.5 rounded flex items-center gap-1"
+                              >
+                                <Plus size={12} /> Order
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Supplier Prices List */}
+                    {supplierPrices.length > 0 && (
+                      <div className="bg-gray-750 rounded-xl border border-gray-600 overflow-hidden">
+                        <div className="px-3 py-2 bg-gray-700 border-b border-gray-600 flex items-center gap-2">
+                          <Store size={14} className="text-blue-400" />
+                          <span className="text-xs font-medium text-gray-300">Daftar Importir & Harga</span>
+                          <span className="ml-auto text-xs text-gray-500">{supplierPrices.length} importir</span>
+                        </div>
+                        <div className="max-h-40 overflow-y-auto">
+                          {supplierPrices.map((sp, idx) => (
+                            <div 
+                              key={sp.supplier} 
+                              className={`px-3 py-2 flex items-center gap-2 ${idx !== supplierPrices.length - 1 ? 'border-b border-gray-700' : ''} ${idx === 0 ? 'bg-green-900/20' : 'hover:bg-gray-700/50'}`}
+                            >
+                              <div className="flex-1 min-w-0">
+                                <p className="text-white text-xs font-medium truncate flex items-center gap-1">
+                                  {idx === 0 && <TrendingDown size={12} className="text-green-400" />}
+                                  {sp.supplier}
+                                </p>
+                                <div className="flex items-center gap-2 text-[10px] text-gray-500 mt-0.5">
+                                  <span className="flex items-center gap-0.5">
+                                    <Clock size={10} /> {sp.tempo}
+                                  </span>
+                                  <span>•</span>
+                                  <span>
+                                    {new Date(sp.last_order_date).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: '2-digit' })}
+                                  </span>
+                                </div>
+                              </div>
+                              <div className="text-right">
+                                <p className={`text-sm font-bold ${idx === 0 ? 'text-green-400' : 'text-blue-400'}`}>
+                                  {formatPrice(sp.harga_satuan)}
+                                </p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Empty state for supplier search */}
+                    {orderSearchQuery && !orderSearchLoading && supplierPrices.length === 0 && !selectedOrderItem && (
+                      <div className="text-center py-4 text-gray-500">
+                        <Package size={24} className="mx-auto mb-2 opacity-50" />
+                        <p className="text-xs">Tidak ditemukan data pembelian untuk part number ini</p>
+                      </div>
+                    )}
+
+                    {/* Divider */}
+                    {orderCart.length > 0 && (
+                      <div className="border-t border-gray-700 pt-3">
+                        <h4 className="text-white text-sm font-medium mb-2 flex items-center gap-2">
+                          <ShoppingCart size={14} /> Keranjang ({orderCart.length})
+                        </h4>
+                        <div className="space-y-2 max-h-32 overflow-y-auto">
+                          {orderCart.map((item) => (
+                            <div key={item.part_number} className="flex items-center gap-2 bg-gray-800 rounded-lg p-2">
+                              <div className="w-8 h-8 bg-gray-700 rounded overflow-hidden flex-shrink-0">
+                                {item.imageUrl ? (
+                                  <img src={item.imageUrl} alt={item.nama_barang} className="w-full h-full object-cover" />
+                                ) : (
+                                  <Package size={14} className="text-gray-600 m-auto mt-2" />
+                                )}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-white text-[10px] font-medium truncate">{item.nama_barang}</p>
+                                <p className="text-gray-500 text-[9px] font-mono truncate">{item.part_number}</p>
+                              </div>
+                              <div className="flex items-center gap-1">
+                                <button onClick={() => updateOrderQty(item.part_number, -1)} className="p-0.5 rounded bg-gray-700 text-gray-300 hover:bg-gray-600"><Minus size={10} /></button>
+                                <span className="px-1.5 text-[10px] font-bold text-purple-400">{item.qty}</span>
+                                <button onClick={() => updateOrderQty(item.part_number, 1)} className="p-0.5 rounded bg-gray-700 text-gray-300 hover:bg-gray-600"><Plus size={10} /></button>
+                              </div>
+                              <button onClick={() => removeFromOrderCart(item.part_number)} className="p-0.5 rounded bg-red-700/50 text-red-400 hover:bg-red-700"><X size={10} /></button>
+                            </div>
+                          ))}
+                        </div>
+                        <button
+                          onClick={submitOrderToBarangKosong}
+                          disabled={submittingOrder}
+                          className="w-full mt-2 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold flex items-center justify-center gap-2 text-xs transition-colors disabled:opacity-50"
+                        >
+                          <Send size={14} />
+                          {submittingOrder ? 'Mengirim...' : 'Kirim Order'}
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Initial state when no search and no cart */}
+                    {!orderSearchQuery && orderCart.length === 0 && (
+                      <div className="text-center py-6 text-gray-500">
+                        <PackageX size={28} className="mx-auto mb-2 opacity-50" />
+                        <p className="text-xs">Cari part number diatas untuk melihat harga dari berbagai importir</p>
+                      </div>
+                    )}
+                  </div>
+                )
+                }
               </div>
             </>
           )}

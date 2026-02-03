@@ -2793,3 +2793,138 @@ export const deleteSupplierOrder = async (store: string | null, orderId: number)
     return { success: false, msg: 'Gagal menghapus order' };
   }
 };
+
+// --- FETCH SUPPLIER PRICES BY PART NUMBER ---
+// Returns list of suppliers/importers with their prices for a given part number
+export interface SupplierPriceInfo {
+  supplier: string;
+  harga_satuan: number;
+  tempo: string;
+  last_order_date: string;
+  qty_last: number;
+}
+
+export const fetchSupplierPricesByPartNumber = async (
+  store: string | null,
+  partNumber: string
+): Promise<SupplierPriceInfo[]> => {
+  const tableMasuk = store === 'mjm' ? 'barang_masuk_mjm' : (store === 'bjw' ? 'barang_masuk_bjw' : null);
+  if (!tableMasuk || !partNumber) return [];
+
+  try {
+    // Fetch all purchase records for this part number
+    const { data, error } = await supabase
+      .from(tableMasuk)
+      .select('customer, harga_satuan, tempo, qty_masuk, created_at')
+      .ilike('part_number', partNumber)
+      .not('customer', 'is', null)
+      .not('customer', 'eq', '')
+      .not('customer', 'eq', '-')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('Fetch Supplier Prices Error:', error);
+      return [];
+    }
+
+    // Group by supplier, keep only the latest entry per supplier
+    const supplierMap: Record<string, SupplierPriceInfo> = {};
+    
+    (data || []).forEach(row => {
+      const supplier = row.customer?.trim().toUpperCase() || '';
+      if (!supplier || supplier === '-') return;
+      
+      // Only keep the first (most recent) entry per supplier
+      if (!supplierMap[supplier]) {
+        supplierMap[supplier] = {
+          supplier,
+          harga_satuan: row.harga_satuan || 0,
+          tempo: row.tempo || '-',
+          last_order_date: row.created_at,
+          qty_last: row.qty_masuk || 0
+        };
+      }
+    });
+
+    // Convert to array and sort by price (lowest first)
+    return Object.values(supplierMap).sort((a, b) => a.harga_satuan - b.harga_satuan);
+  } catch (err) {
+    console.error('Fetch Supplier Prices Exception:', err);
+    return [];
+  }
+};
+
+// --- FETCH PRICE HISTORY BY PART NUMBER ---
+// Returns history of cost prices (harga modal from barang_masuk) and selling prices (harga jual from barang_keluar)
+export interface PriceHistoryItem {
+  type: 'modal' | 'jual';
+  harga: number;
+  date: string;
+  customer: string;
+  qty: number;
+  tempo?: string;
+}
+
+export const fetchPriceHistoryByPartNumber = async (
+  store: string | null,
+  partNumber: string
+): Promise<PriceHistoryItem[]> => {
+  const tableMasuk = store === 'mjm' ? 'barang_masuk_mjm' : (store === 'bjw' ? 'barang_masuk_bjw' : null);
+  const tableKeluar = store === 'mjm' ? 'barang_keluar_mjm' : (store === 'bjw' ? 'barang_keluar_bjw' : null);
+  if (!tableMasuk || !tableKeluar || !partNumber) return [];
+
+  try {
+    // Fetch cost price history (harga modal) from barang_masuk
+    const { data: masukData, error: masukError } = await supabase
+      .from(tableMasuk)
+      .select('harga_satuan, qty_masuk, customer, tempo, created_at')
+      .ilike('part_number', partNumber)
+      .not('harga_satuan', 'is', null)
+      .gt('harga_satuan', 0)
+      .order('created_at', { ascending: false })
+      .limit(20);
+
+    // Fetch selling price history (harga jual) from barang_keluar
+    const { data: keluarData, error: keluarError } = await supabase
+      .from(tableKeluar)
+      .select('harga_satuan, qty_keluar, customer, ecommerce, created_at')
+      .ilike('part_number', partNumber)
+      .not('harga_satuan', 'is', null)
+      .gt('harga_satuan', 0)
+      .order('created_at', { ascending: false })
+      .limit(20);
+
+    const history: PriceHistoryItem[] = [];
+
+    // Add cost prices (harga modal)
+    (masukData || []).forEach(row => {
+      history.push({
+        type: 'modal',
+        harga: row.harga_satuan || 0,
+        date: row.created_at,
+        customer: row.customer || '-',
+        qty: row.qty_masuk || 0,
+        tempo: row.tempo || '-'
+      });
+    });
+
+    // Add selling prices (harga jual)
+    (keluarData || []).forEach(row => {
+      history.push({
+        type: 'jual',
+        harga: row.harga_satuan || 0,
+        date: row.created_at,
+        customer: row.customer || row.ecommerce || '-',
+        qty: row.qty_keluar || 0
+      });
+    });
+
+    // Sort by date descending
+    history.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+    return history;
+  } catch (err) {
+    console.error('Fetch Price History Exception:', err);
+    return [];
+  }
+};

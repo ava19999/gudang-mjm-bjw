@@ -426,8 +426,8 @@ const AppContent: React.FC = () => {
 
       <MobileNav isAdmin={isAdmin} activeView={activeView} setActiveView={setActiveView} pendingOrdersCount={0} myPendingOrdersCount={0} />
       
-      {/* Floating Quick Access Widget */}
-      {isAdmin && (
+      {/* Floating Quick Access Widget - Available for all authenticated users */}
+      {isAuthenticated && (
         <FloatingQuickAccess 
           onAddNew={() => { setEditItem(null); setIsEditing(true); }}
           onViewItem={(item) => { setEditItem(item); setIsEditing(true); }}
