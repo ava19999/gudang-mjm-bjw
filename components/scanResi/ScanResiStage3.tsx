@@ -1,6 +1,8 @@
 // FILE: components/scanResi/ScanResiStage3.tsx
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { RealtimeChannel } from '@supabase/supabase-js';
 import { useStore } from '../../context/StoreContext';
+import { supabase } from '../../services/supabaseClient';
 import XLSX from '../../services/xlsx'; 
 import { 
   checkResiStatus, 
@@ -1193,6 +1195,46 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
   const [isProcessingUpload, setIsProcessingUpload] = useState(false);
   const [processLogs, setProcessLogs] = useState<ProcessLog[]>([]);
 
+  // REALTIME COLLABORATION STATE
+  const [activeUsers, setActiveUsers] = useState<{userId: string, userName: string, color: string}[]>([]);
+  const [editingCells, setEditingCells] = useState<Record<string, {userId: string, userName: string, color: string}>>({});
+  const [userCursors, setUserCursors] = useState<Record<string, {x: number, y: number, userName: string, color: string}>>({});
+  const presenceChannelRef = useRef<RealtimeChannel | null>(null);
+  const resiItemsChannelRef = useRef<RealtimeChannel | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  
+  // State untuk highlight cell yang baru diupdate (flash effect)
+  const [recentlyUpdatedCells, setRecentlyUpdatedCells] = useState<Set<string>>(new Set());
+  
+  // Warna untuk user yang berbeda
+  const userColors = ['#22c55e', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316', '#06b6d4', '#84cc16'];
+  const getUserColor = useCallback((oderId: string) => {
+    const hash = oderId.split('').reduce((a, b) => a + b.charCodeAt(0), 0);
+    return userColors[hash % userColors.length];
+  }, []);
+  
+  // Generate unique user ID (persistent per session)
+  const userIdRef = useRef<string>(Math.random().toString(36).substring(2, 15));
+  const userNameRef = useRef<string>(`User-${Math.random().toString(36).substring(2, 6).toUpperCase()}`);
+  
+  // Throttle untuk cursor update (hanya kirim setiap 50ms)
+  const lastCursorUpdate = useRef<number>(0);
+  
+  // Function untuk menambahkan flash effect pada cell yang diupdate
+  const flashCell = useCallback((rowId: string, fields: string[]) => {
+    const cellKeys = fields.map(f => `${rowId}-${f}`);
+    setRecentlyUpdatedCells(prev => new Set([...prev, ...cellKeys]));
+    
+    // Remove flash setelah 1.5 detik
+    setTimeout(() => {
+      setRecentlyUpdatedCells(prev => {
+        const newSet = new Set(prev);
+        cellKeys.forEach(k => newSet.delete(k));
+        return newSet;
+      });
+    }, 1500);
+  }, []);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Ambil list reseller unik dari data yang sudah ada untuk suggestion
@@ -1245,6 +1287,240 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
   useEffect(() => {
     loadSavedDataFromDB();
   }, [selectedStore]);
+
+  // REALTIME SUBSCRIPTION untuk kolaborasi multi-user
+  useEffect(() => {
+    const tableName = selectedStore === 'bjw' ? 'resi_items_bjw' : 'resi_items_mjm';
+    const userId = userIdRef.current;
+    const userName = userNameRef.current;
+    const userColor = getUserColor(userId);
+
+    // Channel untuk perubahan data resi_items
+    resiItemsChannelRef.current = supabase
+      .channel(`${tableName}-changes`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: tableName
+        },
+        async (payload) => {
+          console.log('[Realtime] UPDATE received:', payload.new);
+          
+          const newData = payload.new as any;
+          const rowId = String(newData.id);
+          
+          // Flash effect untuk cell yang berubah
+          const changedFields: string[] = [];
+          if (newData.part_number !== undefined) changedFields.push('part_number');
+          if (newData.qty !== undefined) changedFields.push('qty');
+          if (newData.harga_total !== undefined) changedFields.push('harga_total');
+          if (changedFields.length > 0) {
+            flashCell(rowId, changedFields);
+          }
+          
+          // STEP 1: Update data segera (tanpa menunggu lookup) - untuk kecepatan
+          setRows(prevRows => 
+            prevRows.map(row => {
+              if (row.id !== rowId) return row;
+              return { 
+                ...row, 
+                part_number: newData.part_number ?? row.part_number,
+                qty_keluar: newData.qty ?? row.qty_keluar,
+                harga_satuan: newData.harga_satuan ?? row.harga_satuan,
+                harga_total: newData.harga_total ?? row.harga_total,
+                customer: newData.customer ?? row.customer,
+                ecommerce: newData.ecommerce ?? row.ecommerce,
+                sub_toko: newData.toko ?? row.sub_toko,
+              };
+            })
+          );
+          
+          // STEP 2: Lookup part info di background, lalu update lagi
+          if (newData.part_number) {
+            try {
+              const partInfo = await lookupPartNumberInfo(newData.part_number, selectedStore);
+              if (partInfo) {
+                setRows(prevRows => 
+                  prevRows.map(row => {
+                    if (row.id !== rowId) return row;
+                    return {
+                      ...row,
+                      nama_barang_base: partInfo.name || '',
+                      brand: partInfo.brand || '',
+                      application: partInfo.application || '',
+                      stock_saat_ini: partInfo.quantity || 0,
+                      is_db_verified: true,
+                      is_stock_valid: (partInfo.quantity || 0) >= row.qty_keluar,
+                      status_message: (partInfo.quantity || 0) >= row.qty_keluar ? 'Ready' : 'Stok Kurang',
+                    };
+                  })
+                );
+              }
+            } catch (e) {
+              console.error('[Realtime] Error looking up part info:', e);
+            }
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: tableName
+        },
+        (payload) => {
+          console.log('[Realtime] INSERT received:', payload.new);
+          // Reload data when new item inserted by other user
+          loadSavedDataFromDB();
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'DELETE',
+          schema: 'public',
+          table: tableName
+        },
+        (payload) => {
+          console.log('[Realtime] DELETE received:', payload.old);
+          // Remove deleted row
+          setRows(prevRows => prevRows.filter(row => row.id !== String(payload.old.id)));
+        }
+      )
+      .subscribe((status) => {
+        console.log(`[Realtime] ${tableName} subscription status:`, status);
+      });
+
+    // Channel untuk presence (siapa yang online dan sedang edit apa)
+    presenceChannelRef.current = supabase
+      .channel(`stage3-presence-${selectedStore}`, {
+        config: {
+          presence: {
+            key: userId,
+          },
+        },
+      })
+      .on('presence', { event: 'sync' }, () => {
+        const state = presenceChannelRef.current?.presenceState() || {};
+        const users: {userId: string, userName: string, color: string}[] = [];
+        const cells: Record<string, {userId: string, userName: string, color: string}> = {};
+        
+        Object.entries(state).forEach(([oderId, presences]) => {
+          const presence = (presences as any[])[0];
+          if (presence && presence.oderId !== oderId) {
+            users.push({
+              userId: presence.userId,
+              userName: presence.userName,
+              color: presence.color
+            });
+            if (presence.editingCell) {
+              cells[presence.editingCell] = {
+                userId: presence.userId,
+                userName: presence.userName,
+                color: presence.color
+              };
+            }
+          }
+        });
+        
+        setActiveUsers(users);
+        setEditingCells(cells);
+        
+        // Update cursor positions
+        const cursors: Record<string, {x: number, y: number, userName: string, color: string}> = {};
+        Object.entries(state).forEach(([oderId, presences]) => {
+          const presence = (presences as any[])[0];
+          if (presence && presence.userId !== userId && presence.cursorX !== undefined && presence.cursorY !== undefined) {
+            cursors[presence.userId] = {
+              x: presence.cursorX,
+              y: presence.cursorY,
+              userName: presence.userName,
+              color: presence.color
+            };
+          }
+        });
+        setUserCursors(cursors);
+      })
+      .subscribe(async (status) => {
+        if (status === 'SUBSCRIBED') {
+          await presenceChannelRef.current?.track({
+            online_at: new Date().toISOString(),
+            userId,
+            userName,
+            color: userColor,
+            editingCell: null,
+            cursorX: 0,
+            cursorY: 0
+          });
+        }
+      });
+
+    // Mouse move handler untuk broadcast cursor position
+    const handleMouseMove = (e: MouseEvent) => {
+      const now = Date.now();
+      // Throttle: hanya kirim setiap 50ms
+      if (now - lastCursorUpdate.current < 50) return;
+      lastCursorUpdate.current = now;
+      
+      if (presenceChannelRef.current && containerRef.current) {
+        const rect = containerRef.current.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        
+        presenceChannelRef.current.track({
+          online_at: new Date().toISOString(),
+          userId,
+          userName,
+          color: userColor,
+          editingCell: null,
+          cursorX: x,
+          cursorY: y
+        });
+      }
+    };
+
+    // Add mouse move listener
+    document.addEventListener('mousemove', handleMouseMove);
+
+    // Cleanup
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      if (resiItemsChannelRef.current) {
+        supabase.removeChannel(resiItemsChannelRef.current);
+      }
+      if (presenceChannelRef.current) {
+        supabase.removeChannel(presenceChannelRef.current);
+      }
+    };
+  }, [selectedStore, getUserColor]);
+
+  // Function untuk broadcast cell yang sedang diedit
+  const broadcastEditingCell = useCallback(async (cellKey: string | null) => {
+    if (!presenceChannelRef.current) return;
+    
+    const userId = userIdRef.current;
+    const userName = userNameRef.current;
+    const userColor = getUserColor(userId);
+    
+    await presenceChannelRef.current.track({
+      online_at: new Date().toISOString(),
+      userId,
+      userName,
+      color: userColor,
+      editingCell: cellKey,
+      cursorX: 0,
+      cursorY: 0
+    });
+  }, [getUserColor]);
+
+  // Helper untuk cek apakah cell sedang diedit user lain
+  const getCellEditStatus = useCallback((rowId: string, field: string) => {
+    const cellKey = `${rowId}-${field}`;
+    return editingCells[cellKey] || null;
+  }, [editingCells]);
 
   // Cleanup auto-save timers on unmount
   useEffect(() => {
@@ -2133,6 +2409,9 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
     
     // Auto-save to database with debounce (only for editable fields)
     if (updatedRow && ['part_number', 'qty_keluar', 'harga_total', 'harga_satuan', 'customer', 'ecommerce', 'sub_toko', 'tanggal'].includes(field)) {
+      // Broadcast editing status
+      broadcastEditingCell(`${id}-${field}`);
+      
       // Get the latest row data after state update
       setTimeout(() => {
         setRows(currentRows => {
@@ -2142,6 +2421,9 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
           }
           return currentRows;
         });
+        
+        // Clear editing status after save
+        setTimeout(() => broadcastEditingCell(null), 500);
       }, 0);
     }
   };
@@ -2832,8 +3114,150 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
     return '';
   };
 
+  // Komponen untuk menampilkan user yang sedang online
+  const ActiveUsersIndicator = () => {
+    if (activeUsers.length === 0) return null;
+    
+    return (
+      <div className="fixed bottom-20 md:bottom-4 left-4 z-50 bg-gray-800 rounded-lg p-2 md:p-3 shadow-lg border border-gray-700">
+        <div className="flex items-center gap-2 text-xs md:text-sm">
+          <div className="flex -space-x-2">
+            {activeUsers.slice(0, 5).map((u) => (
+              <div
+                key={u.userId}
+                className="w-6 h-6 md:w-8 md:h-8 rounded-full flex items-center justify-center text-white text-[10px] md:text-xs font-bold border-2 border-gray-800"
+                style={{ backgroundColor: u.color }}
+                title={u.userName}
+              >
+                {u.userName.charAt(0).toUpperCase()}
+              </div>
+            ))}
+            {activeUsers.length > 5 && (
+              <div className="w-6 h-6 md:w-8 md:h-8 rounded-full flex items-center justify-center text-white text-[10px] md:text-xs font-bold border-2 border-gray-800 bg-gray-600">
+                +{activeUsers.length - 5}
+              </div>
+            )}
+          </div>
+          <span className="text-green-400 whitespace-nowrap">
+            {activeUsers.length} user online
+          </span>
+        </div>
+      </div>
+    );
+  };
+
+  // Wrapper untuk editable cell dengan indicator user lain sedang edit + flash effect
+  const EditableCellWrapper = ({ 
+    rowId, 
+    field, 
+    children 
+  }: { 
+    rowId: string; 
+    field: string; 
+    children: React.ReactNode;
+  }) => {
+    const editStatus = getCellEditStatus(rowId, field);
+    const cellKey = `${rowId}-${field}`;
+    const isRecentlyUpdated = recentlyUpdatedCells.has(cellKey);
+    
+    return (
+      <div className="relative">
+        {editStatus && (
+          <div 
+            className="absolute -top-4 left-0 z-20 text-white text-[9px] px-1.5 py-0.5 rounded whitespace-nowrap shadow-lg animate-pulse"
+            style={{ backgroundColor: editStatus.color }}
+          >
+            {editStatus.userName}
+          </div>
+        )}
+        <div 
+          className={`transition-all duration-300 ${editStatus ? 'pointer-events-none' : ''} ${isRecentlyUpdated ? 'animate-pulse' : ''}`}
+          style={
+            editStatus 
+              ? { 
+                  boxShadow: `0 0 0 2px ${editStatus.color}`,
+                  borderRadius: '4px',
+                  opacity: 0.6
+                } 
+              : isRecentlyUpdated 
+                ? {
+                    boxShadow: '0 0 0 2px #22c55e',
+                    borderRadius: '4px',
+                    backgroundColor: 'rgba(34, 197, 94, 0.2)',
+                  }
+                : undefined
+          }
+        >
+          {children}
+        </div>
+      </div>
+    );
+  };
+
+  // Helper untuk mendapatkan style flash pada row
+  const getRowFlashStyle = (rowId: string) => {
+    // Cek apakah ada cell dalam row ini yang baru diupdate
+    const hasUpdate = Array.from(recentlyUpdatedCells).some(key => key.startsWith(`${rowId}-`));
+    if (hasUpdate) {
+      return {
+        backgroundColor: 'rgba(34, 197, 94, 0.1)',
+        transition: 'background-color 0.3s ease',
+      };
+    }
+    return {};
+  };
+
+  // Komponen untuk render cursor user lain
+  const UserCursors = () => {
+    return (
+      <>
+        {Object.entries(userCursors).map(([oderId, cursor]) => (
+          <div
+            key={oderId}
+            className="pointer-events-none fixed z-[9999] transition-all duration-75 ease-out"
+            style={{
+              left: cursor.x,
+              top: cursor.y,
+              transform: 'translate(-2px, -2px)',
+            }}
+          >
+            {/* Cursor Arrow SVG */}
+            <svg
+              width="24"
+              height="24"
+              viewBox="0 0 24 24"
+              fill="none"
+              style={{ filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.5))' }}
+            >
+              <path
+                d="M5.5 3L19 12L12 13L9 20L5.5 3Z"
+                fill={cursor.color}
+                stroke="white"
+                strokeWidth="1.5"
+                strokeLinejoin="round"
+              />
+            </svg>
+            {/* User Name Label */}
+            <div
+              className="absolute left-4 top-4 px-2 py-0.5 rounded text-[10px] font-medium text-white whitespace-nowrap shadow-lg"
+              style={{ backgroundColor: cursor.color }}
+            >
+              {cursor.userName}
+            </div>
+          </div>
+        ))}
+      </>
+    );
+  };
+
   return (
-    <div className="bg-gray-900 text-white h-screen p-2 pb-20 md:pb-2 text-sm font-sans flex flex-col overflow-hidden">
+    <div ref={containerRef} className="bg-gray-900 text-white h-screen p-2 pb-20 md:pb-2 text-sm font-sans flex flex-col overflow-hidden relative">
+      {/* Remote User Cursors */}
+      <UserCursors />
+      
+      {/* Active Users Indicator */}
+      <ActiveUsersIndicator />
+      
       <datalist id="part-options">
         {partOptions.map((p, idx) => (<option key={idx} value={p} />))}
       </datalist>
@@ -3367,9 +3791,10 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                 return resiItems.map((row, itemIdx) => {
                   const isFirstOfGroup = itemIdx === 0;
                   const idx = displayedRows.indexOf(row);
+                  const rowFlashStyle = getRowFlashStyle(row.id);
                   
                   return (
-                    <tr key={row.id} className={`group hover:bg-gray-700/50 transition-colors ${getRowBgColor(row, isSelected)} ${isFirstOfGroup && resiItems.length > 1 ? 'border-t-2 border-t-gray-500' : ''}`}>
+                    <tr key={row.id} className={`group hover:bg-gray-700/50 transition-colors ${getRowBgColor(row, isSelected)} ${isFirstOfGroup && resiItems.length > 1 ? 'border-t-2 border-t-gray-500' : ''}`} style={rowFlashStyle}>
                       
                       {/* CHECKBOX - hanya tampil di baris pertama grup */}
                       {isFirstOfGroup ? (
