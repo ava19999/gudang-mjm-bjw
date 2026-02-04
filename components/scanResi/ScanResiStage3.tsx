@@ -2973,6 +2973,10 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
     acc[resiKey].push(row);
     return acc;
   }, {} as Record<string, Stage3Row[]>);
+  
+  // VISUAL ROWS - array rows sesuai urutan visual di tabel (setelah grouping)
+  // Ini penting untuk navigasi keyboard yang benar
+  const visualRows = Object.values(groupedByResi).flat();
 
   // Hitung status per grup resi
   const getGroupStatus = (items: Stage3Row[]) => {
@@ -3703,7 +3707,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                                             📋 Hasil di Tabel S3 ({filteredTableRows.length})
                                         </div>
                                         {filteredTableRows.slice(0, 20).map((r, i) => {
-                                            const rowIndex = displayedRows.indexOf(r);
+                                            const rowIndex = visualRows.indexOf(r);
                                             return (
                                                 <div 
                                                     key={`table-${i}`} 
@@ -3762,7 +3766,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                                         className="px-2 py-1.5 hover:bg-blue-900/30 cursor-pointer border-b border-gray-700/50 text-[10px]"
                                         onClick={() => {
                                             // Cek apakah resi ini sudah ada di tabel S3
-                                            const foundRowIndex = displayedRows.findIndex(row => row.resi === r.resi || row.no_pesanan === r.no_pesanan);
+                                            const foundRowIndex = visualRows.findIndex(row => row.resi === r.resi || row.no_pesanan === r.no_pesanan);
                                             if (foundRowIndex >= 0) {
                                                 const el = document.getElementById(`input-${foundRowIndex}-part_number`);
                                                 el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -3943,7 +3947,8 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                 
                 return resiItems.map((row, itemIdx) => {
                   const isFirstOfGroup = itemIdx === 0;
-                  const idx = displayedRows.indexOf(row);
+                  // Gunakan visualRows untuk index yang sesuai dengan urutan visual di tabel
+                  const idx = visualRows.indexOf(row);
                   const rowFlashStyle = getRowFlashStyle(row.id);
                   
                   return (
