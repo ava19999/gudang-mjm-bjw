@@ -233,9 +233,20 @@ export const PettyCashView: React.FC<PettyCashViewProps> = ({ refreshTrigger }) 
   };
   
   const handleDownloadCSV = () => {
+    // Helper untuk format tanggal CSV tanpa konversi timezone
+    const formatDateCSV = (dateStr: string) => {
+      try {
+        const datePart = dateStr.split(/[T\s]/)[0];
+        const [year, month, day] = datePart.split('-');
+        return `${day}/${month}/${year}`;
+      } catch {
+        return dateStr;
+      }
+    };
+    
     const headers = ['Tanggal', 'Akun', 'Keterangan', 'Tipe', 'Jumlah', 'Saldo'];
     const rows = filteredEntries.map(entry => [
-      new Date(entry.tgl).toLocaleDateString('id-ID'),
+      formatDateCSV(entry.tgl),
       entry.akun === 'cash' ? 'Kas' : 'Rekening',
       entry.keterangan,
       entry.type === 'in' ? 'Masuk' : 'Keluar',
@@ -257,11 +268,13 @@ export const PettyCashView: React.FC<PettyCashViewProps> = ({ refreshTrigger }) 
   
   const formatDate = (dateStr: string) => {
     try {
-      return new Date(dateStr).toLocaleDateString('id-ID', {
-        day: '2-digit',
-        month: 'short',
-        year: 'numeric'
-      });
+      // Parse tanggal tanpa konversi timezone
+      // Format dari Supabase: "2026-02-03 17:58:00+00" atau "2026-02-03T17:58:00+00:00"
+      const datePart = dateStr.split(/[T\s]/)[0]; // Ambil bagian tanggal saja (YYYY-MM-DD)
+      const [year, month, day] = datePart.split('-').map(Number);
+      
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+      return `${String(day).padStart(2, '0')} ${months[month - 1]} ${year}`;
     } catch {
       return dateStr;
     }

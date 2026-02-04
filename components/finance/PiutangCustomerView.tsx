@@ -106,10 +106,8 @@ export const PiutangCustomerView: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterTempo, setFilterTempo] = useState<string>('all');
   const [filterStore, setFilterStore] = useState<'all' | 'mjm' | 'bjw'>('all');
-  const [filterMonth, setFilterMonth] = useState(() => {
-    const now = new Date();
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-  });
+  const [filterMonth, setFilterMonth] = useState(''); // Will be set after finding oldest unpaid month
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
   
   // Modal states
   const [selectedCustomer, setSelectedCustomer] = useState<CustomerPiutang | null>(null);
@@ -322,8 +320,70 @@ export const PiutangCustomerView: React.FC = () => {
     }
   };
 
+  // Find oldest month with unpaid records on initial load
+  const findOldestUnpaidMonth = async () => {
+    try {
+      const storesToQuery = filterStore === 'all' ? ['mjm', 'bjw'] : [filterStore];
+      let oldestDate: Date | null = null;
+
+      for (const store of storesToQuery) {
+        const tableName = store === 'mjm' ? 'barang_masuk_mjm' : 'barang_masuk_bjw';
+        
+        const { data } = await supabase
+          .from(tableName)
+          .select('created_at')
+          .not('tempo', 'ilike', '%CASH%')
+          .not('tempo', 'ilike', '%NADIR%')
+          .not('tempo', 'ilike', '%RETUR%')
+          .not('tempo', 'ilike', '%STOK%')
+          .not('tempo', 'is', null)
+          .not('tempo', 'eq', '')
+          .not('tempo', 'eq', '-')
+          .gte('created_at', '2025-11-01') // After Oct 2025 cutoff
+          .order('created_at', { ascending: true })
+          .limit(1);
+
+        if (data && data.length > 0) {
+          const date = new Date(data[0].created_at);
+          if (!oldestDate || date < oldestDate) {
+            oldestDate = date;
+          }
+        }
+      }
+
+      if (oldestDate) {
+        const month = `${oldestDate.getFullYear()}-${String(oldestDate.getMonth() + 1).padStart(2, '0')}`;
+        setFilterMonth(month);
+      } else {
+        // Fallback to current month if no data found
+        const now = new Date();
+        setFilterMonth(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`);
+      }
+    } catch (err) {
+      console.error('Failed to find oldest unpaid month:', err);
+      // Fallback to current month
+      const now = new Date();
+      setFilterMonth(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`);
+    } finally {
+      setIsInitialLoad(false);
+    }
+  };
+
+  // On initial mount, find oldest unpaid month
   useEffect(() => {
-    loadData();
+    if (isInitialLoad) {
+      findOldestUnpaidMonth();
+    }
+  }, []);
+
+  // Load data when filterMonth changes (but not during initial load)
+  useEffect(() => {
+    if (filterMonth && !isInitialLoad) {
+      loadData();
+    } else if (filterMonth && isInitialLoad) {
+      // First load after finding oldest month
+      loadData();
+    }
   }, [filterStore, selectedStore, filterMonth]);
 
   // Filtered customers (based on active tab)
