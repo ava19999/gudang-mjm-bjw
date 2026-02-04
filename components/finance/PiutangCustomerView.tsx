@@ -51,11 +51,13 @@ interface CustomerPiutang {
 interface Pembayaran {
   id: number;
   customer: string;
+  tempo: string;
   tanggal: string;
   jumlah: number;
   keterangan: string;
   created_at: string;
   store: string;
+  for_months: string;
 }
 
 // Utility functions
@@ -104,8 +106,7 @@ export const PiutangCustomerView: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterTempo, setFilterTempo] = useState<string>('all');
   const [filterStore, setFilterStore] = useState<'all' | 'mjm' | 'bjw'>('all');
-  const [filterMonthFrom, setFilterMonthFrom] = useState('2025-11'); // Default November 2025 (after Oct 2025 cutoff)
-  const [filterMonthTo, setFilterMonthTo] = useState(() => {
+  const [filterMonth, setFilterMonth] = useState(() => {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
   });
@@ -173,9 +174,9 @@ export const PiutangCustomerView: React.FC = () => {
 
       const allRecords: BarangMasukRecord[] = [];
       
-      // Calculate date range from month filters
-      const dateFrom = `${filterMonthFrom}-01`;
-      const dateTo = new Date(filterMonthTo + '-01');
+      // Calculate date range from single month filter
+      const dateFrom = `${filterMonth}-01`;
+      const dateTo = new Date(filterMonth + '-01');
       dateTo.setMonth(dateTo.getMonth() + 1);
       dateTo.setDate(0); // Last day of the month
       const dateToStr = dateTo.toISOString().split('T')[0];
@@ -204,10 +205,13 @@ export const PiutangCustomerView: React.FC = () => {
         }
       }
 
-      // Load pembayaran data
+      // Load pembayaran data - filtered by for_months field (date type)
+      // Filter by matching month: for_months between first and last day of selected month
       const { data: pembayaranData } = await supabase
         .from('importir_pembayaran')
         .select('*')
+        .gte('for_months', dateFrom)
+        .lte('for_months', dateToStr)
         .order('tanggal', { ascending: false });
       
       setPembayaranList(pembayaranData || []);
@@ -217,7 +221,7 @@ export const PiutangCustomerView: React.FC = () => {
         .from('importir_tagihan')
         .select('*')
         .gte('tanggal', dateFrom)
-        .lte('tanggal', dateToStr)
+        .lte('tanggal', dateToStr + 'T23:59:59')
         .order('tanggal', { ascending: false });
       
       setTagihanList(tagihanData || []);
@@ -294,21 +298,22 @@ export const PiutangCustomerView: React.FC = () => {
         customer.sisaPiutang = customer.totalPiutang + customer.totalTagihanManual - customer.totalBayar;
       });
 
-      // Convert to array - separate lunas and belum lunas
+      // Convert to array - sort with lunas at bottom
       const allCustomers = Array.from(customerMap.values());
       
-      // Belum lunas (sisa > 0)
-      const customersArray = allCustomers
+      // Belum lunas (sisa > 0) - sorted by sisa piutang descending
+      const belumLunas = allCustomers
         .filter(c => c.sisaPiutang > 0)
         .sort((a, b) => b.sisaPiutang - a.sisaPiutang);
 
-      // Sudah lunas (sisa <= 0 and has transactions)
-      const lunasArray = allCustomers
+      // Sudah lunas (sisa <= 0 and has transactions) - sorted by last transaction
+      const sudahLunas = allCustomers
         .filter(c => c.sisaPiutang <= 0 && c.totalPiutang > 0)
         .sort((a, b) => new Date(b.lastTransaction).getTime() - new Date(a.lastTransaction).getTime());
 
-      setCustomers(customersArray);
-      setCustomersLunas(lunasArray);
+      // Combine: belum lunas first, then lunas at bottom
+      setCustomers([...belumLunas, ...sudahLunas]);
+      setCustomersLunas(sudahLunas);
     } catch (err) {
       console.error('Failed to load piutang data:', err);
       showToast('Gagal memuat data piutang', 'error');
@@ -319,7 +324,7 @@ export const PiutangCustomerView: React.FC = () => {
 
   useEffect(() => {
     loadData();
-  }, [filterStore, selectedStore, filterMonthFrom, filterMonthTo]);
+  }, [filterStore, selectedStore, filterMonth]);
 
   // Filtered customers (based on active tab)
   const filteredCustomers = useMemo(() => {
@@ -365,6 +370,7 @@ export const PiutangCustomerView: React.FC = () => {
           jumlah: parseFloat(paymentAmount),
           keterangan: paymentNote || 'Pembayaran piutang',
           store: filterStore === 'all' ? 'all' : filterStore,
+          for_months: `${filterMonth}-01`,
         }]);
 
       if (error) throw error;
@@ -676,7 +682,7 @@ export const PiutangCustomerView: React.FC = () => {
         </head>
         <body>
           <h1>Laporan Piutang Customer (Tempo)</h1>
-          <div class="subtitle">Toko: ${filterStore === 'all' ? 'Semua' : filterStore.toUpperCase()} | Periode: ${filterMonthFrom} s/d ${filterMonthTo} | Tanggal Cetak: ${new Date().toLocaleDateString('id-ID')}</div>
+          <div class="subtitle">Toko: ${filterStore === 'all' ? 'Semua' : filterStore.toUpperCase()} | Periode: ${filterMonth} | Tanggal Cetak: ${new Date().toLocaleDateString('id-ID')}</div>
           
           <div class="stats">
             <div class="stat-card">
@@ -765,7 +771,7 @@ export const PiutangCustomerView: React.FC = () => {
         </div>
         <div style="text-align: center; color: #6b7280; margin-bottom: 30px; font-size: 14px;">
           Toko: <strong>${filterStore === 'all' ? 'Semua' : filterStore.toUpperCase()}</strong> &nbsp;|&nbsp; 
-          Periode: <strong>${filterMonthFrom}</strong> s/d <strong>${filterMonthTo}</strong> &nbsp;|&nbsp; 
+          Periode: <strong>${filterMonth}</strong> &nbsp;|&nbsp; 
           Tanggal Cetak: <strong>${new Date().toLocaleDateString('id-ID')}</strong>
         </div>
         
@@ -845,7 +851,7 @@ export const PiutangCustomerView: React.FC = () => {
         if (blob) {
           const url = URL.createObjectURL(blob);
           const link = document.createElement('a');
-          link.download = `piutang-customer-${filterStore === 'all' ? 'semua' : filterStore}-${filterMonthFrom}-${filterMonthTo}.png`;
+          link.download = `piutang-customer-${filterStore === 'all' ? 'semua' : filterStore}-${filterMonth}.png`;
           link.href = url;
           link.click();
           URL.revokeObjectURL(url);
@@ -990,7 +996,7 @@ export const PiutangCustomerView: React.FC = () => {
         </div>
       </div>
 
-      {/* Month Range Filter */}
+      {/* Month Filter */}
       <div className="flex flex-col md:flex-row gap-3 mb-4 items-center">
         <div className="flex items-center gap-2">
           <Calendar className="w-4 h-4 text-gray-400" />
@@ -999,16 +1005,8 @@ export const PiutangCustomerView: React.FC = () => {
         <div className="flex items-center gap-2">
           <input
             type="month"
-            value={filterMonthFrom}
-            onChange={(e) => setFilterMonthFrom(e.target.value)}
-            min="2025-11"
-            className="bg-gray-800 border border-gray-700 rounded-xl px-3 py-2.5 text-white focus:border-red-500 focus:ring-1 focus:ring-red-500 transition-colors"
-          />
-          <span className="text-gray-400">s/d</span>
-          <input
-            type="month"
-            value={filterMonthTo}
-            onChange={(e) => setFilterMonthTo(e.target.value)}
+            value={filterMonth}
+            onChange={(e) => setFilterMonth(e.target.value)}
             min="2025-11"
             className="bg-gray-800 border border-gray-700 rounded-xl px-3 py-2.5 text-white focus:border-red-500 focus:ring-1 focus:ring-red-500 transition-colors"
           />
