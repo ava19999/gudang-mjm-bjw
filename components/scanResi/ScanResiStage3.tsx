@@ -1207,6 +1207,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
   const [userCursors, setUserCursors] = useState<Record<string, {x: number, y: number, userName: string, color: string}>>({});
   const presenceChannelRef = useRef<RealtimeChannel | null>(null);
   const resiItemsChannelRef = useRef<RealtimeChannel | null>(null);
+  const broadcastChannelRef = useRef<RealtimeChannel | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   
   // State untuk highlight cell yang baru diupdate (flash effect)
@@ -1225,6 +1226,23 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
   
   // Throttle untuk cursor update (hanya kirim setiap 50ms)
   const lastCursorUpdate = useRef<number>(0);
+  
+  // Function untuk broadcast perubahan data ke user lain (instant, tanpa menunggu database)
+  const broadcastDataChange = useCallback((rowId: string, field: string, value: any) => {
+    if (!broadcastChannelRef.current) return;
+    
+    broadcastChannelRef.current.send({
+      type: 'broadcast',
+      event: 'data_change',
+      payload: {
+        rowId,
+        field,
+        value,
+        userId: userIdRef.current,
+        timestamp: Date.now()
+      }
+    });
+  }, []);
   
   // Function untuk menambahkan flash effect pada cell yang diupdate
   const flashCell = useCallback((rowId: string, fields: string[]) => {
@@ -1400,6 +1418,49 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
         console.log(`[Realtime] ${tableName} subscription status:`, status);
       });
 
+    // Channel untuk INSTANT broadcast perubahan data (tanpa menunggu database)
+    broadcastChannelRef.current = supabase
+      .channel(`stage3-broadcast-${selectedStore}`)
+      .on('broadcast', { event: 'data_change' }, (payload) => {
+        const { rowId, field, value, userId: senderId } = payload.payload;
+        
+        // Jangan proses jika dari user yang sama
+        if (senderId === userId) return;
+        
+        console.log('[Broadcast] Data change received:', { rowId, field, value });
+        
+        // Flash effect
+        flashCell(rowId, [field]);
+        
+        // Update data langsung
+        setRows(prevRows =>
+          prevRows.map(row => {
+            if (row.id !== rowId) return row;
+            
+            // Map field names
+            const fieldMap: Record<string, keyof Stage3Row> = {
+              'part_number': 'part_number',
+              'qty_keluar': 'qty_keluar',
+              'harga_total': 'harga_total',
+              'harga_satuan': 'harga_satuan',
+              'customer': 'customer',
+              'ecommerce': 'ecommerce',
+              'sub_toko': 'sub_toko',
+              'tanggal': 'tanggal',
+            };
+            
+            const rowField = fieldMap[field];
+            if (rowField) {
+              return { ...row, [rowField]: value };
+            }
+            return row;
+          })
+        );
+      })
+      .subscribe((status) => {
+        console.log(`[Broadcast] stage3-broadcast-${selectedStore} status:`, status);
+      });
+
     // Channel untuk presence (siapa yang online dan sedang edit apa)
     presenceChannelRef.current = supabase
       .channel(`stage3-presence-${selectedStore}`, {
@@ -1467,8 +1528,8 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
     // Mouse move handler untuk broadcast cursor position
     const handleMouseMove = (e: MouseEvent) => {
       const now = Date.now();
-      // Throttle: hanya kirim setiap 50ms
-      if (now - lastCursorUpdate.current < 50) return;
+      // Throttle: hanya kirim setiap 16ms (~60fps) untuk cursor yang lebih responsif
+      if (now - lastCursorUpdate.current < 16) return;
       lastCursorUpdate.current = now;
       
       if (presenceChannelRef.current && containerRef.current) {
@@ -1500,8 +1561,11 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
       if (presenceChannelRef.current) {
         supabase.removeChannel(presenceChannelRef.current);
       }
+      if (broadcastChannelRef.current) {
+        supabase.removeChannel(broadcastChannelRef.current);
+      }
     };
-  }, [selectedStore, getUserColor]);
+  }, [selectedStore, getUserColor, flashCell]);
 
   // Function untuk broadcast cell yang sedang diedit
   const broadcastEditingCell = useCallback(async (cellKey: string | null) => {
@@ -2498,6 +2562,9 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
     
     // Auto-save to database with debounce (only for editable fields)
     if (updatedRow && ['part_number', 'qty_keluar', 'harga_total', 'harga_satuan', 'customer', 'ecommerce', 'sub_toko', 'tanggal'].includes(field)) {
+      // INSTANT: Broadcast perubahan ke user lain (tanpa menunggu database)
+      broadcastDataChange(id, field, value);
+      
       // Broadcast editing status
       broadcastEditingCell(`${id}-${field}`);
       
@@ -3303,11 +3370,12 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
         {Object.entries(userCursors).map(([oderId, cursor]) => (
           <div
             key={oderId}
-            className="pointer-events-none fixed z-[9999] transition-all duration-75 ease-out"
+            className="pointer-events-none fixed z-[9999]"
             style={{
               left: cursor.x,
               top: cursor.y,
               transform: 'translate(-2px, -2px)',
+              willChange: 'left, top',
             }}
           >
             {/* Cursor Arrow SVG */}
