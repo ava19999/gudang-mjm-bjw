@@ -1198,6 +1198,12 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
   // REALTIME COLLABORATION STATE
   const [activeUsers, setActiveUsers] = useState<{userId: string, userName: string, color: string}[]>([]);
   const [editingCells, setEditingCells] = useState<Record<string, {userId: string, userName: string, color: string}>>({});
+  
+  // FOCUSED CELL STATE (Google Sheets-like navigation)
+  const [focusedCell, setFocusedCell] = useState<{rowIndex: number, colKey: string} | null>(null);
+  
+  // PART NUMBER DROPDOWN STATE
+  const [partNumberDropdown, setPartNumberDropdown] = useState<{rowId: string, rowIndex: number, isOpen: boolean, selectedIndex: number}>({rowId: '', rowIndex: -1, isOpen: false, selectedIndex: -1});
   const [userCursors, setUserCursors] = useState<Record<string, {x: number, y: number, userName: string, color: string}>>({});
   const presenceChannelRef = useRef<RealtimeChannel | null>(null);
   const resiItemsChannelRef = useRef<RealtimeChannel | null>(null);
@@ -2304,36 +2310,119 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
     }
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent, rowIndex: number, colKey: string) => {
-    // Navigasi panah seperti Excel
+  const handleKeyDown = (e: React.KeyboardEvent, rowIndex: number, colKey: string, rowId?: string) => {
+    // Navigasi panah seperti Excel/Google Sheets
     const colOrder = ['tanggal', 'customer', 'part_number', 'qty_keluar', 'harga_total', 'harga_satuan'];
     const currentColIdx = colOrder.indexOf(colKey);
+    
+    // Handle Part Number dropdown navigation
+    if (colKey === 'part_number' && partNumberDropdown.isOpen && partNumberDropdown.rowIndex === rowIndex) {
+      const currentRow = displayedRows[rowIndex];
+      const searchValue = currentRow?.part_number || '';
+      const filteredParts = partOptions.filter(p => 
+        p.toLowerCase().includes(searchValue.toLowerCase())
+      ).slice(0, 50);
+      
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        e.stopPropagation();
+        setPartNumberDropdown(prev => ({
+          ...prev,
+          selectedIndex: Math.min(prev.selectedIndex + 1, filteredParts.length - 1)
+        }));
+        return;
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        e.stopPropagation();
+        if (partNumberDropdown.selectedIndex > 0) {
+          setPartNumberDropdown(prev => ({
+            ...prev,
+            selectedIndex: prev.selectedIndex - 1
+          }));
+          return;
+        } else {
+          // Close dropdown and allow normal navigation
+          setPartNumberDropdown(prev => ({ ...prev, isOpen: false, selectedIndex: -1 }));
+        }
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (partNumberDropdown.selectedIndex >= 0 && filteredParts[partNumberDropdown.selectedIndex]) {
+          const selectedPart = filteredParts[partNumberDropdown.selectedIndex];
+          if (rowId) {
+            updateRow(rowId, 'part_number', selectedPart);
+            handlePartNumberBlur(rowId, selectedPart);
+          }
+          setPartNumberDropdown(prev => ({ ...prev, isOpen: false, selectedIndex: -1 }));
+        }
+        return;
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        setPartNumberDropdown(prev => ({ ...prev, isOpen: false, selectedIndex: -1 }));
+        return;
+      } else if (e.key === 'Tab') {
+        setPartNumberDropdown(prev => ({ ...prev, isOpen: false, selectedIndex: -1 }));
+      }
+    }
 
-    if (e.key === 'ArrowDown' || e.key === 'Enter') {
+    if (e.key === 'ArrowDown' || (e.key === 'Enter' && colKey !== 'part_number')) {
       e.preventDefault();
       (e.target as HTMLInputElement).blur(); 
       const nextInput = document.getElementById(`input-${rowIndex + 1}-${colKey}`);
-      nextInput?.focus();
+      if (nextInput) {
+        nextInput.focus();
+        setFocusedCell({ rowIndex: rowIndex + 1, colKey });
+      }
+    } else if (e.key === 'Enter' && colKey === 'part_number' && !partNumberDropdown.isOpen) {
+      e.preventDefault();
+      (e.target as HTMLInputElement).blur(); 
+      const nextInput = document.getElementById(`input-${rowIndex + 1}-${colKey}`);
+      if (nextInput) {
+        nextInput.focus();
+        setFocusedCell({ rowIndex: rowIndex + 1, colKey });
+      }
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
       (e.target as HTMLInputElement).blur();
       const prevInput = document.getElementById(`input-${rowIndex - 1}-${colKey}`);
-      prevInput?.focus();
+      if (prevInput) {
+        prevInput.focus();
+        setFocusedCell({ rowIndex: rowIndex - 1, colKey });
+      }
     } else if (e.key === 'ArrowRight') {
       const target = e.target as HTMLInputElement;
       if (target.type !== 'text' || target.selectionStart === target.value.length) {
          e.preventDefault();
          const nextCol = colOrder[currentColIdx + 1];
-         if (nextCol) document.getElementById(`input-${rowIndex}-${nextCol}`)?.focus();
+         if (nextCol) {
+           const nextInput = document.getElementById(`input-${rowIndex}-${nextCol}`);
+           if (nextInput) {
+             nextInput.focus();
+             setFocusedCell({ rowIndex, colKey: nextCol });
+           }
+         }
       }
     } else if (e.key === 'ArrowLeft') {
       const target = e.target as HTMLInputElement;
       if (target.type !== 'text' || target.selectionStart === 0) {
         e.preventDefault();
         const prevCol = colOrder[currentColIdx - 1];
-        if (prevCol) document.getElementById(`input-${rowIndex}-${prevCol}`)?.focus();
+        if (prevCol) {
+          const prevInput = document.getElementById(`input-${rowIndex}-${prevCol}`);
+          if (prevInput) {
+            prevInput.focus();
+            setFocusedCell({ rowIndex, colKey: prevCol });
+          }
+        }
       }
     }
+  };
+  
+  // Helper function untuk mendapatkan style cell yang fokus (Google Sheets-like)
+  const getCellFocusClass = (rowIndex: number, colKey: string): string => {
+    if (focusedCell?.rowIndex === rowIndex && focusedCell?.colKey === colKey) {
+      return 'ring-2 ring-blue-500 ring-inset bg-blue-900/40';
+    }
+    return '';
   };
 
   // Auto-save function with debounce
@@ -3257,10 +3346,6 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
       
       {/* Active Users Indicator */}
       <ActiveUsersIndicator />
-      
-      <datalist id="part-options">
-        {partOptions.map((p, idx) => (<option key={idx} value={p} />))}
-      </datalist>
 
       {/* HEADER TOOLBAR */}
       <div className="bg-gray-800 p-2 rounded border border-gray-700 mb-2 shadow-sm flex-shrink-0">
@@ -3862,14 +3947,15 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                   </td>
 
                   {/* TANGGAL */}
-                  <td className="border border-gray-600 p-0">
+                  <td className={`border border-gray-600 p-0 transition-all ${getCellFocusClass(idx, 'tanggal')}`}>
                     <input 
                         id={`input-${idx}-tanggal`} 
                         type="date" 
                         value={row.tanggal} 
                         onChange={(e) => updateRow(row.id, 'tanggal', e.target.value)} 
-                        onKeyDown={(e) => handleKeyDown(e, idx, 'tanggal')} 
-                        className="w-full h-full bg-transparent px-1 focus:bg-blue-900/50 outline-none text-center cursor-pointer"
+                        onFocus={() => setFocusedCell({ rowIndex: idx, colKey: 'tanggal' })}
+                        onKeyDown={(e) => handleKeyDown(e, idx, 'tanggal', row.id)} 
+                        className="w-full h-full bg-transparent px-1 outline-none text-center cursor-pointer"
                     />
                   </td>
 
@@ -3904,32 +3990,95 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                   </td>
 
                   {/* CUSTOMER (INPUT) */}
-                  <td className="border border-gray-600 p-0">
+                  <td className={`border border-gray-600 p-0 transition-all ${getCellFocusClass(idx, 'customer')}`}>
                     <input 
                         id={`input-${idx}-customer`} 
                         type="text"
                         value={row.customer} 
                         onChange={(e) => updateRow(row.id, 'customer', e.target.value)} 
                         onBlur={() => handleSaveRow(row)} 
-                        onKeyDown={(e) => handleKeyDown(e, idx, 'customer')}
-                        className="w-full h-full bg-transparent px-1.5 focus:bg-blue-900/50 outline-none text-gray-200 truncate focus:text-clip"
+                        onFocus={() => setFocusedCell({ rowIndex: idx, colKey: 'customer' })}
+                        onKeyDown={(e) => handleKeyDown(e, idx, 'customer', row.id)}
+                        className="w-full h-full bg-transparent px-1.5 outline-none text-gray-200 truncate focus:text-clip"
                         placeholder="Customer..."
                     />
                   </td>
 
-                  {/* PART NUMBER (INPUT UTAMA) */}
-                  <td className="border border-gray-600 p-0 bg-gray-800/30">
+                  {/* PART NUMBER (INPUT UTAMA) dengan custom dropdown */}
+                  <td className={`border border-gray-600 p-0 bg-gray-800/30 relative transition-all ${getCellFocusClass(idx, 'part_number')}`}>
                     <input 
                         id={`input-${idx}-part_number`} 
                         type="text" 
-                        list="part-options" 
+                        autoComplete="off"
                         value={row.part_number} 
-                        onChange={(e) => updateRow(row.id, 'part_number', e.target.value)} 
-                        onBlur={(e) => handlePartNumberBlur(row.id, e.target.value)} 
-                        onKeyDown={(e) => handleKeyDown(e, idx, 'part_number')} 
-                        className="w-full h-full bg-transparent px-1.5 focus:bg-blue-900/50 outline-none text-yellow-400 font-mono font-bold placeholder-gray-600" 
+                        onChange={(e) => {
+                          updateRow(row.id, 'part_number', e.target.value);
+                          setPartNumberDropdown({ rowId: row.id, rowIndex: idx, isOpen: true, selectedIndex: -1 });
+                        }} 
+                        onFocus={() => {
+                          setFocusedCell({ rowIndex: idx, colKey: 'part_number' });
+                          setPartNumberDropdown({ rowId: row.id, rowIndex: idx, isOpen: true, selectedIndex: -1 });
+                        }}
+                        onBlur={(e) => {
+                          // Delay blur untuk memungkinkan klik pada dropdown
+                          setTimeout(() => {
+                            if (partNumberDropdown.rowId === row.id) {
+                              setPartNumberDropdown(prev => ({ ...prev, isOpen: false }));
+                            }
+                            handlePartNumberBlur(row.id, e.target.value);
+                          }, 150);
+                        }} 
+                        onKeyDown={(e) => handleKeyDown(e, idx, 'part_number', row.id)} 
+                        className="w-full h-full bg-transparent px-1.5 outline-none text-yellow-400 font-mono font-bold placeholder-gray-600" 
                         placeholder="Scan Part..."
                     />
+                    {/* Custom Part Number Dropdown */}
+                    {partNumberDropdown.isOpen && partNumberDropdown.rowId === row.id && (
+                      <div className="absolute left-0 top-full mt-0.5 w-64 bg-gray-800 border border-gray-600 rounded shadow-xl z-50 max-h-60 overflow-auto">
+                        <div className="p-1.5 text-[9px] text-yellow-400 border-b border-gray-700 bg-yellow-900/20 font-semibold sticky top-0 z-10">
+                          📦 Part Number ({(() => {
+                            const searchValue = row.part_number || '';
+                            return partOptions.filter(p => p.toLowerCase().includes(searchValue.toLowerCase())).slice(0, 50).length;
+                          })()})
+                        </div>
+                        {(() => {
+                          const searchValue = row.part_number || '';
+                          const filtered = partOptions.filter(p => 
+                            p.toLowerCase().includes(searchValue.toLowerCase())
+                          ).slice(0, 50);
+                          
+                          if (filtered.length === 0) {
+                            return (
+                              <div className="p-3 text-center text-gray-500 text-[10px]">
+                                Tidak ditemukan
+                              </div>
+                            );
+                          }
+                          
+                          return filtered.map((pn, pnIdx) => (
+                            <div 
+                              key={pnIdx} 
+                              className={`px-2 py-1.5 cursor-pointer border-b border-gray-700/50 text-[11px] font-mono transition-colors ${
+                                partNumberDropdown.selectedIndex === pnIdx 
+                                  ? 'bg-blue-600 text-white' 
+                                  : 'text-yellow-400 hover:bg-yellow-900/30'
+                              }`}
+                              onMouseDown={(e) => {
+                                e.preventDefault();
+                                updateRow(row.id, 'part_number', pn);
+                                handlePartNumberBlur(row.id, pn);
+                                setPartNumberDropdown(prev => ({ ...prev, isOpen: false, selectedIndex: -1 }));
+                              }}
+                              onMouseEnter={() => {
+                                setPartNumberDropdown(prev => ({ ...prev, selectedIndex: pnIdx }));
+                              }}
+                            >
+                              {pn}
+                            </div>
+                          ));
+                        })()}
+                      </div>
+                    )}
                   </td>
 
                   {/* NAMA BARANG DARI CSV/EXCEL */}
@@ -3957,21 +4106,22 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                   </td>
 
                   {/* QTY KELUAR (INPUT) */}
-                  <td className="border border-gray-600 p-0">
+                  <td className={`border border-gray-600 p-0 transition-all ${getCellFocusClass(idx, 'qty_keluar')}`}>
                     <input 
                         id={`input-${idx}-qty_keluar`} 
                         type="number" 
                         value={row.qty_keluar || ''} 
                         onChange={(e) => updateRow(row.id, 'qty_keluar', parseInt(e.target.value) || 0)} 
                         onBlur={() => handleSaveRow(row)} 
-                        onKeyDown={(e) => handleKeyDown(e, idx, 'qty_keluar')} 
-                        className="w-full h-full bg-transparent text-center focus:bg-blue-900/50 outline-none font-bold"
+                        onFocus={() => setFocusedCell({ rowIndex: idx, colKey: 'qty_keluar' })}
+                        onKeyDown={(e) => handleKeyDown(e, idx, 'qty_keluar', row.id)} 
+                        className="w-full h-full bg-transparent text-center outline-none font-bold"
                         placeholder=""
                     />
                   </td>
 
                   {/* TOTAL HARGA (DISPLAY + INPUT) */}
-                  <td className="border border-gray-600 p-0 relative group/harga">
+                  <td className={`border border-gray-600 p-0 relative group/harga transition-all ${getCellFocusClass(idx, 'harga_total')}`}>
                     <div className="w-full h-full px-1 text-right font-mono text-yellow-400 font-bold group-focus-within/harga:hidden flex items-center justify-end gap-1">
                       <span>{row.harga_total ? formatNumber(row.harga_total) : ''}</span>
                       {row.mata_uang && row.mata_uang !== 'IDR' && row.harga_total > 0 && (
@@ -3984,14 +4134,15 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                         value={row.harga_total || ''} 
                         onChange={(e) => updateRow(row.id, 'harga_total', parseInt(e.target.value) || 0)} 
                         onBlur={() => handleSaveRow(row)} 
-                        onKeyDown={(e) => handleKeyDown(e, idx, 'harga_total')} 
-                        className="absolute inset-0 w-full h-full bg-transparent text-right px-1 focus:bg-blue-900/50 outline-none font-mono text-yellow-400 font-bold opacity-0 focus:opacity-100"
+                        onFocus={() => setFocusedCell({ rowIndex: idx, colKey: 'harga_total' })}
+                        onKeyDown={(e) => handleKeyDown(e, idx, 'harga_total', row.id)} 
+                        className="absolute inset-0 w-full h-full bg-transparent text-right px-1 outline-none font-mono text-yellow-400 font-bold opacity-0 focus:opacity-100"
                         placeholder=""
                     />
                   </td>
 
                   {/* HARGA SATUAN (DISPLAY + INPUT) */}
-                  <td className="border border-gray-600 p-0 relative group/satuan">
+                  <td className={`border border-gray-600 p-0 relative group/satuan transition-all ${getCellFocusClass(idx, 'harga_satuan')}`}>
                     <div className="w-full h-full px-1 text-right font-mono text-yellow-300 text-[11px] group-focus-within/satuan:hidden flex items-center justify-end gap-1">
                       <span>{formatNumber(row.harga_satuan || 0)}</span>
                       {row.mata_uang && row.mata_uang !== 'IDR' && row.harga_satuan > 0 && (
@@ -4004,8 +4155,9 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                         value={row.harga_satuan || ''} 
                         onChange={(e) => updateRow(row.id, 'harga_satuan', parseInt(e.target.value) || 0)} 
                         onBlur={() => handleSaveRow(row)} 
-                        onKeyDown={(e) => handleKeyDown(e, idx, 'harga_satuan')} 
-                        className="absolute inset-0 w-full h-full bg-transparent text-right px-1 focus:bg-blue-900/50 outline-none font-mono text-yellow-300 text-[11px] opacity-0 focus:opacity-100"
+                        onFocus={() => setFocusedCell({ rowIndex: idx, colKey: 'harga_satuan' })}
+                        onKeyDown={(e) => handleKeyDown(e, idx, 'harga_satuan', row.id)} 
+                        className="absolute inset-0 w-full h-full bg-transparent text-right px-1 outline-none font-mono text-yellow-300 text-[11px] opacity-0 focus:opacity-100"
                         placeholder=""
                     />
                   </td>
