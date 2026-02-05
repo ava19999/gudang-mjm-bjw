@@ -92,10 +92,9 @@ export const DataAgungView: React.FC<DataAgungViewProps> = ({ items, onRefresh, 
   const tableRefs = useRef<{[key in TableType]?: HTMLDivElement | null}>({});
   const rowRefs = useRef<{[key: string]: HTMLDivElement | null}>({});
 
-  // Table 1: Base Warehouse - Auto-populated with Qty = 0 items
+  // Table 1: Base Warehouse - All items from inventory (not just Qty = 0)
   const baseWarehouseItems: BaseWarehouseItem[] = useMemo(() => {
     return items
-      .filter(item => item.quantity === 0)
       .map(item => ({
         id: item.id,
         partNumber: item.partNumber,

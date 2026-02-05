@@ -302,6 +302,10 @@ export const OrderManagement: React.FC = () => {
   const [soldPage, setSoldPage] = useState(1);
   const ITEMS_PER_PAGE = 50;
 
+  // Sort options for stock and date
+  const [stockSortOrder, setStockSortOrder] = useState<'none' | 'asc' | 'desc'>('none');
+  const [dateSortOrder, setDateSortOrder] = useState<'desc' | 'asc'>('desc'); // desc = terbaru dulu (default)
+
   // Retur Modal
   const [returModalOpen, setReturModalOpen] = useState(false);
   const [selectedReturItem, setSelectedReturItem] = useState<SoldItemRow | null>(null);
@@ -314,6 +318,19 @@ export const OrderManagement: React.FC = () => {
   const [inventory, setInventory] = useState<any[]>([]);
   const [selectedItem, setSelectedItem] = useState<any>(null);
   const [inventoryLoading, setInventoryLoading] = useState(false);
+
+  // Create inventory lookup map by part number for quick stock access
+  const inventoryStockMap = useMemo(() => {
+    const map: Record<string, number> = {};
+    inventory.forEach(item => {
+      const pn = (item.partNumber || '').toUpperCase().trim();
+      if (pn) {
+        // If duplicate part numbers, sum the quantities
+        map[pn] = (map[pn] || 0) + (item.quantity || 0);
+      }
+    });
+    return map;
+  }, [inventory]);
 
   // Load inventory langsung saat komponen mount - TANPA CACHE untuk menghindari masalah
   useEffect(() => {
@@ -491,8 +508,32 @@ export const OrderManagement: React.FC = () => {
       groups[key].totalAmount += (Number(item.harga_total) || 0);
     });
     
-    return Object.values(groups).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  }, [soldData, searchTerm, customerFilter, partNumberFilter, ecommerceFilter]);
+    return Object.values(groups).sort((a, b) => {
+      // If stock sort is enabled, sort by minimum stock in items (primary)
+      if (stockSortOrder !== 'none') {
+        const getMinStock = (items: SoldItemRow[]) => {
+          let minStock = Infinity;
+          items.forEach(item => {
+            const pn = (item.part_number || '').toUpperCase().trim();
+            const stock = inventoryStockMap[pn] ?? Infinity;
+            if (stock < minStock) minStock = stock;
+          });
+          return minStock === Infinity ? 0 : minStock;
+        };
+        const stockA = getMinStock(a.items);
+        const stockB = getMinStock(b.items);
+        if (stockSortOrder === 'asc') {
+          return stockA - stockB;
+        } else {
+          return stockB - stockA;
+        }
+      }
+      // Sort by date
+      const dateA = new Date(a.date).getTime();
+      const dateB = new Date(b.date).getTime();
+      return dateSortOrder === 'desc' ? dateB - dateA : dateA - dateB;
+    });
+  }, [soldData, searchTerm, customerFilter, partNumberFilter, ecommerceFilter, stockSortOrder, dateSortOrder, inventoryStockMap]);
 
   // Extract unique customers and part numbers from soldData for autocomplete - filtered and limited for performance
   const filteredCustomerOptions = useMemo(() => {
@@ -900,6 +941,72 @@ export const OrderManagement: React.FC = () => {
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
             </div>
+
+            {/* Stock Sort Button (Only for TERJUAL tab) */}
+            {activeTab === 'TERJUAL' && (
+              <button
+                onClick={() => {
+                  setStockSortOrder(prev => 
+                    prev === 'none' ? 'asc' : prev === 'asc' ? 'desc' : 'none'
+                  );
+                }}
+                className={`flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-bold transition-all border ${
+                  stockSortOrder === 'none' 
+                    ? 'bg-gray-800 border-gray-700 text-gray-400 hover:bg-gray-700' 
+                    : stockSortOrder === 'asc'
+                      ? 'bg-orange-900/40 border-orange-700/50 text-orange-400 hover:bg-orange-900/60'
+                      : 'bg-emerald-900/40 border-emerald-700/50 text-emerald-400 hover:bg-emerald-900/60'
+                }`}
+                title={stockSortOrder === 'none' ? 'Klik untuk sort stok terendah' : stockSortOrder === 'asc' ? 'Sort: Stok Terendah' : 'Sort: Stok Tertinggi'}
+              >
+                <Box size={16} />
+                {stockSortOrder === 'none' && 'Stok'}
+                {stockSortOrder === 'asc' && (
+                  <>
+                    Stok ↑
+                    <span className="text-[10px] bg-orange-800/50 px-1.5 py-0.5 rounded">Terendah</span>
+                  </>
+                )}
+                {stockSortOrder === 'desc' && (
+                  <>
+                    Stok ↓
+                    <span className="text-[10px] bg-emerald-800/50 px-1.5 py-0.5 rounded">Tertinggi</span>
+                  </>
+                )}
+              </button>
+            )}
+
+            {/* Date Sort Button (Only for TERJUAL tab) */}
+            {activeTab === 'TERJUAL' && (
+              <button
+                onClick={() => {
+                  setDateSortOrder(prev => prev === 'desc' ? 'asc' : 'desc');
+                  // Reset stock sort when date sort is clicked
+                  if (stockSortOrder !== 'none') setStockSortOrder('none');
+                }}
+                className={`flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-bold transition-all border ${
+                  dateSortOrder === 'desc' 
+                    ? 'bg-blue-900/40 border-blue-700/50 text-blue-400 hover:bg-blue-900/60' 
+                    : 'bg-purple-900/40 border-purple-700/50 text-purple-400 hover:bg-purple-900/60'
+                }`}
+                title={dateSortOrder === 'desc' ? 'Tanggal: Terbaru Dulu' : 'Tanggal: Terlama Dulu'}
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
+                {dateSortOrder === 'desc' ? (
+                  <>
+                    Tanggal ↓
+                    <span className="text-[10px] bg-blue-800/50 px-1.5 py-0.5 rounded">Terbaru</span>
+                  </>
+                ) : (
+                  <>
+                    Tanggal ↑
+                    <span className="text-[10px] bg-purple-800/50 px-1.5 py-0.5 rounded">Terlama</span>
+                  </>
+                )}
+              </button>
+            )}
           </div>
           
           {/* Bulk Action Bar for OFFLINE Tab */}
@@ -1335,6 +1442,11 @@ export const OrderManagement: React.FC = () => {
                     <div className="bg-gray-900/60 border-t border-gray-700/50 px-3 py-3 space-y-2 animate-in slide-in-from-top-2 duration-200">
                       {group.items.map((item, idx) => {
                         const unitPrice = item.qty_keluar > 0 ? item.harga_total / item.qty_keluar : 0;
+                        const partNumberKey = (item.part_number || '').toUpperCase().trim();
+                        const currentStock = inventoryStockMap[partNumberKey];
+                        const hasStock = currentStock !== undefined;
+                        const isLowStock = hasStock && currentStock <= 5;
+                        const isOutOfStock = hasStock && currentStock === 0;
                         
                         return (
                           <div 
@@ -1355,20 +1467,44 @@ export const OrderManagement: React.FC = () => {
                                 </div>
                                 
                                 <div className="flex-1 min-w-0">
-                                  {/* Part Number */}
-                                  <p className="text-base font-bold text-white font-mono tracking-wide mb-0.5 flex items-center gap-2">
-                                    {item.part_number || '-'}
-                                    <button 
-                                      onClick={() => {
-                                        navigator.clipboard.writeText(item.part_number || '');
-                                        showToast('Part number disalin!');
-                                      }}
-                                      className="opacity-0 group-hover/item:opacity-100 transition-opacity p-1 hover:bg-gray-700 rounded"
-                                      title="Copy Part Number"
-                                    >
-                                      <Copy size={12} className="text-gray-400"/>
-                                    </button>
-                                  </p>
+                                  {/* Part Number with Stock Badge */}
+                                  <div className="flex items-center gap-2 flex-wrap mb-0.5">
+                                    <p className="text-base font-bold text-white font-mono tracking-wide flex items-center gap-2">
+                                      {item.part_number || '-'}
+                                      <button 
+                                        onClick={() => {
+                                          navigator.clipboard.writeText(item.part_number || '');
+                                          showToast('Part number disalin!');
+                                        }}
+                                        className="opacity-0 group-hover/item:opacity-100 transition-opacity p-1 hover:bg-gray-700 rounded"
+                                        title="Copy Part Number"
+                                      >
+                                        <Copy size={12} className="text-gray-400"/>
+                                      </button>
+                                    </p>
+                                    {/* Stock Badge */}
+                                    {hasStock && (
+                                      <span 
+                                        className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                                          isOutOfStock 
+                                            ? 'bg-red-900/50 text-red-300 border-red-700/50 animate-pulse' 
+                                            : isLowStock 
+                                              ? 'bg-orange-900/50 text-orange-300 border-orange-700/50'
+                                              : 'bg-emerald-900/40 text-emerald-300 border-emerald-700/50'
+                                        }`}
+                                        title="Stok saat ini"
+                                      >
+                                        <Box size={10} />
+                                        Stok: {currentStock}
+                                      </span>
+                                    )}
+                                    {!hasStock && (
+                                      <span className="inline-flex items-center gap-1 text-[10px] text-gray-500 px-2 py-0.5 rounded-full bg-gray-800/50 border border-gray-700/50" title="Data stok tidak tersedia">
+                                        <Box size={10} />
+                                        N/A
+                                      </span>
+                                    )}
+                                  </div>
                                   
                                   {/* Item Name */}
                                   <p className="text-sm text-gray-300 font-medium truncate max-w-[300px]" title={item.name}>
