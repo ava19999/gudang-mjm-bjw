@@ -1204,6 +1204,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
   
   // PART NUMBER DROPDOWN STATE
   const [partNumberDropdown, setPartNumberDropdown] = useState<{rowId: string, rowIndex: number, isOpen: boolean, selectedIndex: number}>({rowId: '', rowIndex: -1, isOpen: false, selectedIndex: -1});
+  const partNumberSelectedRef = useRef<{rowId: string, value: string} | null>(null); // Track dropdown selection to prevent onBlur override
   const [userCursors, setUserCursors] = useState<Record<string, {x: number, y: number, userName: string, color: string}>>({});
   const presenceChannelRef = useRef<RealtimeChannel | null>(null);
   const resiItemsChannelRef = useRef<RealtimeChannel | null>(null);
@@ -4093,12 +4094,20 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                           setPartNumberDropdown({ rowId: row.id, rowIndex: idx, isOpen: true, selectedIndex: -1 });
                         }}
                         onBlur={(e) => {
+                          const currentRowId = row.id;
+                          const blurValue = e.target.value;
                           // Delay blur untuk memungkinkan klik pada dropdown
                           setTimeout(() => {
-                            if (partNumberDropdown.rowId === row.id) {
+                            if (partNumberDropdown.rowId === currentRowId) {
                               setPartNumberDropdown(prev => ({ ...prev, isOpen: false }));
                             }
-                            handlePartNumberBlur(row.id, e.target.value);
+                            // Jika ada selection dari dropdown untuk row ini, gunakan value dari selection
+                            if (partNumberSelectedRef.current && partNumberSelectedRef.current.rowId === currentRowId) {
+                              // Selection sudah dihandle oleh onMouseDown, skip onBlur
+                              partNumberSelectedRef.current = null;
+                              return;
+                            }
+                            handlePartNumberBlur(currentRowId, blurValue);
                           }, 150);
                         }} 
                         onKeyDown={(e) => handleKeyDown(e, idx, 'part_number', row.id)} 
@@ -4138,6 +4147,9 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                               }`}
                               onMouseDown={(e) => {
                                 e.preventDefault();
+                                e.stopPropagation();
+                                // Set ref untuk mencegah onBlur menimpa value
+                                partNumberSelectedRef.current = { rowId: row.id, value: pn };
                                 updateRow(row.id, 'part_number', pn);
                                 handlePartNumberBlur(row.id, pn);
                                 setPartNumberDropdown(prev => ({ ...prev, isOpen: false, selectedIndex: -1 }));

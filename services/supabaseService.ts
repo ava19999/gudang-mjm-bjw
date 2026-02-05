@@ -1299,7 +1299,7 @@ export const fetchShopItems = async (
 // 1. UPDATE DATA ORDER (Fitur Edit)
 export const updateOfflineOrder = async (
   id: string,
-  updates: { partNumber: string; quantity: number; price: number; nama_barang?: string },
+  updates: { partNumber: string; quantity: number; price: number; nama_barang?: string; tempo?: string },
   store: string | null,
   originalItem?: { tanggal: string; customer: string; part_number: string } // Untuk BJW yang tidak punya id
 ): Promise<{ success: boolean; msg: string }> => {
@@ -1315,6 +1315,7 @@ export const updateOfflineOrder = async (
       harga_total: hargaTotal
     };
     if (updates.nama_barang) updatePayload.nama_barang = updates.nama_barang;
+    if (updates.tempo) updatePayload.tempo = updates.tempo;
 
     let query = supabase.from(table).update(updatePayload);
     

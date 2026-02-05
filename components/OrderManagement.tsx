@@ -312,7 +312,7 @@ export const OrderManagement: React.FC = () => {
 
   // State Edit
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [editForm, setEditForm] = useState({ partNumber: '', quantity: 0, price: 0 });
+  const [editForm, setEditForm] = useState({ partNumber: '', quantity: 0, price: 0, tempo: 'CASH' });
 
   // Inventory for Autocomplete
   const [inventory, setInventory] = useState<any[]>([]);
@@ -799,7 +799,8 @@ export const OrderManagement: React.FC = () => {
     setEditForm({
       partNumber: item.part_number,
       quantity: item.quantity,
-      price: item.harga_satuan
+      price: item.harga_satuan,
+      tempo: item.tempo || 'CASH'
     });
   };
 
@@ -816,7 +817,7 @@ export const OrderManagement: React.FC = () => {
     if (found) {
       namaBarang = found.nama_barang || found.name || editForm.partNumber;
     }
-    const formWithName = { ...editForm, nama_barang: namaBarang };
+    const formWithName = { ...editForm, nama_barang: namaBarang, tempo: editForm.tempo };
     
     // Untuk BJW, kirim originalItem karena tidak punya id
     const originalItemForBJW = editingOriginalItem ? {
@@ -1224,11 +1225,30 @@ export const OrderManagement: React.FC = () => {
                           <div className="w-full md:w-auto flex-1 mr-4">
                             {!isEditing ? (
                                 <>
+                                  <div className="flex items-center gap-2 mb-1">
+                                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${item.tempo === 'CASH' ? 'bg-green-900/40 text-green-400' : 'bg-orange-900/40 text-orange-400'}`}>
+                                      {item.tempo || 'CASH'}
+                                    </span>
+                                  </div>
                                   <p className="text-lg font-bold text-white font-mono tracking-wider">{item.part_number || '-'}</p>
                                   <p className="text-sm font-semibold text-gray-200 mt-0.5">{item.nama_barang}</p>
                                 </>
                             ) : (
                                 <div className="space-y-2 w-full">
+                                    <div className="flex flex-col">
+                                        <label className="text-[10px] text-gray-400">Tempo</label>
+                                        <select
+                                          value={editForm.tempo}
+                                          onChange={(e) => setEditForm({...editForm, tempo: e.target.value})}
+                                          className="bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs text-white focus:ring-1 focus:ring-blue-500 outline-none"
+                                        >
+                                          <option value="CASH">CASH</option>
+                                          <option value="1 BLN">1 BLN</option>
+                                          <option value="2 BLN">2 BLN</option>
+                                          <option value="3 BLN">3 BLN</option>
+                                          <option value="NADIR">NADIR</option>
+                                        </select>
+                                    </div>
                                     <div className="flex flex-col">
                                         <label className="text-[10px] text-gray-400">Part Number</label>
                                         <Autocomplete
