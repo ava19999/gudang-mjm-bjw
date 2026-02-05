@@ -107,6 +107,11 @@ export const ScanResiStage2: React.FC<ScanResiStage2Props> = ({ onRefresh }) => 
   const [bulkSaving, setBulkSaving] = useState(false);
   const bulkInputRefs = useRef<{ [key: string]: HTMLInputElement | null }>({});
   
+  // Duplicate Popup State
+  const [showDuplicatePopup, setShowDuplicatePopup] = useState(false);
+  const [duplicateResi, setDuplicateResi] = useState<string>('');
+  const [duplicateMessage, setDuplicateMessage] = useState<string>('');
+  
   const scannerRef = useRef<HTMLDivElement>(null);
   const scanCooldownRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -195,22 +200,40 @@ export const ScanResiStage2: React.FC<ScanResiStage2Props> = ({ onRefresh }) => 
     setLoading(false);
   };
   
+  // Function to show duplicate popup with sound
+  const showDuplicateAlert = (resi: string, message: string) => {
+    setDuplicateResi(resi);
+    setDuplicateMessage(message);
+    setShowDuplicatePopup(true);
+    
+    // Mainkan audio custom "sudah di scan.mp3"
+    try {
+      const audio = new Audio(duplicateAudioFile);
+      audio.volume = 1.0;
+      audio.play().catch((e) => console.error('Audio play failed:', e));
+    } catch (e) {
+      console.error('Audio error:', e);
+      playBeep('error');
+    }
+    
+    // Getarkan device (vibrate) untuk mobile
+    if ('vibrate' in navigator) {
+      navigator.vibrate([200, 100, 200]);
+    }
+    
+    // Auto close popup setelah 3 detik
+    setTimeout(() => {
+      setShowDuplicatePopup(false);
+    }, 3000);
+  };
+
   const handleScanSuccess = async (decodedText: string) => {
-    // 1. Jika masih cooldown, abaikan
+    // 1. Jika masih cooldown, abaikan scan berikutnya
     if (!scanningEnabled) return;
 
-    // 2. CEK DOUBLE SCAN
+    // 2. CEK DOUBLE SCAN (resi yang baru saja di-scan)
     if (decodedText === lastScannedResi) {
-      // Mainkan audio custom "sudah di scan.mp3"
-      try {
-        const audio = new Audio(duplicateAudioFile);
-        audio.volume = 1.0;
-        audio.play().catch((e) => console.error('Audio play failed:', e));
-      } catch (e) {
-        console.error('Audio error:', e);
-        playBeep('error');
-      }
-      showToast('Resi sudah discan barusan!', 'warning');
+      showDuplicateAlert(decodedText, 'Resi ini baru saja di-scan!');
       return;
     }
     
@@ -221,16 +244,21 @@ export const ScanResiStage2: React.FC<ScanResiStage2Props> = ({ onRefresh }) => 
     // Play sound "Ting" (Sukses Scan)
     playBeep('success');
     
+    // Getarkan device (vibrate) untuk mobile - feedback sukses
+    if ('vibrate' in navigator) {
+      navigator.vibrate(100);
+    }
+    
     // Proses verifikasi ke database
     await verifyResi(decodedText);
     
-    // Cooldown
+    // Cooldown lebih lama (3 detik) untuk menghindari scan terlalu cepat
     if (scanCooldownRef.current) {
       clearTimeout(scanCooldownRef.current);
     }
     scanCooldownRef.current = setTimeout(() => {
       setScanningEnabled(true);
-    }, 2000);
+    }, 3000);
   };
   
   const verifyResi = async (resiNumber: string) => {
@@ -256,16 +284,8 @@ export const ScanResiStage2: React.FC<ScanResiStage2Props> = ({ onRefresh }) => 
       if (onRefresh) onRefresh();
     } else {
       // Jika error dari server (misal resi tidak ditemukan atau sudah diverifikasi)
-      // Mainkan audio duplikat
-      try {
-        const audio = new Audio(duplicateAudioFile);
-        audio.volume = 1.0;
-        audio.play().catch((e) => console.error('Audio play failed:', e));
-      } catch (e) {
-        console.error('Audio error:', e);
-        playBeep('error');
-      }
-      showToast(result.message, 'error');
+      // Tampilkan popup dengan suara
+      showDuplicateAlert(resiNumber, result.message);
     }
   };
 
@@ -461,7 +481,7 @@ export const ScanResiStage2: React.FC<ScanResiStage2Props> = ({ onRefresh }) => 
         'scanner-region',
         handleScanSuccess,
         (err) => {},
-        { fps: 10, qrbox: { width: 320, height: 160 }, aspectRatio: 2.0 }
+        { fps: 5, qrbox: { width: 280, height: 140 }, aspectRatio: 2.0 } // FPS lebih rendah untuk scanning lebih stabil
       );
       
       if (!result.success) throw new Error(result.message);
@@ -526,46 +546,47 @@ export const ScanResiStage2: React.FC<ScanResiStage2Props> = ({ onRefresh }) => 
     <div className="min-h-screen bg-gray-900 text-gray-100 p-4 md:p-6">
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
       
-      {/* Header */}
-      <div className="mb-6">
-        <div className="flex items-center justify-between mb-2">
+      {/* Header - Mobile Friendly */}
+      <div className="mb-4 md:mb-6">
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-2">
           <div className="flex items-center gap-3">
-            <div className="p-3 bg-blue-600 rounded-xl">
-              <Camera size={24} />
+            <div className="p-2 md:p-3 bg-blue-600 rounded-xl flex-shrink-0">
+              <Camera size={20} className="md:w-6 md:h-6" />
             </div>
             <div>
-              <h1 className="text-2xl font-bold">Stage 2: Packing Verification</h1>
-              <p className="text-sm text-gray-400">Scan resi dengan kamera untuk verifikasi</p>
+              <h1 className="text-lg md:text-2xl font-bold">Stage 2: Packing Verification</h1>
+              <p className="text-xs md:text-sm text-gray-400">Scan resi dengan kamera untuk verifikasi</p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 w-full md:w-auto">
             <button
               onClick={() => setShowBulkVerifyModal(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 rounded-lg transition-colors font-semibold"
+              className="flex-1 md:flex-none flex items-center justify-center gap-2 px-3 md:px-4 py-2 bg-purple-600 hover:bg-purple-700 rounded-lg transition-colors font-semibold text-sm md:text-base"
             >
               <List size={16} />
-              Verifikasi Masal
+              <span className="hidden sm:inline">Verifikasi Masal</span>
+              <span className="sm:hidden">Masal</span>
             </button>
             <button
               onClick={loadPendingList}
-              className="flex items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg transition-colors"
+              className="flex items-center justify-center gap-2 px-3 md:px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg transition-colors text-sm md:text-base"
               disabled={loading}
             >
               <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
-              Refresh
+              <span className="hidden sm:inline">Refresh</span>
             </button>
           </div>
         </div>
       </div>
       
-      {/* Camera Scanner + Input Manual */}
-      <div className="bg-gray-800 rounded-xl p-6 mb-6 shadow-lg border border-gray-700">
-        {/* Dropdown Pilih Resi dari Stage 1 */}
-        <div className="mb-4">
-          <label className="block text-sm font-semibold text-gray-300 mb-2">
+      {/* Camera Scanner + Input Manual - Mobile Optimized */}
+      <div className="bg-gray-800 rounded-xl p-3 md:p-6 mb-4 md:mb-6 shadow-lg border border-gray-700">
+        {/* Dropdown Pilih Resi dari Stage 1 - Mobile Optimized */}
+        <div className="mb-3 md:mb-4">
+          <label className="block text-xs md:text-sm font-semibold text-gray-300 mb-1 md:mb-2">
             Pilih Resi dari Stage 1 (Pending Verifikasi)
           </label>
-          <div className="flex flex-col md:flex-row gap-2">
+          <div className="flex flex-col gap-2">
             <Autocomplete
               options={pendingList.filter(r => !r.stage2_verified)}
               getOptionLabel={(option) => option.resi || ''}
@@ -650,7 +671,7 @@ export const ScanResiStage2: React.FC<ScanResiStage2Props> = ({ onRefresh }) => 
             <button
               type="button"
               onClick={(e) => { e.preventDefault(); handleManualSubmit(e as any); }}
-              className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors text-lg flex items-center gap-2 disabled:bg-gray-700 disabled:cursor-not-allowed whitespace-nowrap"
+              className="w-full md:w-auto px-4 md:px-6 py-3 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-semibold rounded-lg transition-colors text-base md:text-lg flex items-center justify-center gap-2 disabled:bg-gray-700 disabled:cursor-not-allowed whitespace-nowrap touch-manipulation"
               disabled={loading || !manualResi.trim()}
             >
               <Check size={20} />
@@ -662,32 +683,34 @@ export const ScanResiStage2: React.FC<ScanResiStage2Props> = ({ onRefresh }) => 
           </p>
         </div>
 
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold flex items-center gap-2">
-            <Camera size={20} />
+        <div className="flex items-center justify-between mb-3 md:mb-4">
+          <h2 className="text-base md:text-lg font-semibold flex items-center gap-2">
+            <Camera size={18} className="md:w-5 md:h-5" />
             Scanner Kamera
           </h2>
           {cameraActive ? (
             <button
               onClick={stopCameraScanning}
-              className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 rounded-lg transition-colors"
+              className="flex items-center gap-2 px-3 md:px-4 py-2 bg-red-600 hover:bg-red-700 active:bg-red-800 rounded-lg transition-colors text-sm md:text-base touch-manipulation"
             >
               <CameraOff size={16} />
-              Matikan Kamera
+              <span className="hidden sm:inline">Matikan Kamera</span>
+              <span className="sm:hidden">Stop</span>
             </button>
           ) : (
             <button
               onClick={startCamera}
-              className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 rounded-lg transition-colors"
+              className="flex items-center gap-2 px-3 md:px-4 py-2 bg-green-600 hover:bg-green-700 active:bg-green-800 rounded-lg transition-colors text-sm md:text-base touch-manipulation"
             >
               <Camera size={16} />
-              Aktifkan Kamera
+              <span className="hidden sm:inline">Aktifkan Kamera</span>
+              <span className="sm:hidden">Aktifkan</span>
             </button>
           )}
         </div>
         
-        {/* SAFE SCANNER REGION */}
-        <div className="relative bg-gray-900 rounded-lg overflow-hidden" style={{ minHeight: '300px' }}>
+        {/* SAFE SCANNER REGION - Mobile Optimized */}
+        <div className="relative bg-gray-900 rounded-lg overflow-hidden" style={{ minHeight: '250px', maxHeight: '60vh' }}>
           <div id="scanner-region" ref={scannerRef} className="w-full h-full"/>
 
           {!cameraActive && !cameraError && (
@@ -717,15 +740,15 @@ export const ScanResiStage2: React.FC<ScanResiStage2Props> = ({ onRefresh }) => 
           )}
         </div>
         
-        <div className="mt-4 p-4 bg-gray-700/50 rounded-lg">
-          <h3 className="text-sm font-semibold mb-2 flex items-center gap-2">
-            <AlertCircle size={16} />
+        <div className="mt-3 md:mt-4 p-3 md:p-4 bg-gray-700/50 rounded-lg">
+          <h3 className="text-xs md:text-sm font-semibold mb-2 flex items-center gap-2">
+            <AlertCircle size={14} className="md:w-4 md:h-4" />
             Petunjuk Penggunaan:
           </h3>
-          <ul className="text-sm text-gray-300 space-y-1 ml-6 list-disc">
+          <ul className="text-xs md:text-sm text-gray-300 space-y-1 ml-4 md:ml-6 list-disc">
             <li>Pastikan izin kamera sudah diberikan</li>
-            <li>Suara "Ting": Scan berhasil masuk</li>
-            <li>Suara Bicara: "Ini sudah di scan...": Scan double (duplikat)</li>
+            <li>Suara "Ting" + getar singkat: Scan berhasil</li>
+            <li>Popup merah + suara + getar: Resi sudah di-scan (duplikat)</li>
           </ul>
         </div>
       </div>
@@ -734,69 +757,71 @@ export const ScanResiStage2: React.FC<ScanResiStage2Props> = ({ onRefresh }) => 
       <div className="bg-gray-800 rounded-xl shadow-lg border border-gray-700">
         <div className="p-6 border-b border-gray-700">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold flex items-center gap-2">
-              <Package size={20} />
+            <h2 className="text-base md:text-lg font-semibold flex items-center gap-2">
+              <Package size={18} className="md:w-5 md:h-5" />
               Menunggu Verifikasi
             </h2>
             <div className="flex items-center gap-2">
-              <span className="text-sm text-gray-400 mb-1">Total:</span>
-              <span className="px-3 py-1 bg-yellow-600 rounded-full text-sm font-semibold">
+              <span className="text-xs md:text-sm text-gray-400">Total:</span>
+              <span className="px-2 md:px-3 py-1 bg-yellow-600 rounded-full text-xs md:text-sm font-semibold">
                 {filteredList.length}
               </span>
             </div>
           </div>
-          {/* Filter Bar */}
-          <div className="flex flex-col md:flex-row gap-2 mb-2">
-            <div className="relative flex-1">
-              <Search size={18} className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+          {/* Filter Bar - Mobile Optimized */}
+          <div className="flex flex-col gap-2 mb-2">
+            <div className="relative">
+              <Search size={16} className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
               <input
                 type="text"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 placeholder="Cari resi, e-commerce, atau toko..."
-                className="w-full pl-10 pr-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full pl-10 pr-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
               />
             </div>
-            <input
-              type="text"
-              list="ecommerce-filter-list"
-              value={searchEcommerce}
-              onChange={e => setSearchEcommerce(e.target.value)}
-              placeholder="Filter E-commerce"
-              className="px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent min-w-[120px]"
-            />
-            <datalist id="ecommerce-filter-list">
-              {ecommerceOptions.map(opt => (
-                <option key={opt} value={opt} />
-              ))}
-            </datalist>
-            <input
-              type="text"
-              list="toko-filter-list"
-              value={searchToko}
-              onChange={e => setSearchToko(e.target.value)}
-              placeholder="Filter Toko"
-              className="px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent min-w-[120px]"
-            />
-            <datalist id="toko-filter-list">
-              {tokoOptions.map(opt => (
-                <option key={opt} value={opt} />
-              ))}
-            </datalist>
-            <select
-              value={statusFilter}
-              onChange={e => setStatusFilter(e.target.value)}
-              className="px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent min-w-[120px]"
-            >
-              <option value="pending">Pending</option>
-              <option value="stage2">Stage 2 (Checked)</option>
-              <option value="all">All</option>
-            </select>
+            <div className="grid grid-cols-3 gap-2">
+              <input
+                type="text"
+                list="ecommerce-filter-list"
+                value={searchEcommerce}
+                onChange={e => setSearchEcommerce(e.target.value)}
+                placeholder="E-commerce"
+                className="px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-xs md:text-sm"
+              />
+              <datalist id="ecommerce-filter-list">
+                {ecommerceOptions.map(opt => (
+                  <option key={opt} value={opt} />
+                ))}
+              </datalist>
+              <input
+                type="text"
+                list="toko-filter-list"
+                value={searchToko}
+                onChange={e => setSearchToko(e.target.value)}
+                placeholder="Toko"
+                className="px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-xs md:text-sm"
+              />
+              <datalist id="toko-filter-list">
+                {tokoOptions.map(opt => (
+                  <option key={opt} value={opt} />
+                ))}
+              </datalist>
+              <select
+                value={statusFilter}
+                onChange={e => setStatusFilter(e.target.value)}
+                className="px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-xs md:text-sm"
+              >
+                <option value="pending">Pending</option>
+                <option value="stage2">Checked</option>
+                <option value="all">All</option>
+              </select>
+            </div>
           </div>
         </div>
         
-        {/* Table Content */}
-        <div className="overflow-x-auto">
+        {/* Table Content - Mobile Card View */}
+        <div className="hidden md:block overflow-x-auto">
           <table className="w-full">
             <thead className="bg-gray-700">
               <tr>
@@ -870,6 +895,77 @@ export const ScanResiStage2: React.FC<ScanResiStage2Props> = ({ onRefresh }) => 
             </tbody>
           </table>
         </div>
+
+        {/* Mobile Card View */}
+        <div className="md:hidden p-3 space-y-3">
+          {loading && pendingList.length === 0 ? (
+            <div className="text-center py-8 text-gray-400">
+              <RefreshCw size={24} className="animate-spin mx-auto mb-2" />
+              Memuat data...
+            </div>
+          ) : filteredList.length === 0 ? (
+            <div className="text-center py-8 text-gray-400">
+              <CheckCircle size={40} className="mx-auto mb-2 text-green-600" />
+              <p className="text-base font-semibold">Semua resi sudah diverifikasi!</p>
+            </div>
+          ) : (
+            filteredList.slice(0, 50).map((resi) => (
+              <div 
+                key={resi.id} 
+                className="bg-gray-700/50 rounded-xl p-3 border border-gray-600 hover:border-gray-500 transition-colors"
+              >
+                {/* Resi Number & Status */}
+                <div className="flex items-start justify-between mb-2">
+                  <p className="font-mono font-bold text-blue-400 text-sm break-all flex-1 mr-2">
+                    {resi.resi}
+                  </p>
+                  {resi.stage2_verified ? (
+                    <span className="inline-flex items-center gap-1 px-2 py-1 text-[10px] bg-blue-600 text-white rounded-full whitespace-nowrap">
+                      <CheckCircle size={10} /> Stage 2
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 px-2 py-1 text-[10px] bg-yellow-600 text-white rounded-full whitespace-nowrap">
+                      <AlertCircle size={10} /> Pending
+                    </span>
+                  )}
+                </div>
+                
+                {/* Badges */}
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  <span className={`px-2 py-0.5 ${getEcommerceBadgeColor(resi.ecommerce)} rounded text-[10px] font-semibold`}>
+                    {resi.ecommerce}
+                    {resi.negara_ekspor && !resi.ecommerce.includes(resi.negara_ekspor) && ` - ${resi.negara_ekspor}`}
+                    {isInstantOrder(resi) && (
+                      <span className="ml-1 px-1 py-0.5 bg-orange-500 text-white text-[8px] font-bold rounded">
+                        INSTANT
+                      </span>
+                    )}
+                  </span>
+                  <span className="px-2 py-0.5 bg-blue-600/20 text-blue-400 rounded text-[10px] font-semibold">
+                    {resi.sub_toko}
+                  </span>
+                </div>
+                
+                {/* Meta Info */}
+                <div className="flex items-center justify-between text-[10px] text-gray-400">
+                  <span>
+                    📅 {new Date(resi.stage1_scanned_at || resi.created_at).toLocaleDateString('id-ID', {
+                      day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit'
+                    })}
+                  </span>
+                  <span>
+                    👤 {resi.stage1_scanned_by || '-'}
+                  </span>
+                </div>
+              </div>
+            ))
+          )}
+          {filteredList.length > 50 && (
+            <p className="text-center text-xs text-gray-400 py-2">
+              Menampilkan 50 dari {filteredList.length} resi. Gunakan filter untuk melihat lebih spesifik.
+            </p>
+          )}
+        </div>
       </div>
 
       {/* Bulk Verify Modal (Verifikasi Masal) */}
@@ -878,9 +974,10 @@ export const ScanResiStage2: React.FC<ScanResiStage2Props> = ({ onRefresh }) => 
           <div className="bg-gray-800 rounded-xl max-w-3xl w-full border border-gray-700 shadow-2xl max-h-[90vh] flex flex-col">
             {/* Modal Header */}
             <div className="p-4 border-b border-gray-700 flex items-center justify-between flex-shrink-0">
-              <h3 className="text-xl font-semibold flex items-center gap-2">
-                <List size={24} className="text-purple-400" />
-                Verifikasi Masal - Input Banyak Resi
+              <h3 className="text-lg md:text-xl font-semibold flex items-center gap-2">
+                <List size={20} className="text-purple-400 md:w-6 md:h-6" />
+                <span className="hidden sm:inline">Verifikasi Masal - Input Banyak Resi</span>
+                <span className="sm:hidden">Verifikasi Masal</span>
               </h3>
               <button
                 onClick={() => setShowBulkVerifyModal(false)}
@@ -1019,6 +1116,60 @@ export const ScanResiStage2: React.FC<ScanResiStage2Props> = ({ onRefresh }) => 
                   )}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Duplicate Scan Popup Modal - Mobile Friendly */}
+      {showDuplicatePopup && (
+        <div 
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
+          onClick={() => setShowDuplicatePopup(false)}
+        >
+          <div 
+            className="bg-gradient-to-b from-red-900 to-red-950 rounded-2xl max-w-sm w-full border-2 border-red-500 shadow-2xl shadow-red-500/30 animate-in zoom-in-95 fade-in duration-200 p-0 overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Animated Header */}
+            <div className="bg-red-600 p-4 flex items-center justify-center">
+              <div className="relative">
+                <div className="absolute inset-0 animate-ping bg-red-400 rounded-full opacity-50"></div>
+                <div className="relative p-4 bg-red-500 rounded-full">
+                  <AlertTriangle size={40} className="text-white animate-pulse" />
+                </div>
+              </div>
+            </div>
+            
+            {/* Content */}
+            <div className="p-5 text-center">
+              <h3 className="text-xl md:text-2xl font-bold text-white mb-2">
+                ⚠️ Resi Sudah Di-Scan!
+              </h3>
+              <p className="text-red-200 text-sm md:text-base mb-4">
+                {duplicateMessage || 'Resi ini sudah pernah di-scan sebelumnya.'}
+              </p>
+              
+              {/* Resi Number Display */}
+              <div className="bg-red-800/50 rounded-xl p-3 mb-4 border border-red-600">
+                <p className="text-xs text-red-300 mb-1">Nomor Resi:</p>
+                <p className="font-mono font-bold text-lg md:text-xl text-white break-all">
+                  {duplicateResi}
+                </p>
+              </div>
+              
+              {/* Close Button */}
+              <button
+                onClick={() => setShowDuplicatePopup(false)}
+                className="w-full py-3 bg-red-600 hover:bg-red-700 active:bg-red-800 text-white font-semibold rounded-xl transition-colors text-base md:text-lg touch-manipulation flex items-center justify-center gap-2"
+              >
+                <X size={20} />
+                Tutup
+              </button>
+              
+              <p className="text-xs text-red-400 mt-3">
+                Popup akan tertutup otomatis dalam 3 detik
+              </p>
             </div>
           </div>
         </div>
