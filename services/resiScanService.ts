@@ -692,15 +692,15 @@ export const getBulkPartNumberInfo = async (skus: string[], store: string | null
   return data || [];
 };
 
-export const getAvailableParts = async (store: string | null) => {
+export const getAvailableParts = async (store: string | null): Promise<{part_number: string, name: string}[]> => {
   const table = getStockTable(store);
   const { data, error } = await supabase
     .from(table)
-    .select('part_number')
+    .select('part_number, name')
     .order('part_number', { ascending: true });
 
   if (error) return [];
-  return data?.map(d => d.part_number) || [];
+  return data?.map(d => ({ part_number: d.part_number, name: d.name || '' })) || [];
 };
 
 export const fetchPendingCSVItems = async (store: string | null) => {

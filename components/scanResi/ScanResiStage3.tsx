@@ -1136,7 +1136,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
   const [rows, setRows] = useState<Stage3Row[]>([]);
   const [loading, setLoading] = useState(false);
   const [savingStatus, setSavingStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
-  const [partOptions, setPartOptions] = useState<string[]>([]);
+  const [partOptions, setPartOptions] = useState<{part_number: string, name: string}[]>([]);
   
   // AUTO-SAVE DEBOUNCE REFS
   const autoSaveTimers = useRef<Map<string, NodeJS.Timeout>>(new Map());
@@ -2385,7 +2385,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
       const currentRow = displayedRows[rowIndex];
       const searchValue = currentRow?.part_number || '';
       const filteredParts = partOptions.filter(p => 
-        p.toLowerCase().includes(searchValue.toLowerCase())
+        p.part_number.toLowerCase().includes(searchValue.toLowerCase())
       ).slice(0, 50);
       
       if (e.key === 'ArrowDown') {
@@ -2412,7 +2412,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
       } else if (e.key === 'Enter') {
         e.preventDefault();
         if (partNumberDropdown.selectedIndex >= 0 && filteredParts[partNumberDropdown.selectedIndex]) {
-          const selectedPart = filteredParts[partNumberDropdown.selectedIndex];
+          const selectedPart = filteredParts[partNumberDropdown.selectedIndex].part_number;
           if (rowId) {
             updateRow(rowId, 'part_number', selectedPart);
             handlePartNumberBlur(rowId, selectedPart);
@@ -4114,19 +4114,13 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                         className="w-full h-full bg-transparent px-1.5 outline-none text-yellow-400 font-mono font-bold placeholder-gray-600" 
                         placeholder="Scan Part..."
                     />
-                    {/* Custom Part Number Dropdown */}
+                    {/* Custom Part Number Dropdown - Style seperti Input Barang */}
                     {partNumberDropdown.isOpen && partNumberDropdown.rowId === row.id && (
-                      <div className="absolute left-0 top-full mt-0.5 w-64 bg-gray-800 border border-gray-600 rounded shadow-xl z-50 max-h-60 overflow-auto">
-                        <div className="p-1.5 text-[9px] text-yellow-400 border-b border-gray-700 bg-yellow-900/20 font-semibold sticky top-0 z-10">
-                          📦 Part Number ({(() => {
-                            const searchValue = row.part_number || '';
-                            return partOptions.filter(p => p.toLowerCase().includes(searchValue.toLowerCase())).slice(0, 50).length;
-                          })()})
-                        </div>
+                      <div className="absolute left-0 top-full mt-1 bg-gray-800 rounded-lg shadow-xl z-50 max-h-48 overflow-y-auto border border-gray-600 w-72">
                         {(() => {
                           const searchValue = row.part_number || '';
                           const filtered = partOptions.filter(p => 
-                            p.toLowerCase().includes(searchValue.toLowerCase())
+                            p.part_number.toLowerCase().includes(searchValue.toLowerCase())
                           ).slice(0, 50);
                           
                           if (filtered.length === 0) {
@@ -4137,28 +4131,29 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                             );
                           }
                           
-                          return filtered.map((pn, pnIdx) => (
+                          return filtered.map((item, pnIdx) => (
                             <div 
                               key={pnIdx} 
-                              className={`px-2 py-1.5 cursor-pointer border-b border-gray-700/50 text-[11px] font-mono transition-colors ${
+                              className={`px-3 py-2 cursor-pointer border-b border-gray-700 last:border-0 transition-colors ${
                                 partNumberDropdown.selectedIndex === pnIdx 
-                                  ? 'bg-blue-600 text-white' 
-                                  : 'text-yellow-400 hover:bg-yellow-900/30'
+                                  ? 'bg-gray-700 border-l-2 border-orange-400' 
+                                  : 'hover:bg-gray-700'
                               }`}
                               onMouseDown={(e) => {
                                 e.preventDefault();
                                 e.stopPropagation();
                                 // Set ref untuk mencegah onBlur menimpa value
-                                partNumberSelectedRef.current = { rowId: row.id, value: pn };
-                                updateRow(row.id, 'part_number', pn);
-                                handlePartNumberBlur(row.id, pn);
+                                partNumberSelectedRef.current = { rowId: row.id, value: item.part_number };
+                                updateRow(row.id, 'part_number', item.part_number);
+                                handlePartNumberBlur(row.id, item.part_number);
                                 setPartNumberDropdown(prev => ({ ...prev, isOpen: false, selectedIndex: -1 }));
                               }}
                               onMouseEnter={() => {
                                 setPartNumberDropdown(prev => ({ ...prev, selectedIndex: pnIdx }));
                               }}
                             >
-                              {pn}
+                              <div className="font-bold text-orange-400 font-mono text-xs">{item.part_number}</div>
+                              <div className="text-gray-400 text-[10px] truncate">{item.name}</div>
                             </div>
                           ));
                         })()}
