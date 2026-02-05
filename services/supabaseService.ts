@@ -1023,12 +1023,12 @@ export const fetchInventoryAllFiltered = async (store: string | null, filters?: 
 
 export const addInventory = async (data: InventoryFormData, store?: string | null): Promise<string | null> => {
   const table = getTableName(store);
-  if (!data.partNumber) { alert("Part Number wajib!"); return null; }
+  if (!data.partNumber) { console.error("Part Number wajib!"); return null; }
   const payload = mapItemToDB(data);
   const { error } = await supabase.from(table).insert([payload]);
   
   if (error) {
-    alert(`Gagal Tambah: ${error.message}`);
+    console.error(`Gagal Tambah: ${error.message}`);
     return null;
   }
   if (data.partNumber) await savePhotosToTable(data.partNumber, data.images);

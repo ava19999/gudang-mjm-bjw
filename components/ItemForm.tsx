@@ -204,9 +204,18 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
         else setError("Gagal update database.");
 
       } else {
-        const newId = await addInventory(formData, selectedStore);
-        if (newId) onSuccess();
-        else setError("Gagal tambah barang.");
+        // Langsung tutup window, proses simpan di background
+        onSuccess();
+        
+        // Proses simpan di background (fire and forget)
+        addInventory(formData, selectedStore).then(newId => {
+          if (!newId) {
+            console.error("Gagal tambah barang.");
+          }
+        }).catch(err => {
+          console.error("Error tambah barang:", err);
+        });
+        return; // Exit early, window sudah ditutup
       }
     } catch (error) {
       console.error(error);

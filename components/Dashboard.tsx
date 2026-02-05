@@ -167,8 +167,16 @@ export const Dashboard: React.FC<DashboardProps> = ({
           setShowItemForm(false);
           loadData(); // Reload data untuk memastikan sinkron
       } else {
+          // Barang baru ditambahkan - reset filter agar terlihat di list
+          setPartNumber('');
+          setNameSearch('');
+          setBrandSearch('');
+          setAppSearch('');
+          setFilterType('all');
+          setPage(1);
           setShowItemForm(false);
-          loadData(); loadStats();
+          loadData(); 
+          loadStats();
       }
   };
 
