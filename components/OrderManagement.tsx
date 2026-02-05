@@ -316,8 +316,23 @@ export const OrderManagement: React.FC = () => {
 
   // Inventory for Autocomplete
   const [inventory, setInventory] = useState<any[]>([]);
+  const [inventoryMjm, setInventoryMjm] = useState<any[]>([]);
+  const [inventoryBjw, setInventoryBjw] = useState<any[]>([]);
   const [selectedItem, setSelectedItem] = useState<any>(null);
   const [inventoryLoading, setInventoryLoading] = useState(false);
+
+  // Item Detail Modal State
+  const [showItemDetailModal, setShowItemDetailModal] = useState(false);
+  const [itemDetailData, setItemDetailData] = useState<{
+    partNumber: string;
+    name: string;
+    brand?: string;
+    application?: string;
+    stockMjm: number;
+    stockBjw: number;
+    stockTotal: number;
+    soldItem?: SoldItemRow;
+  } | null>(null);
 
   // Create inventory lookup map by part number for quick stock access
   const inventoryStockMap = useMemo(() => {
@@ -331,6 +346,35 @@ export const OrderManagement: React.FC = () => {
     });
     return map;
   }, [inventory]);
+
+  // Create separate inventory maps for MJM and BJW
+  const inventoryMjmMap = useMemo(() => {
+    const map: Record<string, { qty: number; item: any }> = {};
+    inventoryMjm.forEach(item => {
+      const pn = (item.partNumber || '').toUpperCase().trim();
+      if (pn) {
+        if (!map[pn]) {
+          map[pn] = { qty: 0, item: item };
+        }
+        map[pn].qty += (item.quantity || 0);
+      }
+    });
+    return map;
+  }, [inventoryMjm]);
+
+  const inventoryBjwMap = useMemo(() => {
+    const map: Record<string, { qty: number; item: any }> = {};
+    inventoryBjw.forEach(item => {
+      const pn = (item.partNumber || '').toUpperCase().trim();
+      if (pn) {
+        if (!map[pn]) {
+          map[pn] = { qty: 0, item: item };
+        }
+        map[pn].qty += (item.quantity || 0);
+      }
+    });
+    return map;
+  }, [inventoryBjw]);
 
   // Load inventory langsung saat komponen mount - TANPA CACHE untuk menghindari masalah
   useEffect(() => {
@@ -359,6 +403,8 @@ export const OrderManagement: React.FC = () => {
         console.log('Total inventory:', all.length);
         
         setInventory(all);
+        setInventoryMjm(invMjm || []);
+        setInventoryBjw(invBjw || []);
       } catch (err) {
         console.error("Error fetching inventory:", err);
       } finally {
@@ -510,12 +556,15 @@ export const OrderManagement: React.FC = () => {
     
     return Object.values(groups).sort((a, b) => {
       // If stock sort is enabled, sort by minimum stock in items (primary)
+      // Use stock from selected store only
       if (stockSortOrder !== 'none') {
+        const selectedStoreMap = selectedStore === 'mjm' ? inventoryMjmMap : inventoryBjwMap;
         const getMinStock = (items: SoldItemRow[]) => {
           let minStock = Infinity;
           items.forEach(item => {
             const pn = (item.part_number || '').toUpperCase().trim();
-            const stock = inventoryStockMap[pn] ?? Infinity;
+            const storeData = selectedStoreMap[pn];
+            const stock = storeData?.qty ?? Infinity;
             if (stock < minStock) minStock = stock;
           });
           return minStock === Infinity ? 0 : minStock;
@@ -533,7 +582,7 @@ export const OrderManagement: React.FC = () => {
       const dateB = new Date(b.date).getTime();
       return dateSortOrder === 'desc' ? dateB - dateA : dateA - dateB;
     });
-  }, [soldData, searchTerm, customerFilter, partNumberFilter, ecommerceFilter, stockSortOrder, dateSortOrder, inventoryStockMap]);
+  }, [soldData, searchTerm, customerFilter, partNumberFilter, ecommerceFilter, stockSortOrder, dateSortOrder, selectedStore, inventoryMjmMap, inventoryBjwMap]);
 
   // Extract unique customers and part numbers from soldData for autocomplete - filtered and limited for performance
   const filteredCustomerOptions = useMemo(() => {
@@ -676,6 +725,28 @@ export const OrderManagement: React.FC = () => {
     } else {
       showToast(result.msg, 'error');
     }
+  };
+
+  // Show Item Detail Modal with Stock Comparison
+  const showItemDetail = (item: SoldItemRow) => {
+    const partNumberKey = (item.part_number || '').toUpperCase().trim();
+    const mjmData = inventoryMjmMap[partNumberKey];
+    const bjwData = inventoryBjwMap[partNumberKey];
+    const stockMjm = mjmData?.qty || 0;
+    const stockBjw = bjwData?.qty || 0;
+    const inventoryItem = mjmData?.item || bjwData?.item;
+    
+    setItemDetailData({
+      partNumber: item.part_number || '-',
+      name: item.name || inventoryItem?.name || '-',
+      brand: item.brand || inventoryItem?.brand,
+      application: item.application || inventoryItem?.application,
+      stockMjm,
+      stockBjw,
+      stockTotal: stockMjm + stockBjw,
+      soldItem: item
+    });
+    setShowItemDetailModal(true);
   };
 
   // --- HANDLERS ---
@@ -1443,7 +1514,10 @@ export const OrderManagement: React.FC = () => {
                       {group.items.map((item, idx) => {
                         const unitPrice = item.qty_keluar > 0 ? item.harga_total / item.qty_keluar : 0;
                         const partNumberKey = (item.part_number || '').toUpperCase().trim();
-                        const currentStock = inventoryStockMap[partNumberKey];
+                        // Use stock from selected store only (not combined)
+                        const selectedStoreMap = selectedStore === 'mjm' ? inventoryMjmMap : inventoryBjwMap;
+                        const storeData = selectedStoreMap[partNumberKey];
+                        const currentStock = storeData?.qty;
                         const hasStock = currentStock !== undefined;
                         const isLowStock = hasStock && currentStock <= 5;
                         const isOutOfStock = hasStock && currentStock === 0;
@@ -1451,7 +1525,9 @@ export const OrderManagement: React.FC = () => {
                         return (
                           <div 
                             key={`${item.id}-${idx}`} 
-                            className="group/item relative flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 p-4 rounded-xl bg-gradient-to-r from-gray-800/80 to-gray-800/40 border border-gray-700/50 hover:border-gray-600 hover:bg-gray-800/90 transition-all duration-200 ml-2"
+                            className="group/item relative flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 p-4 rounded-xl bg-gradient-to-r from-gray-800/80 to-gray-800/40 border border-gray-700/50 hover:border-blue-600/50 hover:bg-gray-800/90 transition-all duration-200 ml-2 cursor-pointer"
+                            onClick={() => showItemDetail(item)}
+                            title="Klik untuk lihat detail & perbandingan stok"
                           >
                             {/* Item Number Badge */}
                             <div className="absolute -left-1 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-gray-700 border-2 border-gray-600 flex items-center justify-center text-[10px] font-bold text-gray-400">
@@ -1770,6 +1846,176 @@ export const OrderManagement: React.FC = () => {
         onClose={() => setReturModalOpen(false)}
         onConfirm={handleReturConfirm}
       />
+
+      {/* ITEM DETAIL MODAL - Stock Comparison */}
+      {showItemDetailModal && itemDetailData && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={() => setShowItemDetailModal(false)}>
+          <div 
+            className="bg-gray-800 rounded-2xl max-w-lg w-full border border-gray-700 shadow-2xl animate-in zoom-in-95 fade-in duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="p-4 border-b border-gray-700 flex items-center justify-between">
+              <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                <Package size={20} className="text-blue-400" />
+                Detail Barang
+              </h3>
+              <button 
+                onClick={() => setShowItemDetailModal(false)}
+                className="p-2 hover:bg-gray-700 rounded-lg transition-colors text-gray-400 hover:text-white"
+              >
+                <X size={20} />
+              </button>
+            </div>
+            
+            {/* Content */}
+            <div className="p-5 space-y-4">
+              {/* Part Number */}
+              <div className="bg-gray-900/60 rounded-xl p-4 border border-gray-700">
+                <p className="text-xs text-gray-400 mb-1">Part Number</p>
+                <p className="text-xl font-bold font-mono text-blue-400">{itemDetailData.partNumber}</p>
+              </div>
+              
+              {/* Item Name */}
+              <div>
+                <p className="text-xs text-gray-400 mb-1">Nama Barang</p>
+                <p className="text-base font-semibold text-white">{itemDetailData.name}</p>
+              </div>
+              
+              {/* Brand & Application */}
+              {(itemDetailData.brand || itemDetailData.application) && (
+                <div className="flex flex-wrap gap-2">
+                  {itemDetailData.brand && (
+                    <span className="inline-flex items-center gap-1 text-xs font-medium bg-blue-900/40 text-blue-300 px-3 py-1.5 rounded-lg border border-blue-800/50">
+                      <span className="w-2 h-2 rounded-full bg-blue-400"/>
+                      {itemDetailData.brand}
+                    </span>
+                  )}
+                  {itemDetailData.application && (
+                    <span className="inline-flex items-center gap-1 text-xs font-medium bg-green-900/40 text-green-300 px-3 py-1.5 rounded-lg border border-green-800/50">
+                      <span className="w-2 h-2 rounded-full bg-green-400"/>
+                      {itemDetailData.application}
+                    </span>
+                  )}
+                </div>
+              )}
+              
+              {/* Stock Comparison */}
+              <div className="mt-4">
+                <p className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2">
+                  <Layers size={16} className="text-purple-400" />
+                  Perbandingan Stok
+                </p>
+                
+                <div className="grid grid-cols-2 gap-3">
+                  {/* MJM Stock */}
+                  <div className={`rounded-xl p-4 border-2 ${
+                    itemDetailData.stockMjm === 0 
+                      ? 'bg-red-900/20 border-red-700/50' 
+                      : itemDetailData.stockMjm <= 5 
+                        ? 'bg-orange-900/20 border-orange-700/50'
+                        : 'bg-cyan-900/20 border-cyan-700/50'
+                  }`}>
+                    <div className="flex items-center gap-2 mb-2">
+                      <div className="w-8 h-8 rounded-lg bg-cyan-600 flex items-center justify-center text-white font-bold text-sm">
+                        M
+                      </div>
+                      <span className="text-sm font-bold text-cyan-300">MJM</span>
+                    </div>
+                    <p className={`text-3xl font-bold ${
+                      itemDetailData.stockMjm === 0 
+                        ? 'text-red-400' 
+                        : itemDetailData.stockMjm <= 5 
+                          ? 'text-orange-400'
+                          : 'text-cyan-400'
+                    }`}>
+                      {itemDetailData.stockMjm}
+                      <span className="text-sm text-gray-400 font-normal ml-1">pcs</span>
+                    </p>
+                    {itemDetailData.stockMjm === 0 && (
+                      <p className="text-[10px] text-red-400 mt-1">Stok Habis!</p>
+                    )}
+                  </div>
+                  
+                  {/* BJW Stock */}
+                  <div className={`rounded-xl p-4 border-2 ${
+                    itemDetailData.stockBjw === 0 
+                      ? 'bg-red-900/20 border-red-700/50' 
+                      : itemDetailData.stockBjw <= 5 
+                        ? 'bg-orange-900/20 border-orange-700/50'
+                        : 'bg-amber-900/20 border-amber-700/50'
+                  }`}>
+                    <div className="flex items-center gap-2 mb-2">
+                      <div className="w-8 h-8 rounded-lg bg-amber-600 flex items-center justify-center text-white font-bold text-sm">
+                        B
+                      </div>
+                      <span className="text-sm font-bold text-amber-300">BJW</span>
+                    </div>
+                    <p className={`text-3xl font-bold ${
+                      itemDetailData.stockBjw === 0 
+                        ? 'text-red-400' 
+                        : itemDetailData.stockBjw <= 5 
+                          ? 'text-orange-400'
+                          : 'text-amber-400'
+                    }`}>
+                      {itemDetailData.stockBjw}
+                      <span className="text-sm text-gray-400 font-normal ml-1">pcs</span>
+                    </p>
+                    {itemDetailData.stockBjw === 0 && (
+                      <p className="text-[10px] text-red-400 mt-1">Stok Habis!</p>
+                    )}
+                  </div>
+                </div>
+                
+                {/* Total Stock */}
+                <div className="mt-3 bg-gray-700/50 rounded-xl p-3 border border-gray-600 flex items-center justify-between">
+                  <span className="text-sm text-gray-300 font-medium">Total Stok Gabungan</span>
+                  <span className={`text-xl font-bold ${
+                    itemDetailData.stockTotal === 0 
+                      ? 'text-red-400' 
+                      : itemDetailData.stockTotal <= 5 
+                        ? 'text-orange-400'
+                        : 'text-green-400'
+                  }`}>
+                    {itemDetailData.stockTotal} <span className="text-sm text-gray-400 font-normal">pcs</span>
+                  </span>
+                </div>
+              </div>
+              
+              {/* Sold Info if available */}
+              {itemDetailData.soldItem && (
+                <div className="mt-4 pt-4 border-t border-gray-700">
+                  <p className="text-xs text-gray-400 mb-2">Info Penjualan</p>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-gray-300">Qty Terjual:</span>
+                    <span className="font-bold text-white">{itemDetailData.soldItem.qty_keluar} pcs</span>
+                  </div>
+                  <div className="flex items-center justify-between text-sm mt-1">
+                    <span className="text-gray-300">Total Harga:</span>
+                    <span className="font-bold text-green-400">{formatRupiah(itemDetailData.soldItem.harga_total)}</span>
+                  </div>
+                  {itemDetailData.soldItem.customer && (
+                    <div className="flex items-center justify-between text-sm mt-1">
+                      <span className="text-gray-300">Customer:</span>
+                      <span className="font-medium text-white">{itemDetailData.soldItem.customer}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+            
+            {/* Footer */}
+            <div className="p-4 border-t border-gray-700">
+              <button
+                onClick={() => setShowItemDetailModal(false)}
+                className="w-full py-3 bg-gray-700 hover:bg-gray-600 text-white font-semibold rounded-xl transition-colors"
+              >
+                Tutup
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
