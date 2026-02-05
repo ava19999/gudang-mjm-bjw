@@ -1383,6 +1383,36 @@ export const fetchSoldItems = async (store: string | null): Promise<SoldItemRow[
   return data || [];
 };
 
+// 4.1 UPDATE SOLD ITEM PRICE
+export const updateSoldItemPrice = async (
+  itemId: string,
+  newHargaTotal: number,
+  qtyKeluar: number,
+  store: string | null
+): Promise<{ success: boolean; msg: string }> => {
+  const table = store === 'mjm' ? 'barang_keluar_mjm' : (store === 'bjw' ? 'barang_keluar_bjw' : null);
+  if (!table) return { success: false, msg: 'Toko tidak valid' };
+
+  try {
+    const { error } = await supabase
+      .from(table)
+      .update({ 
+        harga_total: newHargaTotal 
+      })
+      .eq('id', itemId);
+
+    if (error) {
+      console.error('Update Sold Item Price Error:', error);
+      return { success: false, msg: 'Gagal update harga: ' + error.message };
+    }
+
+    return { success: true, msg: 'Harga berhasil diupdate' };
+  } catch (err: any) {
+    console.error('Update Sold Item Price Exception:', err);
+    return { success: false, msg: 'Error: ' + (err.message || 'Unknown error') };
+  }
+};
+
 // 5. FETCH RETUR
 export const fetchReturItems = async (store: string | null): Promise<ReturRow[]> => {
   const table = store === 'mjm' ? 'retur_mjm' : (store === 'bjw' ? 'retur_bjw' : null);

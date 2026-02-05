@@ -6,7 +6,7 @@ import { useStore } from '../context/StoreContext';
 import { 
   fetchOfflineOrders, fetchSoldItems, fetchReturItems,
   processOfflineOrderItem, updateOfflineOrder, fetchInventory, createReturFromSold, updateReturStatus,
-  fetchDistinctEcommerce, deleteBarangLog
+  fetchDistinctEcommerce, deleteBarangLog, updateSoldItemPrice
 } from '../services/supabaseService';
 import { OfflineOrderRow, SoldItemRow, ReturRow } from '../types';
 import { 
@@ -333,6 +333,11 @@ export const OrderManagement: React.FC = () => {
     stockTotal: number;
     soldItem?: SoldItemRow;
   } | null>(null);
+
+  // Edit Sold Item Price State
+  const [editingSoldItemId, setEditingSoldItemId] = useState<string | null>(null);
+  const [editSoldPrice, setEditSoldPrice] = useState<number>(0);
+  const [savingSoldPrice, setSavingSoldPrice] = useState(false);
 
   // Create inventory lookup map by part number for quick stock access
   const inventoryStockMap = useMemo(() => {
@@ -747,6 +752,39 @@ export const OrderManagement: React.FC = () => {
       soldItem: item
     });
     setShowItemDetailModal(true);
+  };
+
+  // Handle Edit Sold Item Price
+  const startEditSoldPrice = (item: SoldItemRow, e: React.MouseEvent) => {
+    e.stopPropagation(); // Prevent opening detail modal
+    setEditingSoldItemId(item.id);
+    setEditSoldPrice(item.harga_total);
+  };
+
+  const cancelEditSoldPrice = (e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setEditingSoldItemId(null);
+    setEditSoldPrice(0);
+  };
+
+  const saveEditSoldPrice = async (item: SoldItemRow, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (editSoldPrice < 0) {
+      showToast('Harga tidak boleh negatif', 'error');
+      return;
+    }
+
+    setSavingSoldPrice(true);
+    const result = await updateSoldItemPrice(item.id, editSoldPrice, item.qty_keluar, selectedStore);
+    setSavingSoldPrice(false);
+
+    if (result.success) {
+      showToast('Harga berhasil diupdate!');
+      setEditingSoldItemId(null);
+      loadData(); // Reload data
+    } else {
+      showToast(result.msg, 'error');
+    }
   };
 
   // --- HANDLERS ---
@@ -1622,7 +1660,7 @@ export const OrderManagement: React.FC = () => {
                             </div>
                             
                             {/* Pricing & Actions */}
-                            <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-end ml-4 sm:ml-0">
+                            <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-end ml-4 sm:ml-0" onClick={(e) => e.stopPropagation()}>
                               {/* Pricing Info */}
                               <div className="flex items-center gap-3">
                                 {/* Quantity Badge */}
@@ -1631,21 +1669,61 @@ export const OrderManagement: React.FC = () => {
                                   <p className="text-[9px] text-gray-400 uppercase tracking-wide">pcs</p>
                                 </div>
                                 
-                                {/* Price Breakdown */}
-                                <div className="text-right">
-                                  <p className="text-xs text-gray-400">
-                                    @ {formatRupiah(unitPrice)}
-                                  </p>
-                                  <p className="text-base font-bold text-green-400">
-                                    {formatRupiah(item.harga_total)}
-                                  </p>
-                                </div>
+                                {/* Price Breakdown - Editable */}
+                                {editingSoldItemId === item.id ? (
+                                  <div className="flex items-center gap-2">
+                                    <div className="relative">
+                                      <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-gray-400">Rp</span>
+                                      <input
+                                        type="number"
+                                        value={editSoldPrice}
+                                        onChange={(e) => setEditSoldPrice(Number(e.target.value))}
+                                        onKeyDown={(e) => {
+                                          if (e.key === 'Enter') saveEditSoldPrice(item, e as any);
+                                          if (e.key === 'Escape') cancelEditSoldPrice();
+                                        }}
+                                        className="w-28 pl-7 pr-2 py-1.5 bg-gray-700 border border-blue-500 rounded-lg text-sm text-white font-mono focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                                        autoFocus
+                                        onClick={(e) => e.stopPropagation()}
+                                      />
+                                    </div>
+                                    <button
+                                      onClick={(e) => saveEditSoldPrice(item, e)}
+                                      disabled={savingSoldPrice}
+                                      className="p-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors disabled:opacity-50"
+                                      title="Simpan"
+                                    >
+                                      {savingSoldPrice ? <RefreshCw size={14} className="animate-spin" /> : <Check size={14} />}
+                                    </button>
+                                    <button
+                                      onClick={cancelEditSoldPrice}
+                                      className="p-1.5 bg-gray-600 hover:bg-gray-500 text-white rounded-lg transition-colors"
+                                      title="Batal"
+                                    >
+                                      <X size={14} />
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <div 
+                                    className="text-right cursor-pointer hover:bg-gray-700/50 p-1.5 rounded-lg transition-colors group/price"
+                                    onClick={(e) => startEditSoldPrice(item, e)}
+                                    title="Klik untuk edit harga"
+                                  >
+                                    <p className="text-xs text-gray-400">
+                                      @ {formatRupiah(unitPrice)}
+                                    </p>
+                                    <p className="text-base font-bold text-green-400 flex items-center gap-1">
+                                      {formatRupiah(item.harga_total)}
+                                      <Pencil size={12} className="opacity-0 group-hover/price:opacity-100 text-gray-400 transition-opacity" />
+                                    </p>
+                                  </div>
+                                )}
                               </div>
                               
                               {/* Action Buttons */}
                               <div className="flex items-center gap-1.5">
                                 <button 
-                                  onClick={() => openReturModal(item)} 
+                                  onClick={(e) => { e.stopPropagation(); openReturModal(item); }} 
                                   className="p-2 rounded-lg bg-orange-900/30 text-orange-400 hover:bg-orange-900/50 transition-all duration-200 border border-orange-800/50 hover:scale-105" 
                                   title="Retur Item"
                                 >
