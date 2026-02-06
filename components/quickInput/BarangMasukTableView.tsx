@@ -1,5 +1,5 @@
 // FILE: src/components/quickInput/BarangMasukTableView.tsx
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useStore } from '../../context/StoreContext';
 import { fetchBarangMasukLog, deleteBarangLog } from '../../services/supabaseService';
 import { supabase } from '../../services/supabaseClient';
@@ -39,12 +39,19 @@ export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger, onRefres
     const [deletingId, setDeletingId] = useState<number | null>(null);
     const [editingId, setEditingId] = useState<number | null>(null);
     const [editForm, setEditForm] = useState<{
+        part_number: string;
         quantity: string;
         harga_satuan: string;
         customer: string;
         tempo: string;
-    }>({ quantity: '', harga_satuan: '', customer: '', tempo: '' });
+    }>({ part_number: '', quantity: '', harga_satuan: '', customer: '', tempo: '' });
     const [savingId, setSavingId] = useState<number | null>(null);
+    
+    // Part number dropdown states
+    const [partOptions, setPartOptions] = useState<Array<{part_number: string, name: string, quantity: number}>>([]);
+    const [showPartDropdown, setShowPartDropdown] = useState(false);
+    const [partDropdownIndex, setPartDropdownIndex] = useState(-1);
+    const partDropdownRef = useRef<HTMLDivElement>(null);
     
     // Photo hover & viewer states
     const [hoverPartNumber, setHoverPartNumber] = useState<string | null>(null);
@@ -119,6 +126,79 @@ export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger, onRefres
         if (photos.length > 0) {
             setViewerImages(photos);
             setViewerOpen(true);
+        }
+    };
+
+    // Load part number options for dropdown
+    const loadPartOptions = useCallback(async () => {
+        try {
+            const tableName = selectedStore === 'mjm' ? 'inventory_mjm' : 'inventory_bjw';
+            const { data: parts, error } = await supabase
+                .from(tableName)
+                .select('part_number, nama_barang, stok_akhir')
+                .order('part_number', { ascending: true })
+                .limit(1000);
+            
+            if (!error && parts) {
+                setPartOptions(parts.map(p => ({
+                    part_number: p.part_number,
+                    name: p.nama_barang || '',
+                    quantity: p.stok_akhir || 0
+                })));
+            }
+        } catch (e) {
+            console.error('Error loading part options:', e);
+        }
+    }, [selectedStore]);
+
+    // Close dropdown when clicking outside
+    useEffect(() => {
+        const handleClickOutside = (e: MouseEvent) => {
+            if (partDropdownRef.current && !partDropdownRef.current.contains(e.target as Node)) {
+                setShowPartDropdown(false);
+            }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
+
+    // Load part options when store changes
+    useEffect(() => {
+        loadPartOptions();
+    }, [loadPartOptions]);
+
+    // Handle part number selection from dropdown
+    const handlePartNumberSelect = (partNumber: string, name: string) => {
+        setEditForm(prev => ({ ...prev, part_number: partNumber }));
+        setShowPartDropdown(false);
+        setPartDropdownIndex(-1);
+        
+        // Update local data immediately to show name
+        setData(prevData => prevData.map(d => 
+            d.id === editingId 
+                ? { ...d, name: name } 
+                : d
+        ));
+    };
+
+    // Handle keyboard navigation in dropdown
+    const handlePartKeyDown = (e: React.KeyboardEvent) => {
+        const filtered = partOptions.filter(p => 
+            p.part_number.toLowerCase().includes(editForm.part_number.toLowerCase())
+        ).slice(0, 50);
+        
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            setShowPartDropdown(true);
+            setPartDropdownIndex(prev => Math.min(prev + 1, filtered.length - 1));
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            setPartDropdownIndex(prev => Math.max(prev - 1, 0));
+        } else if (e.key === 'Enter' && partDropdownIndex >= 0 && filtered[partDropdownIndex]) {
+            e.preventDefault();
+            handlePartNumberSelect(filtered[partDropdownIndex].part_number, filtered[partDropdownIndex].name);
+        } else if (e.key === 'Escape') {
+            setShowPartDropdown(false);
         }
     };
 
@@ -199,6 +279,7 @@ export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger, onRefres
     const handleEdit = (item: any) => {
         setEditingId(item.id);
         setEditForm({
+            part_number: item.part_number || '',
             quantity: String(item.quantity || item.qty_masuk || 0),
             harga_satuan: String(item.harga_satuan || 0),
             customer: item.customer || '',
@@ -208,16 +289,24 @@ export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger, onRefres
 
     const handleCancelEdit = () => {
         setEditingId(null);
-        setEditForm({ quantity: '', harga_satuan: '', customer: '', tempo: '' });
+        setEditForm({ part_number: '', quantity: '', harga_satuan: '', customer: '', tempo: '' });
     };
 
     const handleSaveEdit = async (item: any) => {
         const newQty = parseInt(editForm.quantity);
         const newHarga = parseFloat(editForm.harga_satuan) || 0;
+        const newPartNumber = editForm.part_number.trim().toUpperCase();
         const oldQty = item.quantity || item.qty_masuk || 0;
+        const oldPartNumber = item.part_number;
+        const partNumberChanged = newPartNumber !== oldPartNumber;
 
         if (!newQty || newQty <= 0) {
             alert('Qty harus lebih dari 0');
+            return;
+        }
+
+        if (!newPartNumber) {
+            alert('Part Number tidak boleh kosong');
             return;
         }
 
@@ -227,10 +316,11 @@ export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger, onRefres
             const inventoryTable = selectedStore === 'mjm' ? 'inventory_mjm' : 'inventory_bjw';
             const qtyDiff = newQty - oldQty;
 
-            // Update barang_masuk record
+            // Update barang_masuk record (including part_number)
             const { error: updateError } = await supabase
                 .from(tableName)
                 .update({
+                    part_number: newPartNumber,
                     qty_masuk: newQty,
                     harga_satuan: newHarga,
                     harga_total: newQty * newHarga,
@@ -241,8 +331,42 @@ export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger, onRefres
 
             if (updateError) throw updateError;
 
-            // Update stock in inventory if qty changed
-            if (qtyDiff !== 0) {
+            // Handle inventory stock adjustments
+            if (partNumberChanged) {
+                // Part number changed: reduce stock from old part, add to new part
+                
+                // 1. Reduce stock from old part number
+                const { data: oldInventory } = await supabase
+                    .from(inventoryTable)
+                    .select('stok_akhir')
+                    .eq('part_number', oldPartNumber)
+                    .single();
+
+                if (oldInventory) {
+                    const oldStock = oldInventory.stok_akhir || 0;
+                    const newOldStock = Math.max(0, oldStock - oldQty);
+                    await supabase
+                        .from(inventoryTable)
+                        .update({ stok_akhir: newOldStock })
+                        .eq('part_number', oldPartNumber);
+                }
+
+                // 2. Add stock to new part number
+                const { data: newInventory } = await supabase
+                    .from(inventoryTable)
+                    .select('stok_akhir')
+                    .eq('part_number', newPartNumber)
+                    .single();
+
+                if (newInventory) {
+                    const currentNewStock = newInventory.stok_akhir || 0;
+                    await supabase
+                        .from(inventoryTable)
+                        .update({ stok_akhir: currentNewStock + newQty })
+                        .eq('part_number', newPartNumber);
+                }
+            } else if (qtyDiff !== 0) {
+                // Same part number, only qty changed
                 const { data: inventoryData } = await supabase
                     .from(inventoryTable)
                     .select('stok_akhir')
@@ -265,19 +389,20 @@ export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger, onRefres
                 d.id === item.id 
                     ? { 
                         ...d, 
+                        part_number: newPartNumber,
                         quantity: newQty,
                         qty_masuk: newQty,
                         harga_satuan: newHarga, 
                         harga_total: newQty * newHarga,
                         customer: editForm.customer,
                         tempo: editForm.tempo,
-                        current_qty: (d.current_qty || 0) + qtyDiff
+                        current_qty: partNumberChanged ? newQty : ((d.current_qty || 0) + qtyDiff)
                     } 
                     : d
             ));
 
             setEditingId(null);
-            setEditForm({ quantity: '', harga_satuan: '', customer: '', tempo: '' });
+            setEditForm({ part_number: '', quantity: '', harga_satuan: '', customer: '', tempo: '' });
             
             if (onRefresh) onRefresh();
         } catch (error) {
@@ -394,17 +519,74 @@ export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger, onRefres
                             data.map((item, idx) => (
                                 <tr key={item.id || idx} className={`hover:bg-gray-800/50 transition-colors ${editingId === item.id ? 'bg-gray-800/80' : ''}`}>
                                     <td className="px-3 py-2 text-gray-400 font-mono whitespace-nowrap">{formatDate(item.created_at)}</td>
-                                    <td className="px-3 py-2 font-bold font-mono">
-                                        <span 
-                                            className="text-blue-400 underline decoration-dotted cursor-pointer hover:text-blue-300 transition-colors inline-flex items-center gap-1"
-                                            onMouseEnter={(e) => handlePartNumberMouseEnter(e, item.part_number)}
-                                            onMouseLeave={handlePartNumberMouseLeave}
-                                            onClick={() => handlePartNumberClick(item.part_number)}
-                                            title="Hover untuk preview, klik untuk lihat semua foto"
-                                        >
-                                            {item.part_number}
-                                            <Image size={12} className="opacity-50" />
-                                        </span>
+                                    <td className="px-3 py-2 font-bold font-mono relative">
+                                        {editingId === item.id ? (
+                                            <div ref={partDropdownRef} className="relative">
+                                                <input
+                                                    type="text"
+                                                    value={editForm.part_number}
+                                                    onChange={(e) => {
+                                                        setEditForm({ ...editForm, part_number: e.target.value.toUpperCase() });
+                                                        setShowPartDropdown(true);
+                                                        setPartDropdownIndex(-1);
+                                                    }}
+                                                    onFocus={() => setShowPartDropdown(true)}
+                                                    onKeyDown={handlePartKeyDown}
+                                                    className="w-32 px-2 py-1 text-xs bg-gray-900 border border-blue-500 rounded text-blue-400 focus:outline-none font-mono"
+                                                    placeholder="Part Number..."
+                                                    autoComplete="off"
+                                                />
+                                                {/* Part Number Dropdown */}
+                                                {showPartDropdown && (
+                                                    <div className="absolute left-0 top-full mt-1 bg-gray-800 rounded-lg shadow-xl z-50 max-h-48 overflow-y-auto border border-gray-600 w-72">
+                                                        {(() => {
+                                                            const filtered = partOptions.filter(p => 
+                                                                p.part_number.toLowerCase().includes(editForm.part_number.toLowerCase())
+                                                            ).slice(0, 50);
+                                                            
+                                                            if (filtered.length === 0) {
+                                                                return (
+                                                                    <div className="p-3 text-center text-gray-500 text-[10px]">
+                                                                        Tidak ditemukan
+                                                                    </div>
+                                                                );
+                                                            }
+                                                            
+                                                            return filtered.map((part, pIdx) => (
+                                                                <div 
+                                                                    key={pIdx}
+                                                                    className={`px-3 py-2 cursor-pointer border-b border-gray-700 last:border-0 transition-colors ${
+                                                                        partDropdownIndex === pIdx 
+                                                                            ? 'bg-gray-700 border-l-2 border-blue-400' 
+                                                                            : 'hover:bg-gray-700'
+                                                                    }`}
+                                                                    onMouseDown={(e) => {
+                                                                        e.preventDefault();
+                                                                        handlePartNumberSelect(part.part_number, part.name);
+                                                                    }}
+                                                                    onMouseEnter={() => setPartDropdownIndex(pIdx)}
+                                                                >
+                                                                    <div className="font-bold text-blue-400 font-mono text-xs">{part.part_number}</div>
+                                                                    <div className="text-gray-400 text-[10px] truncate">{part.name}</div>
+                                                                    <div className="text-cyan-400 text-[10px]">Stok: {part.quantity}</div>
+                                                                </div>
+                                                            ));
+                                                        })()}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        ) : (
+                                            <span 
+                                                className="text-blue-400 underline decoration-dotted cursor-pointer hover:text-blue-300 transition-colors inline-flex items-center gap-1"
+                                                onMouseEnter={(e) => handlePartNumberMouseEnter(e, item.part_number)}
+                                                onMouseLeave={handlePartNumberMouseLeave}
+                                                onClick={() => handlePartNumberClick(item.part_number)}
+                                                title="Hover untuk preview, klik untuk lihat semua foto"
+                                            >
+                                                {item.part_number}
+                                                <Image size={12} className="opacity-50" />
+                                            </span>
+                                        )}
                                     </td>
                                     <td className="px-3 py-2 text-gray-300 max-w-[200px] truncate" title={item.name}>{item.name || '-'}</td>
                                     <td className="px-3 py-2 text-right">

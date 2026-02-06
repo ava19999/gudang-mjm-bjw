@@ -33,7 +33,7 @@ import {
   detectCSVPlatform
 } from '../../services/csvParserService';
 import { 
-  Upload, Save, Trash2, Plus, DownloadCloud, RefreshCw, Filter, CheckCircle, Loader2, Settings, Search, X, AlertTriangle, Package
+  Upload, Save, Trash2, Plus, DownloadCloud, RefreshCw, Filter, CheckCircle, Loader2, Settings, Search, X, AlertTriangle, Package, Zap
 } from 'lucide-react';
 import { EcommercePlatform, SubToko, NegaraEkspor } from '../../types';
 
@@ -2100,6 +2100,97 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
     }
   };
 
+  // SAVE KILAT ONLY - Simpan hanya resi dengan ecommerce KILAT
+  const handleSaveKilatRows = async () => {
+    const kilatRows = rows.filter(r => r.ecommerce?.toUpperCase() === 'KILAT');
+    
+    if (kilatRows.length === 0) {
+      alert('Tidak ada resi KILAT untuk disimpan');
+      return;
+    }
+    
+    setSavingStatus('saving');
+    let savedCount = 0;
+    let errorCount = 0;
+    
+    try {
+      // Clear any pending auto-save timers first
+      autoSaveTimers.current.forEach(timer => clearTimeout(timer));
+      autoSaveTimers.current.clear();
+      
+      // Pisahkan rows yang perlu update vs insert
+      const rowsToUpdate: Array<{ id: string; payload: any }> = [];
+      const rowsToInsert: typeof rows = [];
+      
+      for (const row of kilatRows) {
+        if (row.id.startsWith('db-')) {
+          // Row sudah ada di DB, siapkan untuk batch update
+          const dbId = row.id.replace('db-', '');
+          rowsToUpdate.push({
+            id: dbId,
+            payload: {
+              customer: row.customer,
+              part_number: row.part_number,
+              nama_produk: row.nama_barang_csv,
+              jumlah: row.qty_keluar,
+              total_harga_produk: row.harga_total,
+              ecommerce: row.ecommerce,
+              toko: row.sub_toko
+            }
+          });
+        } else {
+          // Row baru, perlu insert
+          rowsToInsert.push(row);
+        }
+      }
+      
+      // Batch update semua rows yang sudah ada di DB (parallel)
+      if (rowsToUpdate.length > 0) {
+        console.log(`[SaveKilat] Batch updating ${rowsToUpdate.length} rows...`);
+        const batchResult = await batchUpdateResiItems(selectedStore, rowsToUpdate);
+        savedCount += batchResult.updatedCount;
+        errorCount += batchResult.errorCount;
+        console.log(`[SaveKilat] Batch update done: ${batchResult.updatedCount} success, ${batchResult.errorCount} errors`);
+      }
+      
+      // Insert rows baru satu per satu (karena perlu mendapat ID baru)
+      for (const row of rowsToInsert) {
+        try {
+          const payload = {
+            resi: row.resi,
+            ecommerce: row.ecommerce,
+            toko: row.sub_toko,
+            customer: row.customer,
+            part_number: row.part_number,
+            nama_produk: row.nama_barang_csv,
+            jumlah: row.qty_keluar,
+            total_harga_produk: row.harga_total,
+            status: 'pending',
+            order_id: row.no_pesanan,
+            created_at: new Date().toISOString()
+          };
+          
+          const newId = await insertResiItem(selectedStore, payload);
+          
+          if (newId) {
+            setRows(prev => prev.map(r => r.id === row.id ? { ...r, id: `db-${newId}` } : r));
+            savedCount++;
+          }
+        } catch (e) {
+          console.error("Insert row failed:", row.id, e);
+          errorCount++;
+        }
+      }
+      
+      console.log(`[SaveKilat] Total: ${savedCount} saved, ${errorCount} errors`);
+      setSavingStatus('saved');
+      setTimeout(() => setSavingStatus('idle'), 3000);
+    } catch (e) {
+      console.error("Save kilat failed:", e);
+      setSavingStatus('idle');
+    }
+  };
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -3640,6 +3731,20 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                             <Save size={12}/> Simpan ({rows.length})
                         </>
                     )}
+                </button>
+                
+                {/* KILAT BUTTON - Simpan hanya resi KILAT */}
+                <button 
+                    onClick={handleSaveKilatRows}
+                    disabled={savingStatus === 'saving' || rows.filter(r => r.ecommerce?.toUpperCase() === 'KILAT').length === 0}
+                    className={`px-3 md:px-4 py-1 rounded text-[10px] md:text-xs flex gap-1 items-center font-bold shadow transition-colors ${
+                        rows.filter(r => r.ecommerce?.toUpperCase() === 'KILAT').length === 0
+                            ? 'bg-gray-600 text-gray-400 cursor-not-allowed'
+                            : 'bg-orange-600 hover:bg-orange-500 text-white'
+                    }`}
+                    title="Simpan hanya resi KILAT"
+                >
+                    <Zap size={12}/> Kilat ({rows.filter(r => r.ecommerce?.toUpperCase() === 'KILAT').length})
                 </button>
             </div>
 
