@@ -161,6 +161,16 @@ export const PiutangCustomerView: React.FC = () => {
     return Array.from(types).sort();
   }, [customers]);
 
+  // Helper function to calculate due date based on tempo
+  const calculateDueMonth = (transactionDate: string, tempo: string): string => {
+    const date = new Date(transactionDate);
+    // Extract tempo months (e.g., "3 BLN" -> 3, "2 BLN" -> 2)
+    const tempoMatch = tempo.match(/(\d+)/);
+    const tempoMonths = tempoMatch ? parseInt(tempoMatch[1]) : 1;
+    date.setMonth(date.getMonth() + tempoMonths);
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+  };
+
   // Load data
   const loadData = async () => {
     setLoading(true);
@@ -172,12 +182,20 @@ export const PiutangCustomerView: React.FC = () => {
 
       const allRecords: BarangMasukRecord[] = [];
       
-      // Calculate date range from single month filter
-      const dateFrom = `${filterMonth}-01`;
-      const dateTo = new Date(filterMonth + '-01');
-      dateTo.setMonth(dateTo.getMonth() + 1);
-      dateTo.setDate(0); // Last day of the month
-      const dateToStr = dateTo.toISOString().split('T')[0];
+      // For due date filtering, we need to fetch records from previous months
+      // For example, if filterMonth is Feb 2026:
+      // - 3 BLN tempo: need Nov 2025 transactions
+      // - 2 BLN tempo: need Dec 2025 transactions  
+      // - 1 BLN tempo: need Jan 2026 transactions
+      // So we fetch from 3 months before up to the selected month
+      const selectedDate = new Date(filterMonth + '-01');
+      const fetchFromDate = new Date(selectedDate);
+      fetchFromDate.setMonth(fetchFromDate.getMonth() - 3); // Go back 3 months
+      const fetchFromStr = `${fetchFromDate.getFullYear()}-${String(fetchFromDate.getMonth() + 1).padStart(2, '0')}-01`;
+      
+      // Also set cutoff at Oct 2025 since those are already paid
+      const cutoffDate = '2025-11-01';
+      const actualFetchFrom = fetchFromStr < cutoffDate ? cutoffDate : fetchFromStr;
       
       for (const store of storesToQuery) {
         const tableName = store === 'mjm' ? 'barang_masuk_mjm' : 'barang_masuk_bjw';
@@ -192,37 +210,67 @@ export const PiutangCustomerView: React.FC = () => {
           .not('tempo', 'is', null)
           .not('tempo', 'eq', '')
           .not('tempo', 'eq', '-')
-          .gte('created_at', dateFrom)
-          .lte('created_at', dateToStr + 'T23:59:59')
+          .gte('created_at', actualFetchFrom)
           .order('created_at', { ascending: false });
 
         if (error) {
           console.error(`Error fetching from ${tableName}:`, error);
         } else if (data) {
-          allRecords.push(...data);
+          // Filter records where due month matches the selected filterMonth
+          const filteredData = data.filter(record => {
+            const dueMonth = calculateDueMonth(record.created_at, record.tempo || '1 BLN');
+            return dueMonth === filterMonth;
+          });
+          allRecords.push(...filteredData);
         }
       }
 
-      // Load pembayaran data - filtered by for_months field (date type)
-      // Filter by matching month: for_months between first and last day of selected month
-      const { data: pembayaranData } = await supabase
+      // For pembayaran, we need to fetch payments for the transaction months that have due date in filterMonth
+      // E.g., for Feb 2026: Nov 2025 (3 BLN), Dec 2025 (2 BLN), Jan 2026 (1 BLN)
+      // So we fetch payments with for_months from 3 months before filterMonth up to filterMonth-1
+      const pembayaranFromDate = new Date(selectedDate);
+      pembayaranFromDate.setMonth(pembayaranFromDate.getMonth() - 3);
+      const pembayaranFromStr = `${pembayaranFromDate.getFullYear()}-${String(pembayaranFromDate.getMonth() + 1).padStart(2, '0')}-01`;
+      const pembayaranToDate = new Date(selectedDate);
+      pembayaranToDate.setDate(0); // Last day of previous month
+      const pembayaranToStr = pembayaranToDate.toISOString().split('T')[0];
+
+      // Load pembayaran data - filtered by for_months (the month of the original transaction)
+      const { data: pembayaranDataRaw } = await supabase
         .from('importir_pembayaran')
         .select('*')
-        .gte('for_months', dateFrom)
-        .lte('for_months', dateToStr)
+        .gte('for_months', pembayaranFromStr)
+        .lte('for_months', pembayaranToStr)
         .order('tanggal', { ascending: false });
       
-      setPembayaranList(pembayaranData || []);
+      // Filter pembayaran to only include those whose transaction month + tempo = filterMonth
+      const pembayaranData = (pembayaranDataRaw || []).filter(p => {
+        if (!p.for_months || !p.tempo) return false;
+        const dueMonth = calculateDueMonth(p.for_months, p.tempo);
+        return dueMonth === filterMonth;
+      });
+      
+      setPembayaranList(pembayaranData);
 
-      // Load tagihan manual data
-      const { data: tagihanData } = await supabase
+      // Load tagihan manual data - also filter by due month
+      const tagihanFetchFrom = new Date(selectedDate);
+      tagihanFetchFrom.setMonth(tagihanFetchFrom.getMonth() - 3);
+      const tagihanFetchFromStr = `${tagihanFetchFrom.getFullYear()}-${String(tagihanFetchFrom.getMonth() + 1).padStart(2, '0')}-01`;
+      const actualTagihanFetchFrom = tagihanFetchFromStr < cutoffDate ? cutoffDate : tagihanFetchFromStr;
+      
+      const { data: tagihanDataRaw } = await supabase
         .from('importir_tagihan')
         .select('*')
-        .gte('tanggal', dateFrom)
-        .lte('tanggal', dateToStr + 'T23:59:59')
+        .gte('tanggal', actualTagihanFetchFrom)
         .order('tanggal', { ascending: false });
       
-      setTagihanList(tagihanData || []);
+      // Filter tagihan by due month
+      const tagihanData = (tagihanDataRaw || []).filter(t => {
+        const dueMonth = calculateDueMonth(t.tanggal, t.tempo || '1 BLN');
+        return dueMonth === filterMonth;
+      });
+      
+      setTagihanList(tagihanData);
 
       // Group by customer and tempo
       const customerMap = new Map<string, CustomerPiutang>();
@@ -320,18 +368,18 @@ export const PiutangCustomerView: React.FC = () => {
     }
   };
 
-  // Find oldest month with unpaid records on initial load
+  // Find oldest due month with unpaid records on initial load
   const findOldestUnpaidMonth = async () => {
     try {
       const storesToQuery = filterStore === 'all' ? ['mjm', 'bjw'] : [filterStore];
-      let oldestDate: Date | null = null;
+      let oldestDueMonth: string | null = null;
 
       for (const store of storesToQuery) {
         const tableName = store === 'mjm' ? 'barang_masuk_mjm' : 'barang_masuk_bjw';
         
         const { data } = await supabase
           .from(tableName)
-          .select('created_at')
+          .select('created_at, tempo')
           .not('tempo', 'ilike', '%CASH%')
           .not('tempo', 'ilike', '%NADIR%')
           .not('tempo', 'ilike', '%RETUR%')
@@ -341,19 +389,20 @@ export const PiutangCustomerView: React.FC = () => {
           .not('tempo', 'eq', '-')
           .gte('created_at', '2025-11-01') // After Oct 2025 cutoff
           .order('created_at', { ascending: true })
-          .limit(1);
+          .limit(100); // Get enough records to find oldest due month
 
         if (data && data.length > 0) {
-          const date = new Date(data[0].created_at);
-          if (!oldestDate || date < oldestDate) {
-            oldestDate = date;
-          }
+          data.forEach(record => {
+            const dueMonth = calculateDueMonth(record.created_at, record.tempo || '1 BLN');
+            if (!oldestDueMonth || dueMonth < oldestDueMonth) {
+              oldestDueMonth = dueMonth;
+            }
+          });
         }
       }
 
-      if (oldestDate) {
-        const month = `${oldestDate.getFullYear()}-${String(oldestDate.getMonth() + 1).padStart(2, '0')}`;
-        setFilterMonth(month);
+      if (oldestDueMonth) {
+        setFilterMonth(oldestDueMonth);
       } else {
         // Fallback to current month if no data found
         const now = new Date();
@@ -404,13 +453,38 @@ export const PiutangCustomerView: React.FC = () => {
 
   // Statistics
   const stats = useMemo(() => {
+    // Total sisa piutang (belum dibayar)
     const totalPiutang = filteredCustomers.reduce((sum, c) => sum + c.sisaPiutang, 0);
-    const tempo3Bln = filteredCustomers.filter(c => c.tempo.includes('3')).reduce((sum, c) => sum + c.sisaPiutang, 0);
-    const tempo2Bln = filteredCustomers.filter(c => c.tempo.includes('2')).reduce((sum, c) => sum + c.sisaPiutang, 0);
-    const tempo1Bln = filteredCustomers.filter(c => c.tempo.includes('1')).reduce((sum, c) => sum + c.sisaPiutang, 0);
+    
+    // Per tempo: sisa, total tagihan, total bayar
+    const tempo3BlnCustomers = filteredCustomers.filter(c => c.tempo.includes('3'));
+    const tempo3Bln = tempo3BlnCustomers.reduce((sum, c) => sum + c.sisaPiutang, 0);
+    const tempo3BlnTagihan = tempo3BlnCustomers.reduce((sum, c) => sum + c.totalPiutang + c.totalTagihanManual, 0);
+    const tempo3BlnBayar = tempo3BlnCustomers.reduce((sum, c) => sum + c.totalBayar, 0);
+    
+    const tempo2BlnCustomers = filteredCustomers.filter(c => c.tempo.includes('2'));
+    const tempo2Bln = tempo2BlnCustomers.reduce((sum, c) => sum + c.sisaPiutang, 0);
+    const tempo2BlnTagihan = tempo2BlnCustomers.reduce((sum, c) => sum + c.totalPiutang + c.totalTagihanManual, 0);
+    const tempo2BlnBayar = tempo2BlnCustomers.reduce((sum, c) => sum + c.totalBayar, 0);
+    
+    const tempo1BlnCustomers = filteredCustomers.filter(c => c.tempo.includes('1'));
+    const tempo1Bln = tempo1BlnCustomers.reduce((sum, c) => sum + c.sisaPiutang, 0);
+    const tempo1BlnTagihan = tempo1BlnCustomers.reduce((sum, c) => sum + c.totalPiutang + c.totalTagihanManual, 0);
+    const tempo1BlnBayar = tempo1BlnCustomers.reduce((sum, c) => sum + c.totalBayar, 0);
+    
     const tempoLainnya = totalPiutang - tempo3Bln - tempo2Bln - tempo1Bln;
     
-    return { totalPiutang, tempo3Bln, tempo2Bln, tempo1Bln, tempoLainnya };
+    // Total keseluruhan
+    const totalTagihan = filteredCustomers.reduce((sum, c) => sum + c.totalPiutang + c.totalTagihanManual, 0);
+    const totalBayar = filteredCustomers.reduce((sum, c) => sum + c.totalBayar, 0);
+    
+    return { 
+      totalPiutang, totalTagihan, totalBayar,
+      tempo3Bln, tempo3BlnTagihan, tempo3BlnBayar, tempo3BlnCount: tempo3BlnCustomers.length,
+      tempo2Bln, tempo2BlnTagihan, tempo2BlnBayar, tempo2BlnCount: tempo2BlnCustomers.length,
+      tempo1Bln, tempo1BlnTagihan, tempo1BlnBayar, tempo1BlnCount: tempo1BlnCustomers.length,
+      tempoLainnya 
+    };
   }, [filteredCustomers]);
 
   // Handle payment submission
@@ -781,7 +855,7 @@ export const PiutangCustomerView: React.FC = () => {
                   <td>${idx + 1}</td>
                   <td>${c.customer}</td>
                   <td>${c.tempo}</td>
-                  <td class="text-right">${formatCurrency(c.totalPiutang)}</td>
+                  <td class="text-right">${formatCurrency(c.totalPiutang + c.totalTagihanManual)}</td>
                   <td class="text-right">${formatCurrency(c.totalBayar)}</td>
                   <td class="text-right">${formatCurrency(c.sisaPiutang)}</td>
                   <td>${formatDate(c.lastTransaction)}</td>
@@ -789,7 +863,7 @@ export const PiutangCustomerView: React.FC = () => {
               `).join('')}
               <tr class="total-row">
                 <td colspan="3">TOTAL</td>
-                <td class="text-right">${formatCurrency(filteredCustomers.reduce((s, c) => s + c.totalPiutang, 0))}</td>
+                <td class="text-right">${formatCurrency(filteredCustomers.reduce((s, c) => s + c.totalPiutang + c.totalTagihanManual, 0))}</td>
                 <td class="text-right">${formatCurrency(filteredCustomers.reduce((s, c) => s + c.totalBayar, 0))}</td>
                 <td class="text-right">${formatCurrency(stats.totalPiutang)}</td>
                 <td></td>
@@ -874,7 +948,7 @@ export const PiutangCustomerView: React.FC = () => {
                 <td style="border: 1px solid #d1d5db; padding: 10px; text-align: center;">
                   <span style="display: inline-block; background: ${c.tempo.includes('3') ? '#f3e8ff' : c.tempo.includes('2') ? '#dbeafe' : '#dcfce7'}; color: ${c.tempo.includes('3') ? '#7c3aed' : c.tempo.includes('2') ? '#2563eb' : '#16a34a'}; padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 600;">${c.tempo}</span>
                 </td>
-                <td style="border: 1px solid #d1d5db; padding: 10px; text-align: right; font-family: 'SF Mono', Consolas, monospace; color: #374151; font-size: 13px;">${formatCurrency(c.totalPiutang)}</td>
+                <td style="border: 1px solid #d1d5db; padding: 10px; text-align: right; font-family: 'SF Mono', Consolas, monospace; color: #374151; font-size: 13px;">${formatCurrency(c.totalPiutang + c.totalTagihanManual)}</td>
                 <td style="border: 1px solid #d1d5db; padding: 10px; text-align: right; font-family: 'SF Mono', Consolas, monospace; color: #16a34a; font-weight: 600; font-size: 13px;">${formatCurrency(c.totalBayar)}</td>
                 <td style="border: 1px solid #d1d5db; padding: 10px; text-align: right; font-family: 'SF Mono', Consolas, monospace; color: #dc2626; font-weight: 700; font-size: 13px;">${formatCurrency(c.sisaPiutang)}</td>
                 <td style="border: 1px solid #d1d5db; padding: 10px; text-align: center; color: #6b7280; font-size: 12px;">${formatDate(c.lastTransaction)}</td>
@@ -882,7 +956,7 @@ export const PiutangCustomerView: React.FC = () => {
             `).join('')}
             <tr style="background: linear-gradient(135deg, #e5e7eb 0%, #d1d5db 100%);">
               <td colspan="3" style="border: 1px solid #9ca3af; padding: 12px 10px; font-weight: 700; color: #1f2937; font-size: 13px;">TOTAL (${filteredCustomers.length} customer)</td>
-              <td style="border: 1px solid #9ca3af; padding: 12px 10px; text-align: right; font-family: 'SF Mono', Consolas, monospace; font-weight: 700; color: #1f2937; font-size: 13px;">${formatCurrency(filteredCustomers.reduce((s, c) => s + c.totalPiutang, 0))}</td>
+              <td style="border: 1px solid #9ca3af; padding: 12px 10px; text-align: right; font-family: 'SF Mono', Consolas, monospace; font-weight: 700; color: #1f2937; font-size: 13px;">${formatCurrency(filteredCustomers.reduce((s, c) => s + c.totalPiutang + c.totalTagihanManual, 0))}</td>
               <td style="border: 1px solid #9ca3af; padding: 12px 10px; text-align: right; font-family: 'SF Mono', Consolas, monospace; font-weight: 700; color: #16a34a; font-size: 13px;">${formatCurrency(filteredCustomers.reduce((s, c) => s + c.totalBayar, 0))}</td>
               <td style="border: 1px solid #9ca3af; padding: 12px 10px; text-align: right; font-family: 'SF Mono', Consolas, monospace; font-weight: 700; color: #dc2626; font-size: 13px;">${formatCurrency(stats.totalPiutang)}</td>
               <td style="border: 1px solid #9ca3af; padding: 12px 10px;"></td>
@@ -951,24 +1025,64 @@ export const PiutangCustomerView: React.FC = () => {
       {/* Statistics Cards */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
         <div className="bg-gradient-to-br from-red-900/40 to-red-800/20 border border-red-800/30 rounded-xl p-4">
-          <div className="text-red-400 text-xs font-medium mb-1">Total Piutang</div>
+          <div className="text-red-400 text-xs font-medium mb-1">Total Sisa Piutang</div>
           <div className="text-xl md:text-2xl font-bold text-white">{formatCompactNumber(stats.totalPiutang)}</div>
           <div className="text-gray-400 text-xs mt-1">{filteredCustomers.length} customer</div>
+          <div className="mt-2 pt-2 border-t border-red-800/30 space-y-1">
+            <div className="flex justify-between text-xs">
+              <span className="text-gray-500">Tagihan:</span>
+              <span className="text-gray-300">{formatCompactNumber(stats.totalTagihan)}</span>
+            </div>
+            <div className="flex justify-between text-xs">
+              <span className="text-gray-500">Dibayar:</span>
+              <span className="text-green-400">{formatCompactNumber(stats.totalBayar)}</span>
+            </div>
+          </div>
         </div>
         <div className="bg-gradient-to-br from-purple-900/40 to-purple-800/20 border border-purple-800/30 rounded-xl p-4">
           <div className="text-purple-400 text-xs font-medium mb-1">Tempo 3 BLN</div>
           <div className="text-xl md:text-2xl font-bold text-white">{formatCompactNumber(stats.tempo3Bln)}</div>
-          <div className="text-gray-400 text-xs mt-1">{filteredCustomers.filter(c => c.tempo.includes('3')).length} customer</div>
+          <div className="text-gray-400 text-xs mt-1">{stats.tempo3BlnCount} customer</div>
+          <div className="mt-2 pt-2 border-t border-purple-800/30 space-y-1">
+            <div className="flex justify-between text-xs">
+              <span className="text-gray-500">Tagihan:</span>
+              <span className="text-gray-300">{formatCompactNumber(stats.tempo3BlnTagihan)}</span>
+            </div>
+            <div className="flex justify-between text-xs">
+              <span className="text-gray-500">Dibayar:</span>
+              <span className="text-green-400">{formatCompactNumber(stats.tempo3BlnBayar)}</span>
+            </div>
+          </div>
         </div>
         <div className="bg-gradient-to-br from-blue-900/40 to-blue-800/20 border border-blue-800/30 rounded-xl p-4">
           <div className="text-blue-400 text-xs font-medium mb-1">Tempo 2 BLN</div>
           <div className="text-xl md:text-2xl font-bold text-white">{formatCompactNumber(stats.tempo2Bln)}</div>
-          <div className="text-gray-400 text-xs mt-1">{filteredCustomers.filter(c => c.tempo.includes('2')).length} customer</div>
+          <div className="text-gray-400 text-xs mt-1">{stats.tempo2BlnCount} customer</div>
+          <div className="mt-2 pt-2 border-t border-blue-800/30 space-y-1">
+            <div className="flex justify-between text-xs">
+              <span className="text-gray-500">Tagihan:</span>
+              <span className="text-gray-300">{formatCompactNumber(stats.tempo2BlnTagihan)}</span>
+            </div>
+            <div className="flex justify-between text-xs">
+              <span className="text-gray-500">Dibayar:</span>
+              <span className="text-green-400">{formatCompactNumber(stats.tempo2BlnBayar)}</span>
+            </div>
+          </div>
         </div>
         <div className="bg-gradient-to-br from-green-900/40 to-green-800/20 border border-green-800/30 rounded-xl p-4">
           <div className="text-green-400 text-xs font-medium mb-1">Tempo 1 BLN</div>
           <div className="text-xl md:text-2xl font-bold text-white">{formatCompactNumber(stats.tempo1Bln)}</div>
-          <div className="text-gray-400 text-xs mt-1">{filteredCustomers.filter(c => c.tempo.includes('1')).length} customer</div>
+          <div className="text-gray-400 text-xs mt-1">{stats.tempo1BlnCount} customer</div>
+          <div className="mt-2 pt-2 border-t border-green-800/30 space-y-1">
+            <div className="flex justify-between text-xs">
+              <span className="text-gray-500">Tagihan:</span>
+              <span className="text-gray-300">{formatCompactNumber(stats.tempo1BlnTagihan)}</span>
+            </div>
+            <div className="flex justify-between text-xs">
+              <span className="text-gray-500">Dibayar:</span>
+              <span className="text-green-400">{formatCompactNumber(stats.tempo1BlnBayar)}</span>
+            </div>
+          </div>
         </div>
         <div className="bg-gradient-to-br from-yellow-900/40 to-yellow-800/20 border border-yellow-800/30 rounded-xl p-4">
           <div className="text-yellow-400 text-xs font-medium mb-1">Tempo Lainnya</div>
@@ -1056,23 +1170,23 @@ export const PiutangCustomerView: React.FC = () => {
         </div>
       </div>
 
-      {/* Month Filter */}
+      {/* Month Filter - Now filters by payment due date */}
       <div className="flex flex-col md:flex-row gap-3 mb-4 items-center">
         <div className="flex items-center gap-2">
           <Calendar className="w-4 h-4 text-gray-400" />
-          <span className="text-sm text-gray-400">Periode:</span>
+          <span className="text-sm text-gray-400">Jatuh Tempo:</span>
         </div>
         <div className="flex items-center gap-2">
           <input
             type="month"
             value={filterMonth}
             onChange={(e) => setFilterMonth(e.target.value)}
-            min="2025-11"
+            min="2025-12"
             className="bg-gray-800 border border-gray-700 rounded-xl px-3 py-2.5 text-white focus:border-red-500 focus:ring-1 focus:ring-red-500 transition-colors"
           />
         </div>
         <div className="text-xs text-gray-500 bg-gray-800/50 px-2 py-1 rounded-lg">
-          ℹ️ Tagihan s/d Oct 2025 sudah lunas
+          ℹ️ Tagihan jatuh tempo bulan ini (transaksi + tempo)
         </div>
 
         {/* Actions */}
@@ -1170,7 +1284,7 @@ export const PiutangCustomerView: React.FC = () => {
                       </span>
                     </td>
                     <td className="px-4 py-3 text-right font-mono text-sm">
-                      {formatCurrency(customer.totalPiutang)}
+                      {formatCurrency(customer.totalPiutang + customer.totalTagihanManual)}
                     </td>
                     <td className="px-4 py-3 text-right font-mono text-sm text-green-400">
                       {formatCurrency(customer.totalBayar)}
