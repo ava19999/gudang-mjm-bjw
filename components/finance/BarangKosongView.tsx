@@ -1528,17 +1528,18 @@ export const BarangKosongView: React.FC = () => {
         });
       }
       
-      // For BJW view: Add items from base tables that have NO supplier (not in any barang_masuk)
+      // Add items from base tables that have NO supplier (not in any barang_masuk)
+      // This applies to BOTH MJM and BJW views
+      const allPartNumbersWithSupplier = new Set<string>();
+      Object.values(supplierMap).forEach(itemsMap => {
+        itemsMap.forEach((_, pn) => allPartNumbersWithSupplier.add(pn));
+      });
+      
+      // Add items from base tables that don't have supplier
+      const noSupplierKey = '⚠️ TANPA SUPPLIER';
+      
       if (isBJW) {
-        const allPartNumbersWithSupplier = new Set<string>();
-        Object.values(supplierMap).forEach(itemsMap => {
-          itemsMap.forEach((_, pn) => allPartNumbersWithSupplier.add(pn));
-        });
-        
-        // Add items from base_mjm and base_bjw that don't have supplier
-        const noSupplierKey = '⚠️ TANPA SUPPLIER';
-        
-        // Check base_mjm items
+        // For BJW: Check both base_mjm and base_bjw items
         (baseMJMData || []).forEach(item => {
           if (!allPartNumbersWithSupplier.has(item.part_number)) {
             const baseBJWInfo = getBaseBJWInfo(item.part_number);
@@ -1585,6 +1586,35 @@ export const BarangKosongView: React.FC = () => {
                 current_stock: item.quantity || 0,
                 current_stock_mjm: baseMJMInfo?.quantity || 0,
                 current_stock_bjw: item.quantity || 0,
+                last_price: 0,
+                last_price_mjm: 0,
+                last_price_bjw: 0,
+                last_order_date: '',
+                last_order_date_mjm: '',
+                last_order_date_bjw: '',
+                tempo: '-',
+                brand: item.brand || '-',
+                application: item.application || '-'
+              });
+              allPartNumbersWithSupplier.add(item.part_number);
+            }
+          }
+        });
+      } else {
+        // For MJM: Check only base_mjm items
+        (baseMJMData || []).forEach(item => {
+          if (!allPartNumbersWithSupplier.has(item.part_number)) {
+            if (!supplierMap[noSupplierKey]) {
+              supplierMap[noSupplierKey] = new Map();
+            }
+            
+            if (!supplierMap[noSupplierKey].has(item.part_number)) {
+              supplierMap[noSupplierKey].set(item.part_number, {
+                part_number: item.part_number,
+                nama_barang: item.name || '-',
+                current_stock: item.quantity || 0,
+                current_stock_mjm: item.quantity || 0,
+                current_stock_bjw: 0,
                 last_price: 0,
                 last_price_mjm: 0,
                 last_price_bjw: 0,

@@ -44,6 +44,7 @@ interface CustomerPiutang {
   totalBayar: number;
   sisaPiutang: number;
   lastTransaction: string;
+  lastPaymentDate: string | null;
   transactions: BarangMasukRecord[];
   tagihanManual: Tagihan[];
 }
@@ -105,7 +106,9 @@ export const PiutangCustomerView: React.FC = () => {
   // Filter states
   const [searchTerm, setSearchTerm] = useState('');
   const [filterTempo, setFilterTempo] = useState<string>('all');
-  const [filterStore, setFilterStore] = useState<'all' | 'mjm' | 'bjw'>('all');
+  const [filterStore, setFilterStore] = useState<'all' | 'mjm' | 'bjw'>(
+    selectedStore === 'mjm' ? 'mjm' : selectedStore === 'bjw' ? 'bjw' : 'mjm'
+  );
   const [filterMonth, setFilterMonth] = useState(''); // Will be set after finding oldest unpaid month
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   
@@ -151,6 +154,13 @@ export const PiutangCustomerView: React.FC = () => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 3000);
   };
+
+  // Sync filterStore with selectedStore when user changes store in header
+  useEffect(() => {
+    if (selectedStore === 'mjm' || selectedStore === 'bjw') {
+      setFilterStore(selectedStore);
+    }
+  }, [selectedStore]);
 
   // Get tempo types (excluding CASH and NADIR)
   const tempoTypes = useMemo(() => {
@@ -244,9 +254,14 @@ export const PiutangCustomerView: React.FC = () => {
         .order('tanggal', { ascending: false });
       
       // Filter pembayaran to only include those whose transaction month + tempo = filterMonth
+      // Also filter by toko column to separate payments per store
       const pembayaranData = (pembayaranDataRaw || []).filter(p => {
         if (!p.for_months || !p.tempo) return false;
         const dueMonth = calculateDueMonth(p.for_months, p.tempo);
+        // Filter by toko if not 'all'
+        if (filterStore !== 'all' && p.toko && p.toko.toLowerCase() !== filterStore) {
+          return false;
+        }
         return dueMonth === filterMonth;
       });
       
@@ -264,9 +279,13 @@ export const PiutangCustomerView: React.FC = () => {
         .gte('tanggal', actualTagihanFetchFrom)
         .order('tanggal', { ascending: false });
       
-      // Filter tagihan by due month
+      // Filter tagihan by due month and store
       const tagihanData = (tagihanDataRaw || []).filter(t => {
         const dueMonth = calculateDueMonth(t.tanggal, t.tempo || '1 BLN');
+        // Filter by store if not 'all'
+        if (filterStore !== 'all' && t.store && t.store.toLowerCase() !== filterStore) {
+          return false;
+        }
         return dueMonth === filterMonth;
       });
       
@@ -287,6 +306,7 @@ export const PiutangCustomerView: React.FC = () => {
             totalBayar: 0,
             sisaPiutang: 0,
             lastTransaction: record.created_at,
+            lastPaymentDate: null,
             transactions: [],
             tagihanManual: [],
           });
@@ -315,6 +335,7 @@ export const PiutangCustomerView: React.FC = () => {
             totalBayar: 0,
             sisaPiutang: 0,
             lastTransaction: t.tanggal,
+            lastPaymentDate: null,
             transactions: [],
             tagihanManual: [],
           });
@@ -330,12 +351,16 @@ export const PiutangCustomerView: React.FC = () => {
         }
       });
 
-      // Calculate totalBayar from pembayaran
+      // Calculate totalBayar from pembayaran and track last payment date
       (pembayaranData || []).forEach(p => {
         const key = `${p.customer?.trim().toUpperCase() || 'UNKNOWN'}_${p.tempo || '-'}`;
         const customer = customerMap.get(key);
         if (customer) {
           customer.totalBayar += p.jumlah || 0;
+          // Update last payment date if this payment is newer (use created_at from importir_pembayaran)
+          if (!customer.lastPaymentDate || new Date(p.created_at) > new Date(customer.lastPaymentDate)) {
+            customer.lastPaymentDate = p.created_at;
+          }
         }
       });
 
@@ -495,6 +520,16 @@ export const PiutangCustomerView: React.FC = () => {
     }
 
     try {
+      // Calculate the original transaction month based on tempo
+      // E.g., if filterMonth is Feb 2026 and tempo is 3 BLN, 
+      // the original transaction was in Nov 2025 (Feb 2026 - 3 months)
+      const tempoMatch = selectedCustomer.tempo.match(/(\d+)/);
+      const tempoMonths = tempoMatch ? parseInt(tempoMatch[1]) : 1;
+      const dueDate = new Date(filterMonth + '-01');
+      const transactionDate = new Date(dueDate);
+      transactionDate.setMonth(transactionDate.getMonth() - tempoMonths);
+      const forMonthsValue = `${transactionDate.getFullYear()}-${String(transactionDate.getMonth() + 1).padStart(2, '0')}-01`;
+
       const { error } = await supabase
         .from('importir_pembayaran')
         .insert([{
@@ -504,7 +539,8 @@ export const PiutangCustomerView: React.FC = () => {
           jumlah: parseFloat(paymentAmount),
           keterangan: paymentNote || 'Pembayaran piutang',
           store: filterStore === 'all' ? 'all' : filterStore,
-          for_months: `${filterMonth}-01`,
+          for_months: forMonthsValue,
+          toko: selectedStore?.toUpperCase() || 'MJM',
         }]);
 
       if (error) throw error;
@@ -537,7 +573,7 @@ export const PiutangCustomerView: React.FC = () => {
           tanggal: tagihanDate || new Date().toISOString().split('T')[0],
           jumlah: parseFloat(tagihanAmount),
           keterangan: tagihanNote || 'Tagihan manual',
-          store: filterStore === 'all' ? 'all' : filterStore,
+          store: selectedStore?.toUpperCase() || 'MJM',
         }]);
 
       if (error) throw error;
@@ -937,7 +973,7 @@ export const PiutangCustomerView: React.FC = () => {
               <th style="width: 140px; border: 1px solid #d1d5db; padding: 12px 10px; text-align: right; color: #374151; font-weight: 600;">Total Piutang</th>
               <th style="width: 130px; border: 1px solid #d1d5db; padding: 12px 10px; text-align: right; color: #374151; font-weight: 600;">Total Bayar</th>
               <th style="width: 140px; border: 1px solid #d1d5db; padding: 12px 10px; text-align: right; color: #374151; font-weight: 600;">Sisa Piutang</th>
-              <th style="width: 100px; border: 1px solid #d1d5db; padding: 12px 10px; text-align: center; color: #374151; font-weight: 600;">Terakhir</th>
+              <th style="width: 100px; border: 1px solid #d1d5db; padding: 12px 10px; text-align: center; color: #374151; font-weight: 600;">Terakhir Bayar</th>
             </tr>
           </thead>
           <tbody>
@@ -951,7 +987,7 @@ export const PiutangCustomerView: React.FC = () => {
                 <td style="border: 1px solid #d1d5db; padding: 10px; text-align: right; font-family: 'SF Mono', Consolas, monospace; color: #374151; font-size: 13px;">${formatCurrency(c.totalPiutang + c.totalTagihanManual)}</td>
                 <td style="border: 1px solid #d1d5db; padding: 10px; text-align: right; font-family: 'SF Mono', Consolas, monospace; color: #16a34a; font-weight: 600; font-size: 13px;">${formatCurrency(c.totalBayar)}</td>
                 <td style="border: 1px solid #d1d5db; padding: 10px; text-align: right; font-family: 'SF Mono', Consolas, monospace; color: #dc2626; font-weight: 700; font-size: 13px;">${formatCurrency(c.sisaPiutang)}</td>
-                <td style="border: 1px solid #d1d5db; padding: 10px; text-align: center; color: #6b7280; font-size: 12px;">${formatDate(c.lastTransaction)}</td>
+                <td style="border: 1px solid #d1d5db; padding: 10px; text-align: center; color: #6b7280; font-size: 12px;">${c.lastPaymentDate ? formatDate(c.lastPaymentDate) : '-'}</td>
               </tr>
             `).join('')}
             <tr style="background: linear-gradient(135deg, #e5e7eb 0%, #d1d5db 100%);">
