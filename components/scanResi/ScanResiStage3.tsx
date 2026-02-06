@@ -1183,7 +1183,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
   
   // SORT STATE
   const [sortField, setSortField] = useState<string>('');
-  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc' | 'none'>('none');
   const [showResiDropdown, setShowResiDropdown] = useState(false);
   const resiSearchRef = useRef<HTMLDivElement>(null);
 
@@ -1396,10 +1396,74 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
           schema: 'public',
           table: tableName
         },
-        (payload) => {
+        async (payload) => {
           console.log('[Realtime] INSERT received:', payload.new);
-          // Reload data when new item inserted by other user
-          loadSavedDataFromDB();
+          
+          const newData = payload.new as any;
+          const newRowId = String(newData.id);
+          
+          // Cek apakah row dengan ID ini sudah ada (untuk menghindari duplikat)
+          setRows(prevRows => {
+            const exists = prevRows.some(row => row.id === newRowId);
+            if (exists) {
+              console.log('[Realtime] INSERT ignored - row already exists:', newRowId);
+              return prevRows;
+            }
+            
+            // Buat row baru dari data yang diterima
+            const newRow: Stage3Row = {
+              id: newRowId,
+              tanggal: newData.tanggal || new Date().toISOString().split('T')[0],
+              resi: newData.resi || '',
+              ecommerce: newData.ecommerce || '-',
+              sub_toko: newData.toko || (selectedStore === 'bjw' ? 'BJW' : 'MJM'),
+              part_number: newData.part_number || '',
+              nama_barang_csv: newData.nama_barang || '',
+              nama_barang_base: '',
+              brand: '',
+              application: '',
+              stock_saat_ini: 0,
+              qty_keluar: newData.qty || 0,
+              harga_total: newData.harga_total || 0,
+              harga_satuan: newData.harga_satuan || 0,
+              mata_uang: 'IDR',
+              no_pesanan: newData.order_id || '',
+              customer: newData.customer || '',
+              is_db_verified: false,
+              is_stock_valid: true,
+              status_message: 'Baru',
+              force_override_double: false
+            };
+            
+            console.log('[Realtime] Adding new row:', newRow);
+            return [...prevRows, newRow];
+          });
+          
+          // Lookup part info di background jika ada part_number
+          if (newData.part_number) {
+            try {
+              const partInfo = await lookupPartNumberInfo(newData.part_number, selectedStore);
+              if (partInfo) {
+                setRows(prevRows => 
+                  prevRows.map(row => {
+                    if (row.id !== newRowId) return row;
+                    return {
+                      ...row,
+                      nama_barang_base: partInfo.name || '',
+                      brand: partInfo.brand || '',
+                      application: partInfo.application || '',
+                      stock_saat_ini: partInfo.quantity || 0,
+                      is_db_verified: true,
+                      is_stock_valid: (partInfo.quantity || 0) >= row.qty_keluar,
+                      status_message: (partInfo.quantity || 0) >= row.qty_keluar ? 'Ready' : 'Stok Kurang',
+                    };
+                  })
+                );
+              }
+            } catch (e) {
+              console.error('[Realtime] Error looking up part info for new row:', e);
+            }
+          }
         }
       )
       .on(
@@ -2381,8 +2445,9 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
     const currentColIdx = colOrder.indexOf(colKey);
     
     // Handle Part Number dropdown navigation
-    if (colKey === 'part_number' && partNumberDropdown.isOpen && partNumberDropdown.rowIndex === rowIndex) {
-      const currentRow = displayedRows[rowIndex];
+    if (colKey === 'part_number' && partNumberDropdown.isOpen && partNumberDropdown.rowId === rowId) {
+      // Gunakan rowId untuk mencari row yang benar, bukan rowIndex
+      const currentRow = rowId ? rows.find(r => r.id === rowId) : null;
       const searchValue = currentRow?.part_number || '';
       const filteredParts = partOptions.filter(p => 
         p.part_number.toLowerCase().includes(searchValue.toLowerCase())
@@ -2940,8 +3005,8 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
     
     return true;
   }).sort((a, b) => {
-    // Apply sorting jika ada sortField
-    if (!sortField) return 0;
+    // Apply sorting jika ada sortField dan direction bukan 'none'
+    if (!sortField || sortDirection === 'none') return 0;
     
     let valA: any = a[sortField as keyof Stage3Row];
     let valB: any = b[sortField as keyof Stage3Row];
@@ -3221,14 +3286,30 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
     onRefresh?.();
   };
 
-  // Handle sort by column
+  // Handle sort by column (3 states: asc -> desc -> none)
   const handleSort = (field: string) => {
     if (sortField === field) {
-      setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
+      // Cycle through: asc -> desc -> none
+      if (sortDirection === 'asc') {
+        setSortDirection('desc');
+      } else if (sortDirection === 'desc') {
+        setSortDirection('none');
+        setSortField('');
+      } else {
+        setSortDirection('asc');
+      }
     } else {
       setSortField(field);
       setSortDirection('asc');
     }
+  };
+
+  // Helper untuk menampilkan icon sort (↑ asc, ↓ desc, kosong jika none)
+  const getSortIcon = (field: string) => {
+    if (sortField !== field) return '';
+    if (sortDirection === 'asc') return '↑';
+    if (sortDirection === 'desc') return '↓';
+    return '';
   };
 
   // Format number with thousand separator (47320 -> 47.320)
@@ -3882,52 +3963,52 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                 />
               </th>
               <th className="border border-gray-600 px-1 py-1 text-center w-[55px] md:w-[5%] bg-gray-700 cursor-pointer hover:bg-gray-600" onClick={() => handleSort('status_message')}>
-                <div className="flex items-center justify-center gap-0.5">Status {sortField === 'status_message' && (sortDirection === 'asc' ? '↑' : '↓')}</div>
+                <div className="flex items-center justify-center gap-0.5">Status {getSortIcon('status_message')}</div>
               </th>
               <th className="border border-gray-600 px-1 py-1 text-center w-[75px] md:w-[6%] bg-gray-700 cursor-pointer hover:bg-gray-600" onClick={() => handleSort('tanggal')}>
-                <div className="flex items-center justify-center gap-0.5">Tanggal {sortField === 'tanggal' && (sortDirection === 'asc' ? '↑' : '↓')}</div>
+                <div className="flex items-center justify-center gap-0.5">Tanggal {getSortIcon('tanggal')}</div>
               </th>
               <th className="border border-gray-600 px-1 py-1 text-left w-[80px] md:w-[7%] bg-gray-700 cursor-pointer hover:bg-gray-600" onClick={() => handleSort('resi')}>
-                <div className="flex items-center gap-0.5">Resi {sortField === 'resi' && (sortDirection === 'asc' ? '↑' : '↓')}</div>
+                <div className="flex items-center gap-0.5">Resi {getSortIcon('resi')}</div>
               </th>
               <th className="border border-gray-600 px-1 py-1 text-center w-[55px] md:w-[5%] bg-gray-700 cursor-pointer hover:bg-gray-600" onClick={() => handleSort('ecommerce')}>
-                <div className="flex items-center justify-center gap-0.5">E-Comm {sortField === 'ecommerce' && (sortDirection === 'asc' ? '↑' : '↓')}</div>
+                <div className="flex items-center justify-center gap-0.5">E-Comm {getSortIcon('ecommerce')}</div>
               </th>
               <th className="border border-gray-600 px-1 py-1 text-center w-[45px] md:w-[4%] bg-gray-700 cursor-pointer hover:bg-gray-600" onClick={() => handleSort('sub_toko')}>
-                <div className="flex items-center justify-center gap-0.5">Toko {sortField === 'sub_toko' && (sortDirection === 'asc' ? '↑' : '↓')}</div>
+                <div className="flex items-center justify-center gap-0.5">Toko {getSortIcon('sub_toko')}</div>
               </th>
               <th className="border border-gray-600 px-1 py-1 text-left w-[70px] md:w-[6%] bg-gray-600 cursor-pointer hover:bg-gray-500" onClick={() => handleSort('customer')}>
-                <div className="flex items-center gap-0.5">Customer {sortField === 'customer' && (sortDirection === 'asc' ? '↑' : '↓')}</div>
+                <div className="flex items-center gap-0.5">Customer {getSortIcon('customer')}</div>
               </th>
               <th className="border border-gray-600 px-1 py-1 text-left border-b-2 border-b-yellow-600/50 w-[90px] md:w-[8%] bg-gray-600 cursor-pointer hover:bg-gray-500" onClick={() => handleSort('part_number')}>
-                <div className="flex items-center gap-0.5">Part No. {sortField === 'part_number' && (sortDirection === 'asc' ? '↑' : '↓')}</div>
+                <div className="flex items-center gap-0.5">Part No. {getSortIcon('part_number')}</div>
               </th>
               <th className="border border-gray-600 px-1 py-1 text-left w-[140px] md:w-[12%] bg-gray-700 cursor-pointer hover:bg-gray-600" onClick={() => handleSort('nama_barang_csv')}>
-                <div className="flex items-center gap-0.5">Nama (CSV) {sortField === 'nama_barang_csv' && (sortDirection === 'asc' ? '↑' : '↓')}</div>
+                <div className="flex items-center gap-0.5">Nama (CSV) {getSortIcon('nama_barang_csv')}</div>
               </th>
               <th className="border border-gray-600 px-1 py-1 text-left w-[100px] md:w-[9%] bg-gray-700 cursor-pointer hover:bg-gray-600" onClick={() => handleSort('nama_barang_base')}>
-                <div className="flex items-center gap-0.5">Nama (Base) {sortField === 'nama_barang_base' && (sortDirection === 'asc' ? '↑' : '↓')}</div>
+                <div className="flex items-center gap-0.5">Nama (Base) {getSortIcon('nama_barang_base')}</div>
               </th>
               <th className="border border-gray-600 px-1 py-1 text-left w-[55px] md:w-[5%] bg-gray-700 cursor-pointer hover:bg-gray-600" onClick={() => handleSort('brand')}>
-                <div className="flex items-center gap-0.5">Brand {sortField === 'brand' && (sortDirection === 'asc' ? '↑' : '↓')}</div>
+                <div className="flex items-center gap-0.5">Brand {getSortIcon('brand')}</div>
               </th>
               <th className="border border-gray-600 px-1 py-1 text-left w-[70px] md:w-[6%] bg-gray-700 cursor-pointer hover:bg-gray-600" onClick={() => handleSort('application')}>
-                <div className="flex items-center gap-0.5">Aplikasi {sortField === 'application' && (sortDirection === 'asc' ? '↑' : '↓')}</div>
+                <div className="flex items-center gap-0.5">Aplikasi {getSortIcon('application')}</div>
               </th>
               <th className="border border-gray-600 px-1 py-1 text-center w-[40px] md:w-[3%] bg-gray-700 cursor-pointer hover:bg-gray-600" onClick={() => handleSort('stock_saat_ini')}>
-                <div className="flex items-center justify-center gap-0.5">Stok {sortField === 'stock_saat_ini' && (sortDirection === 'asc' ? '↑' : '↓')}</div>
+                <div className="flex items-center justify-center gap-0.5">Stok {getSortIcon('stock_saat_ini')}</div>
               </th>
               <th className="border border-gray-600 px-1 py-1 text-center border-b-2 border-b-yellow-600/50 w-[40px] md:w-[3%] bg-gray-600 cursor-pointer hover:bg-gray-500" onClick={() => handleSort('qty_keluar')}>
-                <div className="flex items-center justify-center gap-0.5">Qty {sortField === 'qty_keluar' && (sortDirection === 'asc' ? '↑' : '↓')}</div>
+                <div className="flex items-center justify-center gap-0.5">Qty {getSortIcon('qty_keluar')}</div>
               </th>
               <th className="border border-gray-600 px-1 py-1 text-right border-b-2 border-b-yellow-600/50 w-[70px] md:w-[5%] bg-gray-600 cursor-pointer hover:bg-gray-500" onClick={() => handleSort('harga_total')}>
-                <div className="flex items-center justify-end gap-0.5">Total {sortField === 'harga_total' && (sortDirection === 'asc' ? '↑' : '↓')}</div>
+                <div className="flex items-center justify-end gap-0.5">Total {getSortIcon('harga_total')}</div>
               </th>
               <th className="border border-gray-600 px-1 py-1 text-right w-[60px] md:w-[4%] bg-gray-700 cursor-pointer hover:bg-gray-600" onClick={() => handleSort('harga_satuan')}>
-                <div className="flex items-center justify-end gap-0.5">Satuan {sortField === 'harga_satuan' && (sortDirection === 'asc' ? '↑' : '↓')}</div>
+                <div className="flex items-center justify-end gap-0.5">Satuan {getSortIcon('harga_satuan')}</div>
               </th>
               <th className="border border-gray-600 px-1 py-1 text-left w-[60px] md:w-[4%] bg-gray-700 cursor-pointer hover:bg-gray-600" onClick={() => handleSort('no_pesanan')}>
-                <div className="flex items-center gap-0.5">No. Pesanan {sortField === 'no_pesanan' && (sortDirection === 'asc' ? '↑' : '↓')}</div>
+                <div className="flex items-center gap-0.5">No. Pesanan {getSortIcon('no_pesanan')}</div>
               </th>
               <th className="border border-gray-600 px-1 py-1 text-center w-[35px] md:w-[2%] bg-gray-700">#</th>
             </tr>
