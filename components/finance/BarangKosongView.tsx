@@ -14,8 +14,14 @@ interface SupplierItem {
   part_number: string;
   nama_barang: string;
   current_stock: number;
+  current_stock_mjm?: number;  // Stock from MJM (for BJW view)
+  current_stock_bjw?: number;  // Stock from BJW (for BJW view)
   last_price: number;
+  last_price_mjm?: number;     // Price from MJM
+  last_price_bjw?: number;     // Price from BJW
   last_order_date: string;
+  last_order_date_mjm?: string;
+  last_order_date_bjw?: string;
   tempo: string;
   brand?: string;
   application?: string;
@@ -952,7 +958,8 @@ const SupplierCard: React.FC<{
   onRemoveFromCart: (partNumber: string) => void;
   onUpdateQty: (partNumber: string, qty: number) => void;
   onViewHistory: (item: SupplierItem) => void;
-}> = ({ group, isExpanded, onToggle, cart, onAddToCart, onRemoveFromCart, onUpdateQty, onViewHistory }) => {
+  isBJW?: boolean;
+}> = ({ group, isExpanded, onToggle, cart, onAddToCart, onRemoveFromCart, onUpdateQty, onViewHistory, isBJW = false }) => {
   const cartItemsFromSupplier = cart.filter(c => c.supplier === group.supplier);
   const totalInCart = cartItemsFromSupplier.reduce((sum, c) => sum + c.qty, 0);
   
@@ -985,14 +992,37 @@ const SupplierCard: React.FC<{
       {/* Items List */}
       {isExpanded && (
         <div className="border-t border-gray-700">
-          <div className="max-h-[400px] overflow-y-auto">
-            <table className="w-full">
+          <div className="max-h-[400px] overflow-y-auto overflow-x-auto">
+            <table className="w-full min-w-[900px]">
               <thead className="bg-gray-900/50 sticky top-0">
                 <tr className="text-xs text-gray-400 uppercase">
                   <th className="px-4 py-2 text-left">Part Number</th>
                   <th className="px-4 py-2 text-left">Nama / Brand / Aplikasi</th>
-                  <th className="px-4 py-2 text-center">Stok</th>
-                  <th className="px-4 py-2 text-right">Harga Terakhir</th>
+                  {isBJW ? (
+                    <>
+                      <th className="px-2 py-2 text-center bg-blue-900/30">
+                        <div className="text-blue-400">Stok</div>
+                        <div className="text-[10px] text-blue-300">MJM</div>
+                      </th>
+                      <th className="px-2 py-2 text-center bg-purple-900/30">
+                        <div className="text-purple-400">Stok</div>
+                        <div className="text-[10px] text-purple-300">BJW</div>
+                      </th>
+                      <th className="px-2 py-2 text-right bg-blue-900/30">
+                        <div className="text-blue-400">Harga</div>
+                        <div className="text-[10px] text-blue-300">MJM</div>
+                      </th>
+                      <th className="px-2 py-2 text-right bg-purple-900/30">
+                        <div className="text-purple-400">Harga</div>
+                        <div className="text-[10px] text-purple-300">BJW</div>
+                      </th>
+                    </>
+                  ) : (
+                    <>
+                      <th className="px-4 py-2 text-center">Stok</th>
+                      <th className="px-4 py-2 text-right">Harga Terakhir</th>
+                    </>
+                  )}
                   <th className="px-4 py-2 text-center">Order Terakhir</th>
                   <th className="px-4 py-2 text-center w-32">Aksi</th>
                 </tr>
@@ -1000,6 +1030,22 @@ const SupplierCard: React.FC<{
               <tbody className="divide-y divide-gray-700">
                 {group.items.map((item) => {
                   const inCart = cart.find(c => c.part_number === item.part_number);
+                  
+                  // Stock colors for BJW view
+                  const stockMJM = item.current_stock_mjm || 0;
+                  const stockBJW = item.current_stock_bjw || 0;
+                  const stockMJMColor = stockMJM === 0 
+                    ? 'text-red-400 bg-red-900/30' 
+                    : stockMJM <= 5 
+                      ? 'text-yellow-400 bg-yellow-900/30' 
+                      : 'text-green-400 bg-green-900/30';
+                  const stockBJWColor = stockBJW === 0 
+                    ? 'text-red-400 bg-red-900/30' 
+                    : stockBJW <= 5 
+                      ? 'text-yellow-400 bg-yellow-900/30' 
+                      : 'text-green-400 bg-green-900/30';
+                  
+                  // Single stock color for MJM view
                   const stockColor = item.current_stock === 0 
                     ? 'text-red-400 bg-red-900/30' 
                     : item.current_stock <= 5 
@@ -1021,25 +1067,70 @@ const SupplierCard: React.FC<{
                           </span>
                         </div>
                       </td>
+                      {isBJW ? (
+                        <>
+                          {/* Stock MJM */}
+                          <td className="px-2 py-3 text-center bg-blue-900/10">
+                            <span className={`px-2 py-1 rounded text-xs font-bold ${stockMJMColor}`}>
+                              {stockMJM}
+                            </span>
+                          </td>
+                          {/* Stock BJW */}
+                          <td className="px-2 py-3 text-center bg-purple-900/10">
+                            <span className={`px-2 py-1 rounded text-xs font-bold ${stockBJWColor}`}>
+                              {stockBJW}
+                            </span>
+                          </td>
+                          {/* Harga MJM */}
+                          <td className="px-2 py-3 text-right bg-blue-900/10">
+                            <span className="text-xs text-blue-300">
+                              {item.last_price_mjm ? formatCurrency(item.last_price_mjm) : '-'}
+                            </span>
+                          </td>
+                          {/* Harga BJW */}
+                          <td className="px-2 py-3 bg-purple-900/10">
+                            <div className="flex items-center justify-end gap-1">
+                              <span className="text-xs text-purple-300">
+                                {item.last_price_bjw ? formatCurrency(item.last_price_bjw) : '-'}
+                              </span>
+                              <button
+                                onClick={() => onViewHistory(item)}
+                                className="p-1 bg-gray-700 hover:bg-blue-600 text-gray-400 hover:text-white rounded transition-colors"
+                                title="Lihat riwayat harga"
+                              >
+                                <History size={12} />
+                              </button>
+                            </div>
+                          </td>
+                        </>
+                      ) : (
+                        <>
+                          <td className="px-4 py-3 text-center">
+                            <span className={`px-2 py-1 rounded text-xs font-bold ${stockColor}`}>
+                              {item.current_stock}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center justify-end gap-2">
+                              <span className="text-sm text-gray-300">{formatCurrency(item.last_price)}</span>
+                              <button
+                                onClick={() => onViewHistory(item)}
+                                className="p-1 bg-gray-700 hover:bg-blue-600 text-gray-400 hover:text-white rounded transition-colors"
+                                title="Lihat riwayat harga"
+                              >
+                                <History size={14} />
+                              </button>
+                            </div>
+                          </td>
+                        </>
+                      )}
                       <td className="px-4 py-3 text-center">
-                        <span className={`px-2 py-1 rounded text-xs font-bold ${stockColor}`}>
-                          {item.current_stock}
+                        <span className="text-xs text-gray-400">
+                          {isBJW 
+                            ? formatDate(item.last_order_date_bjw || item.last_order_date_mjm || '')
+                            : formatDate(item.last_order_date)
+                          }
                         </span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center justify-end gap-2">
-                          <span className="text-sm text-gray-300">{formatCurrency(item.last_price)}</span>
-                          <button
-                            onClick={() => onViewHistory(item)}
-                            className="p-1 bg-gray-700 hover:bg-blue-600 text-gray-400 hover:text-white rounded transition-colors"
-                            title="Lihat riwayat harga"
-                          >
-                            <History size={14} />
-                          </button>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        <span className="text-xs text-gray-400">{formatDate(item.last_order_date)}</span>
                       </td>
                       <td className="px-4 py-3">
                         {inCart ? (
@@ -1240,38 +1331,11 @@ export const BarangKosongView: React.FC = () => {
   // Tempo values for filtering
   const TEMPO_VALUES = ['3 BLN', '2 BLN', '1 BLN'];
   
-  // Fetch data
+  // Fetch data - for BJW, also fetch from MJM
   const fetchData = async () => {
     setLoading(true);
     try {
-      const tableMasuk = selectedStore === 'bjw' ? 'barang_masuk_bjw' : 'barang_masuk_mjm';
-      const tableBase = selectedStore === 'bjw' ? 'base_bjw' : 'base_mjm';
-      
-      // Fetch all barang masuk with the selected tempo type
-      // TEMPO = 3 BLN, 2 BLN, 1 BLN | CASH = CASH
-      let query = supabase
-        .from(tableMasuk)
-        .select('part_number, nama_barang, customer, harga_satuan, tempo, created_at')
-        .order('created_at', { ascending: false });
-      
-      if (activeTab === 'TEMPO') {
-        // Filter by tempo values: 3 BLN, 2 BLN, 1 BLN
-        query = query.in('tempo', TEMPO_VALUES);
-      } else {
-        // Filter by CASH
-        query = query.eq('tempo', 'CASH');
-      }
-      
-      const { data: masukData, error: masukError } = await query;
-      
-      if (masukError) throw masukError;
-      
-      // Fetch ALL items from base table with full details (name, brand, application)
-      const { data: baseData } = await supabase
-        .from(tableBase)
-        .select('part_number, name, quantity, brand, application');
-      
-      // Create lookup maps from base data
+      const isBJW = selectedStore === 'bjw';
       const normalizePN = (pn: string): string => pn?.trim().toUpperCase().replace(/\s+/g, ' ') || '';
       
       interface BaseItemInfo {
@@ -1281,37 +1345,113 @@ export const BarangKosongView: React.FC = () => {
         application: string;
       }
       
-      const baseItemMap: Record<string, BaseItemInfo> = {};
-      const baseItemMapNormalized: Record<string, BaseItemInfo> = {};
+      // For BJW: fetch from BOTH barang_masuk_mjm and barang_masuk_bjw
+      // For MJM: fetch only from barang_masuk_mjm
       
-      (baseData || []).forEach(item => {
+      // Fetch base data from BOTH stores
+      const { data: baseMJMData } = await supabase
+        .from('base_mjm')
+        .select('part_number, name, quantity, brand, application');
+      
+      const { data: baseBJWData } = await supabase
+        .from('base_bjw')
+        .select('part_number, name, quantity, brand, application');
+      
+      // Create lookup maps for both stores
+      const baseMJMMap: Record<string, BaseItemInfo> = {};
+      const baseBJWMap: Record<string, BaseItemInfo> = {};
+      const baseMJMMapNormalized: Record<string, BaseItemInfo> = {};
+      const baseBJWMapNormalized: Record<string, BaseItemInfo> = {};
+      
+      (baseMJMData || []).forEach(item => {
         const info: BaseItemInfo = {
           quantity: item.quantity || 0,
           name: item.name || '-',
           brand: item.brand || '-',
           application: item.application || '-'
         };
-        baseItemMap[item.part_number] = info;
-        baseItemMapNormalized[normalizePN(item.part_number)] = info;
+        baseMJMMap[item.part_number] = info;
+        baseMJMMapNormalized[normalizePN(item.part_number)] = info;
+      });
+      
+      (baseBJWData || []).forEach(item => {
+        const info: BaseItemInfo = {
+          quantity: item.quantity || 0,
+          name: item.name || '-',
+          brand: item.brand || '-',
+          application: item.application || '-'
+        };
+        baseBJWMap[item.part_number] = info;
+        baseBJWMapNormalized[normalizePN(item.part_number)] = info;
       });
       
       // Helper to get base item info
-      const getBaseInfo = (pn: string): BaseItemInfo | null => {
-        return baseItemMap[pn] || baseItemMapNormalized[normalizePN(pn)] || null;
+      const getBaseMJMInfo = (pn: string): BaseItemInfo | null => {
+        return baseMJMMap[pn] || baseMJMMapNormalized[normalizePN(pn)] || null;
       };
       
-      // Group by customer (supplier) - ONLY include items that exist in base table
+      const getBaseBJWInfo = (pn: string): BaseItemInfo | null => {
+        return baseBJWMap[pn] || baseBJWMapNormalized[normalizePN(pn)] || null;
+      };
+      
+      // Fetch barang masuk data
+      let masukDataMJM: any[] = [];
+      let masukDataBJW: any[] = [];
+      
+      // Always fetch MJM data (for both BJW and MJM views)
+      let queryMJM = supabase
+        .from('barang_masuk_mjm')
+        .select('part_number, nama_barang, customer, harga_satuan, tempo, created_at')
+        .order('created_at', { ascending: false });
+      
+      if (activeTab === 'TEMPO') {
+        queryMJM = queryMJM.in('tempo', TEMPO_VALUES);
+      } else {
+        queryMJM = queryMJM.eq('tempo', 'CASH');
+      }
+      
+      const { data: mjmData, error: mjmError } = await queryMJM;
+      if (mjmError) throw mjmError;
+      masukDataMJM = mjmData || [];
+      
+      // For BJW view, also fetch BJW data
+      if (isBJW) {
+        let queryBJW = supabase
+          .from('barang_masuk_bjw')
+          .select('part_number, nama_barang, customer, harga_satuan, tempo, created_at')
+          .order('created_at', { ascending: false });
+        
+        if (activeTab === 'TEMPO') {
+          queryBJW = queryBJW.in('tempo', TEMPO_VALUES);
+        } else {
+          queryBJW = queryBJW.eq('tempo', 'CASH');
+        }
+        
+        const { data: bjwData, error: bjwError } = await queryBJW;
+        if (bjwError) throw bjwError;
+        masukDataBJW = bjwData || [];
+      }
+      
+      // Group by customer (supplier)
       const supplierMap: Record<string, Map<string, SupplierItem>> = {};
       
-      (masukData || []).forEach(row => {
+      // Process MJM data
+      masukDataMJM.forEach(row => {
         const supplier = row.customer?.trim() || 'UNKNOWN';
         const pn = row.part_number;
         
         if (!pn) return;
         
-        // Check if item exists in base table - skip if not
-        const baseInfo = getBaseInfo(pn);
-        if (!baseInfo) return; // Skip items not in base table
+        // For BJW view: item must exist in EITHER base table
+        // For MJM view: item must exist in base_mjm
+        const baseMJMInfo = getBaseMJMInfo(pn);
+        const baseBJWInfo = isBJW ? getBaseBJWInfo(pn) : null;
+        
+        if (!isBJW && !baseMJMInfo) return; // MJM view: skip if not in base_mjm
+        if (isBJW && !baseMJMInfo && !baseBJWInfo) return; // BJW view: skip if not in either
+        
+        // Use MJM info primarily, fall back to BJW
+        const baseInfo = baseMJMInfo || baseBJWInfo;
         
         if (!supplierMap[supplier]) {
           supplierMap[supplier] = new Map();
@@ -1319,24 +1459,161 @@ export const BarangKosongView: React.FC = () => {
         
         // Only keep the latest entry per part_number
         if (!supplierMap[supplier].has(pn)) {
-          supplierMap[supplier].set(pn, {
+          const item: SupplierItem = {
             part_number: pn,
-            nama_barang: baseInfo.name || row.nama_barang || '-',
-            current_stock: baseInfo.quantity,
-            last_price: row.harga_satuan || 0,
-            last_order_date: row.created_at,
+            nama_barang: baseInfo?.name || row.nama_barang || '-',
+            current_stock: isBJW ? (baseBJWInfo?.quantity || 0) : (baseMJMInfo?.quantity || 0),
+            current_stock_mjm: baseMJMInfo?.quantity || 0,
+            current_stock_bjw: baseBJWInfo?.quantity || 0,
+            last_price: isBJW ? 0 : (row.harga_satuan || 0),
+            last_price_mjm: row.harga_satuan || 0,
+            last_price_bjw: 0,
+            last_order_date: isBJW ? '' : row.created_at,
+            last_order_date_mjm: row.created_at,
+            last_order_date_bjw: '',
             tempo: row.tempo,
-            brand: baseInfo.brand,
-            application: baseInfo.application
-          });
+            brand: baseInfo?.brand || '-',
+            application: baseInfo?.application || '-'
+          };
+          supplierMap[supplier].set(pn, item);
         }
       });
+      
+      // Process BJW data (for BJW view only)
+      if (isBJW) {
+        masukDataBJW.forEach(row => {
+          const supplier = row.customer?.trim() || 'UNKNOWN';
+          const pn = row.part_number;
+          
+          if (!pn) return;
+          
+          const baseMJMInfo = getBaseMJMInfo(pn);
+          const baseBJWInfo = getBaseBJWInfo(pn);
+          
+          if (!baseMJMInfo && !baseBJWInfo) return;
+          
+          const baseInfo = baseBJWInfo || baseMJMInfo;
+          
+          if (!supplierMap[supplier]) {
+            supplierMap[supplier] = new Map();
+          }
+          
+          const existing = supplierMap[supplier].get(pn);
+          if (existing) {
+            // Update BJW specific data
+            existing.last_price_bjw = row.harga_satuan || 0;
+            existing.last_order_date_bjw = row.created_at;
+            existing.last_price = row.harga_satuan || existing.last_price;
+            existing.last_order_date = row.created_at || existing.last_order_date;
+          } else {
+            // New item from BJW
+            const item: SupplierItem = {
+              part_number: pn,
+              nama_barang: baseInfo?.name || row.nama_barang || '-',
+              current_stock: baseBJWInfo?.quantity || 0,
+              current_stock_mjm: baseMJMInfo?.quantity || 0,
+              current_stock_bjw: baseBJWInfo?.quantity || 0,
+              last_price: row.harga_satuan || 0,
+              last_price_mjm: 0,
+              last_price_bjw: row.harga_satuan || 0,
+              last_order_date: row.created_at,
+              last_order_date_mjm: '',
+              last_order_date_bjw: row.created_at,
+              tempo: row.tempo,
+              brand: baseInfo?.brand || '-',
+              application: baseInfo?.application || '-'
+            };
+            supplierMap[supplier].set(pn, item);
+          }
+        });
+      }
+      
+      // For BJW view: Add items from base tables that have NO supplier (not in any barang_masuk)
+      if (isBJW) {
+        const allPartNumbersWithSupplier = new Set<string>();
+        Object.values(supplierMap).forEach(itemsMap => {
+          itemsMap.forEach((_, pn) => allPartNumbersWithSupplier.add(pn));
+        });
+        
+        // Add items from base_mjm and base_bjw that don't have supplier
+        const noSupplierKey = '⚠️ TANPA SUPPLIER';
+        
+        // Check base_mjm items
+        (baseMJMData || []).forEach(item => {
+          if (!allPartNumbersWithSupplier.has(item.part_number)) {
+            const baseBJWInfo = getBaseBJWInfo(item.part_number);
+            
+            if (!supplierMap[noSupplierKey]) {
+              supplierMap[noSupplierKey] = new Map();
+            }
+            
+            if (!supplierMap[noSupplierKey].has(item.part_number)) {
+              supplierMap[noSupplierKey].set(item.part_number, {
+                part_number: item.part_number,
+                nama_barang: item.name || '-',
+                current_stock: baseBJWInfo?.quantity || 0,
+                current_stock_mjm: item.quantity || 0,
+                current_stock_bjw: baseBJWInfo?.quantity || 0,
+                last_price: 0,
+                last_price_mjm: 0,
+                last_price_bjw: 0,
+                last_order_date: '',
+                last_order_date_mjm: '',
+                last_order_date_bjw: '',
+                tempo: '-',
+                brand: item.brand || '-',
+                application: item.application || '-'
+              });
+              allPartNumbersWithSupplier.add(item.part_number);
+            }
+          }
+        });
+        
+        // Check base_bjw items
+        (baseBJWData || []).forEach(item => {
+          if (!allPartNumbersWithSupplier.has(item.part_number)) {
+            const baseMJMInfo = getBaseMJMInfo(item.part_number);
+            
+            if (!supplierMap[noSupplierKey]) {
+              supplierMap[noSupplierKey] = new Map();
+            }
+            
+            if (!supplierMap[noSupplierKey].has(item.part_number)) {
+              supplierMap[noSupplierKey].set(item.part_number, {
+                part_number: item.part_number,
+                nama_barang: item.name || '-',
+                current_stock: item.quantity || 0,
+                current_stock_mjm: baseMJMInfo?.quantity || 0,
+                current_stock_bjw: item.quantity || 0,
+                last_price: 0,
+                last_price_mjm: 0,
+                last_price_bjw: 0,
+                last_order_date: '',
+                last_order_date_mjm: '',
+                last_order_date_bjw: '',
+                tempo: '-',
+                brand: item.brand || '-',
+                application: item.application || '-'
+              });
+              allPartNumbersWithSupplier.add(item.part_number);
+            }
+          }
+        });
+      }
       
       // Convert to array and sort
       const groups: SupplierGroup[] = Object.entries(supplierMap)
         .map(([supplier, itemsMap]) => {
           const items = Array.from(itemsMap.values())
-            .sort((a, b) => a.current_stock - b.current_stock); // Sort by stock ascending
+            // For BJW: sort by BJW stock ascending, then by MJM stock
+            .sort((a, b) => {
+              if (isBJW) {
+                const stockDiff = (a.current_stock_bjw || 0) - (b.current_stock_bjw || 0);
+                if (stockDiff !== 0) return stockDiff;
+                return (a.current_stock_mjm || 0) - (b.current_stock_mjm || 0);
+              }
+              return a.current_stock - b.current_stock;
+            });
           return {
             supplier,
             items,
@@ -1344,7 +1621,12 @@ export const BarangKosongView: React.FC = () => {
           };
         })
         .filter(g => g.totalItems > 0)
-        .sort((a, b) => b.totalItems - a.totalItems); // Sort suppliers by item count
+        // Sort: "TANPA SUPPLIER" at the end, others by item count
+        .sort((a, b) => {
+          if (a.supplier.includes('TANPA SUPPLIER')) return 1;
+          if (b.supplier.includes('TANPA SUPPLIER')) return -1;
+          return b.totalItems - a.totalItems;
+        });
       
       setSupplierGroups(groups);
       
@@ -1428,12 +1710,15 @@ export const BarangKosongView: React.FC = () => {
       result = result.filter(g => g.supplier === selectedSupplierFilter);
     }
     
-    // Filter by selected part number
+    // Filter by part number search (partial match)
     if (selectedPartNoFilter) {
+      const searchPN = selectedPartNoFilter.toUpperCase();
       result = result
         .map(group => ({
           ...group,
-          items: group.items.filter(item => item.part_number === selectedPartNoFilter)
+          items: group.items.filter(item => 
+            item.part_number.toUpperCase().includes(searchPN)
+          )
         }))
         .filter(g => g.items.length > 0);
     }
@@ -1599,14 +1884,21 @@ export const BarangKosongView: React.FC = () => {
     }
   };
   
-  // Stats
+  // Stats - for BJW view, use BJW stock specifically
+  const isBJWView = selectedStore === 'bjw';
   const totalSuppliers = filteredGroups.length;
   const totalItems = filteredGroups.reduce((sum, g) => sum + g.items.length, 0);
   const lowStockItems = filteredGroups.reduce((sum, g) => 
-    sum + g.items.filter(i => i.current_stock <= 5).length, 0
+    sum + g.items.filter(i => {
+      const stock = isBJWView ? (i.current_stock_bjw || 0) : i.current_stock;
+      return stock > 0 && stock <= 5;
+    }).length, 0
   );
   const emptyStockItems = filteredGroups.reduce((sum, g) => 
-    sum + g.items.filter(i => i.current_stock === 0).length, 0
+    sum + g.items.filter(i => {
+      const stock = isBJWView ? (i.current_stock_bjw || 0) : i.current_stock;
+      return stock === 0;
+    }).length, 0
   );
   
   return (
@@ -1701,20 +1993,24 @@ export const BarangKosongView: React.FC = () => {
             <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" />
           </div>
           
-          {/* Part Number Dropdown */}
+          {/* Part Number Search Input */}
           <div className="relative">
             <Package size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
-            <select
+            <input
+              type="text"
+              placeholder={`Cari Part Number (${allPartNumbers.length} item)...`}
               value={selectedPartNoFilter}
-              onChange={(e) => setSelectedPartNoFilter(e.target.value)}
-              className="w-full pl-10 pr-8 py-3 bg-gray-900 border border-gray-700 rounded-lg text-gray-200 focus:border-blue-500 outline-none transition-colors appearance-none cursor-pointer"
-            >
-              <option value="">Semua Part Number ({allPartNumbers.length})</option>
-              {allPartNumbers.map(p => (
-                <option key={p} value={p}>{p}</option>
-              ))}
-            </select>
-            <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" />
+              onChange={(e) => setSelectedPartNoFilter(e.target.value.toUpperCase())}
+              className="w-full pl-10 pr-10 py-3 bg-gray-900 border border-gray-700 rounded-lg text-gray-200 focus:border-blue-500 outline-none transition-colors font-mono"
+            />
+            {selectedPartNoFilter && (
+              <button
+                onClick={() => setSelectedPartNoFilter('')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300"
+              >
+                <X size={16} />
+              </button>
+            )}
           </div>
           
           {/* Search Input */}
@@ -1780,14 +2076,23 @@ export const BarangKosongView: React.FC = () => {
           <div className="bg-gray-900/50 rounded-lg p-3 text-center">
             <Layers size={20} className="mx-auto text-yellow-400 mb-1" />
             <p className="text-lg font-bold text-yellow-400">{lowStockItems}</p>
-            <p className="text-xs text-gray-400">Stok Menipis</p>
+            <p className="text-xs text-gray-400">{isBJWView ? 'Stok Menipis (BJW)' : 'Stok Menipis'}</p>
           </div>
           <div className="bg-gray-900/50 rounded-lg p-3 text-center">
             <PackageX size={20} className="mx-auto text-red-400 mb-1" />
             <p className="text-lg font-bold text-red-400">{emptyStockItems}</p>
-            <p className="text-xs text-gray-400">Stok Habis</p>
+            <p className="text-xs text-gray-400">{isBJWView ? 'Stok Habis (BJW)' : 'Stok Habis'}</p>
           </div>
         </div>
+        
+        {/* Info banner for BJW view */}
+        {isBJWView && (
+          <div className="mt-3 p-3 bg-purple-900/20 border border-purple-800/30 rounded-lg">
+            <p className="text-xs text-purple-300">
+              ℹ️ <strong>Mode BJW:</strong> Menampilkan semua barang dari importir MJM + BJW. Kolom stok dan harga ditampilkan terpisah untuk perbandingan.
+            </p>
+          </div>
+        )}
       </div>
       
       {/* Content */}
@@ -1817,6 +2122,7 @@ export const BarangKosongView: React.FC = () => {
                 onRemoveFromCart={removeFromCart}
                 onUpdateQty={updateCartQty}
                 onViewHistory={setHistoryItem}
+                isBJW={selectedStore === 'bjw'}
               />
             ))
           )}
