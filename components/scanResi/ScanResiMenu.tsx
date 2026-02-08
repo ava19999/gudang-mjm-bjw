@@ -1,6 +1,6 @@
 // FILE: components/scanResi/ScanResiMenu.tsx
 import React, { useState } from 'react';
-import { Scan, ChevronDown, ChevronUp, Camera, FileEdit, History, Users } from 'lucide-react';
+import { Scan, ChevronDown, ChevronUp, Camera, FileEdit, History, Users, Zap } from 'lucide-react';
 import { ActiveView } from '../../types/ui';
 
 interface ScanResiMenuProps {
@@ -23,7 +23,7 @@ export const ScanResiMenu: React.FC<ScanResiMenuProps> = ({
   // Use external state for mobile, internal for desktop
   const isOpen = isMobile && externalIsOpen !== undefined ? externalIsOpen : internalIsOpen;
   
-  const isScanResiActive = ['scan_resi_stage1', 'scan_resi_stage2', 'scan_resi_stage3', 'scan_resi_reseller', 'scan_resi_history'].includes(activeView);
+  const isScanResiActive = ['scan_resi_stage1', 'scan_resi_stage2', 'scan_resi_stage3', 'scan_resi_reseller', 'scan_resi_history', 'kilat_management'].includes(activeView);
 
   const handleMainClick = (e: React.MouseEvent) => {
     if (isMobile && onToggle) {
@@ -105,6 +105,20 @@ export const ScanResiMenu: React.FC<ScanResiMenuProps> = ({
                 <Users size={16} />
               </div>
               <span className="text-sm font-medium">Reseller</span>
+            </button>
+            
+            <button
+              onClick={() => {
+                setActiveView('kilat_management');
+              }}
+              className={`w-full px-3 py-2.5 text-left hover:bg-gray-700/80 transition-all duration-150 flex items-center gap-2.5 active:scale-[0.98] ${
+                activeView === 'kilat_management' ? 'bg-gradient-to-r from-yellow-900/30 to-transparent text-yellow-400 shadow-inner' : 'text-gray-300'
+              }`}
+            >
+              <div className={`p-1 rounded-lg ${activeView === 'kilat_management' ? 'bg-yellow-900/40' : 'bg-gray-700/50'}`}>
+                <Zap size={16} />
+              </div>
+              <span className="text-sm font-medium">KILAT</span>
             </button>
             
             <button
@@ -209,6 +223,19 @@ export const ScanResiMenu: React.FC<ScanResiMenuProps> = ({
           >
             <Users size={16} />
             <span className="text-sm font-medium">Reseller</span>
+          </button>
+          
+          <button
+            onClick={() => {
+              setActiveView('kilat_management');
+              setInternalIsOpen(false);
+            }}
+            className={`w-full px-4 py-3 text-left hover:bg-gray-700 transition-colors flex items-center gap-2 ${
+              activeView === 'kilat_management' ? 'bg-gray-700 text-yellow-400' : 'text-gray-300'
+            }`}
+          >
+            <Zap size={16} />
+            <span className="text-sm font-medium">KILAT Management</span>
           </button>
           
           <button

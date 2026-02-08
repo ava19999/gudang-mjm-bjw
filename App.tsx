@@ -24,6 +24,7 @@ import { ScanResiStage3 } from './components/scanResi/ScanResiStage3';
 import { RiwayatScanResi } from './components/scanResi/RiwayatScanResi';
 import { ResellerView } from './components/scanResi/ResellerView';
 import { KirimBarangView } from './components/gudang/KirimBarangView';
+import { KilatManagementView } from './components/kilat/KilatManagementView';
 
 // --- NEW SPLIT COMPONENTS ---
 import { Toast } from './components/common/Toast';
@@ -318,6 +319,7 @@ const AppContent: React.FC = () => {
         {activeView === 'scan_resi_stage3' && isAdmin && <ScanResiStage3 onRefresh={refreshData} />}
         {activeView === 'scan_resi_reseller' && isAdmin && <ResellerView onRefresh={refreshData} refreshTrigger={refreshTrigger} />}
         {activeView === 'scan_resi_history' && isAdmin && <RiwayatScanResi />}
+        {activeView === 'kilat_management' && isAdmin && <KilatManagementView />}
         {activeView === 'kirim_barang' && isAdmin && <KirimBarangView />}
         {activeView === 'orders' && isAdmin && <OrderManagement />}
         {activeView === 'orders' && !isAdmin && <CustomerOrderView orders={[]} currentCustomerName={userName} />}

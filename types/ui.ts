@@ -18,4 +18,5 @@ export type ActiveView =
   | 'scan_resi_stage3'
   | 'scan_resi_reseller'
   | 'scan_resi_history'
+  | 'kilat_management'
   | 'kirim_barang';

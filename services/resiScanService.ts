@@ -759,6 +759,83 @@ export const fetchPendingCSVItems = async (store: string | null) => {
   return filteredData;
 };
 
+// Helper: Cek apakah item ada di KILAT prestock (sudah dikirim ke gudang Shopee)
+const checkKilatPrestock = async (partNumber: string, qty: number, store: string | null): Promise<{
+  isKilat: boolean;
+  kilatId?: string;
+  qtySisa?: number;
+}> => {
+  const prestockTable = store === 'mjm' ? 'kilat_prestock_mjm' : 'kilat_prestock_bjw';
+  
+  try {
+    const { data } = await supabase
+      .from(prestockTable)
+      .select('id, qty_kirim, qty_terjual')
+      .eq('part_number', partNumber)
+      .in('status', ['MENUNGGU_TERJUAL', 'SEBAGIAN_TERJUAL'])
+      .order('tanggal_kirim', { ascending: true }) // FIFO
+      .limit(1);
+    
+    if (data && data.length > 0) {
+      const kilat = data[0];
+      const qtySisa = kilat.qty_kirim - kilat.qty_terjual;
+      if (qtySisa >= qty) {
+        return { isKilat: true, kilatId: kilat.id, qtySisa };
+      }
+    }
+  } catch (err) {
+    console.error('checkKilatPrestock error:', err);
+  }
+  
+  return { isKilat: false };
+};
+
+// Helper: Update KILAT prestock saat terjual
+const updateKilatSold = async (kilatId: string, qtySold: number, saleData: any, store: string | null): Promise<boolean> => {
+  const prestockTable = store === 'mjm' ? 'kilat_prestock_mjm' : 'kilat_prestock_bjw';
+  const penjualanTable = store === 'mjm' ? 'kilat_penjualan_mjm' : 'kilat_penjualan_bjw';
+  
+  try {
+    // Get current kilat data
+    const { data: kilat } = await supabase
+      .from(prestockTable)
+      .select('*')
+      .eq('id', kilatId)
+      .single();
+    
+    if (!kilat) return false;
+    
+    // Update qty_terjual
+    const newQtyTerjual = kilat.qty_terjual + qtySold;
+    await supabase
+      .from(prestockTable)
+      .update({ qty_terjual: newQtyTerjual })
+      .eq('id', kilatId);
+    
+    // Insert ke kilat_penjualan
+    await supabase.from(penjualanTable).insert([{
+      kilat_id: kilatId,
+      no_pesanan: saleData.order_id || saleData.no_pesanan,
+      resi_penjualan: saleData.resi,
+      customer: saleData.customer,
+      part_number: saleData.part_number,
+      nama_barang: saleData.nama_pesanan,
+      qty_jual: qtySold,
+      harga_satuan: saleData.harga_satuan || 0,
+      harga_jual: saleData.harga_total || 0,
+      tanggal_jual: getWIBDate().toISOString(),
+      source: 'CSV',
+      ecommerce: saleData.ecommerce
+    }]);
+    
+    console.log(`[KILAT] Updated prestock ${kilatId}: +${qtySold} sold, total ${newQtyTerjual}`);
+    return true;
+  } catch (err) {
+    console.error('updateKilatSold error:', err);
+    return false;
+  }
+};
+
 export const processBarangKeluarBatch = async (items: any[], store: string | null) => {
   const scanTable = getTableName(store);
   const logTable = getBarangKeluarTable(store);
@@ -770,27 +847,52 @@ export const processBarangKeluarBatch = async (items: any[], store: string | nul
 
   for (const item of items) {
     try {
-      // 1. Cek & Potong Stok
-      const { data: stock } = await supabase
-        .from(stockTable)
-        .select('quantity')
-        .eq('part_number', item.part_number)
-        .single();
+      // === KILAT CHECK: Cek apakah item ini ada di KILAT prestock ===
+      // Jika ada di prestock, berarti stock sudah dikurangi saat kirim ke gudang Shopee
+      // Jadi TIDAK perlu kurangi stock lagi, hanya catat penjualan
+      const kilatCheck = await checkKilatPrestock(item.part_number, item.qty_keluar, store);
+      
+      let newStock = 0;
+      let skipStockReduction = false;
+      
+      if (kilatCheck.isKilat && kilatCheck.kilatId) {
+        // Item dari KILAT prestock - stock sudah dikurangi sebelumnya
+        console.log(`[KILAT] Item ${item.part_number} matched with prestock ${kilatCheck.kilatId}`);
+        skipStockReduction = true;
         
-      if (!stock || stock.quantity < item.qty_keluar) {
-        errors.push(`Stok ${item.part_number} Habis/Kurang (Sisa: ${stock?.quantity || 0})`);
-        continue;
-      }
+        // Update KILAT prestock
+        await updateKilatSold(kilatCheck.kilatId, item.qty_keluar, item, store);
+        
+        // Get current stock untuk logging (tanpa mengurangi)
+        const { data: stock } = await supabase
+          .from(stockTable)
+          .select('quantity')
+          .eq('part_number', item.part_number)
+          .single();
+        newStock = stock?.quantity || 0;
+      } else {
+        // Normal flow: Cek & Potong Stok
+        const { data: stock } = await supabase
+          .from(stockTable)
+          .select('quantity')
+          .eq('part_number', item.part_number)
+          .single();
+          
+        if (!stock || stock.quantity < item.qty_keluar) {
+          errors.push(`Stok ${item.part_number} Habis/Kurang (Sisa: ${stock?.quantity || 0})`);
+          continue;
+        }
 
-      const newStock = stock.quantity - item.qty_keluar;
-      const { error: stockErr } = await supabase
-        .from(stockTable)
-        .update({ quantity: newStock })
-        .eq('part_number', item.part_number);
+        newStock = stock.quantity - item.qty_keluar;
+        const { error: stockErr } = await supabase
+          .from(stockTable)
+          .update({ quantity: newStock })
+          .eq('part_number', item.part_number);
 
-      if (stockErr) {
-        errors.push(`Gagal update stok ${item.part_number}: ${stockErr.message}`);
-        continue;
+        if (stockErr) {
+          errors.push(`Gagal update stok ${item.part_number}: ${stockErr.message}`);
+          continue;
+        }
       }
 
       // 2. Simpan Log Barang Keluar
@@ -808,7 +910,7 @@ export const processBarangKeluarBatch = async (items: any[], store: string | nul
         harga_satuan: item.harga_satuan,
         harga_total: item.harga_total,
         stock_ahir: newStock,
-        tempo: 'LUNAS',
+        tempo: skipStockReduction ? 'KILAT' : 'LUNAS', // Mark as KILAT if from prestock
         // [UBAH] Tambahkan created_at dengan getWIBDate()
         created_at: getWIBDate().toISOString()
       };
