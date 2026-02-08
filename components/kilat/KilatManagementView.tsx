@@ -1,10 +1,13 @@
 // FILE: components/kilat/KilatManagementView.tsx
-// Komponen utama untuk mengelola sistem KILAT (Pre-Ship ke gudang e-commerce)
+// Komponen untuk mengelola sistem KILAT Pre-Ship (TERPISAH dari Scan Resi KILAT)
+// 
+// PERBEDAAN:
+// - Scan Resi KILAT (Stage 3) = Pesanan KILAT yang sudah masuk, diproses via scan resi biasa
+// - KILAT Pre-Ship (Menu ini) = Barang dikirim ke gudang Shopee SEBELUM ada order
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useStore } from '../../context/StoreContext';
 import {
-  fetchKilatFromScanResi,
   fetchAllKilatPrestock,
   fetchKilatPrestockPending,
   addKilatPrestock,
@@ -13,10 +16,8 @@ import {
   fetchKilatPenjualan,
   addKilatPenjualanManual,
   getKilatStats,
-  migrateKilatFromScanResi,
   KilatPrestock,
-  KilatPenjualan,
-  KilatFromScanResi
+  KilatPenjualan
 } from '../../services/kilatService';
 import { supabase } from '../../services/supabaseClient';
 import {
@@ -42,10 +43,10 @@ import {
   Calendar,
   DollarSign,
   ArrowRightLeft,
-  Database
+  Info
 } from 'lucide-react';
 
-type TabType = 'scan_resi' | 'prestock' | 'penjualan' | 'input';
+type TabType = 'prestock' | 'penjualan' | 'input';
 type StatusFilter = 'all' | 'MENUNGGU_TERJUAL' | 'SEBAGIAN_TERJUAL' | 'HABIS_TERJUAL';
 
 interface Toast {
@@ -57,14 +58,13 @@ export const KilatManagementView: React.FC = () => {
   const { selectedStore: currentStore } = useStore();
   
   // State
-  const [activeTab, setActiveTab] = useState<TabType>('scan_resi');
+  const [activeTab, setActiveTab] = useState<TabType>('prestock');
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [toast, setToast] = useState<Toast | null>(null);
   
   // Data states
-  const [scanResiKilat, setScanResiKilat] = useState<KilatFromScanResi[]>([]);
   const [prestockData, setPrestockData] = useState<KilatPrestock[]>([]);
   const [penjualanData, setPenjualanData] = useState<KilatPenjualan[]>([]);
   const [stats, setStats] = useState<{
@@ -108,14 +108,12 @@ export const KilatManagementView: React.FC = () => {
     setLoading(true);
     
     try {
-      const [scanResi, prestock, penjualan, statsData] = await Promise.all([
-        fetchKilatFromScanResi(currentStore, { includeCompleted: false, limit: 200 }),
+      const [prestock, penjualan, statsData] = await Promise.all([
         fetchAllKilatPrestock(currentStore, { limit: 500 }),
         fetchKilatPenjualan(currentStore, { limit: 200 }),
         getKilatStats(currentStore)
       ]);
       
-      setScanResiKilat(scanResi);
       setPrestockData(prestock);
       setPenjualanData(penjualan);
       setStats(statsData);
@@ -196,22 +194,6 @@ export const KilatManagementView: React.FC = () => {
     setLoading(false);
   };
   
-  // Handle migrate
-  const handleMigrate = async () => {
-    if (!confirm('Migrate semua data KILAT dari Scan Resi ke sistem baru?')) return;
-    
-    setLoading(true);
-    const result = await migrateKilatFromScanResi(currentStore);
-    
-    if (result.success) {
-      showToast(result.message, 'success');
-      loadData();
-    } else {
-      showToast(result.message, 'error');
-    }
-    setLoading(false);
-  };
-  
   // Filtered data
   const filteredPrestock = useMemo(() => {
     let data = prestockData;
@@ -231,16 +213,6 @@ export const KilatManagementView: React.FC = () => {
     
     return data;
   }, [prestockData, statusFilter, searchTerm]);
-  
-  const filteredScanResi = useMemo(() => {
-    if (!searchTerm) return scanResiKilat;
-    const term = searchTerm.toLowerCase();
-    return scanResiKilat.filter(d =>
-      d.resi?.toLowerCase().includes(term) ||
-      d.part_number?.toLowerCase().includes(term) ||
-      d.customer?.toLowerCase().includes(term)
-    );
-  }, [scanResiKilat, searchTerm]);
   
   // Status badge
   const getStatusBadge = (status: string) => {
@@ -298,24 +270,24 @@ export const KilatManagementView: React.FC = () => {
           >
             <RefreshCw size={18} className={`text-gray-300 ${loading ? 'animate-spin' : ''}`} />
           </button>
-          
-          <button
-            onClick={handleMigrate}
-            disabled={loading}
-            className="px-3 py-2 bg-purple-900/50 hover:bg-purple-800/50 text-purple-300 rounded-lg transition-colors flex items-center gap-2 text-sm"
-          >
-            <Database size={16} />
-            <span className="hidden md:inline">Migrate Data</span>
-          </button>
+        </div>
+      </div>
+      
+      {/* Info Banner */}
+      <div className="bg-yellow-900/20 border border-yellow-700/30 rounded-lg p-3 flex items-start gap-3">
+        <Info size={18} className="text-yellow-400 mt-0.5 flex-shrink-0" />
+        <div className="text-sm text-yellow-200/80">
+          <p className="font-medium text-yellow-300 mb-1">Sistem KILAT Pre-Ship</p>
+          <p>Input barang yang dikirim ke gudang Shopee sebelum terjual. Ketika CSV diimport di Scan Resi, sistem akan otomatis match dan tidak mengurangi stock lagi.</p>
         </div>
       </div>
       
       {/* Stats Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
         <div className="bg-gradient-to-br from-yellow-900/30 to-yellow-900/10 border border-yellow-800/30 rounded-xl p-4">
           <div className="flex items-center gap-2 text-yellow-400 mb-1">
             <Clock size={18} />
-            <span className="text-sm font-medium">Menunggu</span>
+            <span className="text-sm font-medium">Menunggu Terjual</span>
           </div>
           <div className="text-2xl font-bold text-white">{stats.totalPending}</div>
           <div className="text-xs text-gray-400">{stats.totalQtyPending} pcs</div>
@@ -324,7 +296,7 @@ export const KilatManagementView: React.FC = () => {
         <div className="bg-gradient-to-br from-green-900/30 to-green-900/10 border border-green-800/30 rounded-xl p-4">
           <div className="flex items-center gap-2 text-green-400 mb-1">
             <CheckCircle size={18} />
-            <span className="text-sm font-medium">Terjual</span>
+            <span className="text-sm font-medium">Sudah Terjual</span>
           </div>
           <div className="text-2xl font-bold text-white">{stats.totalTerjual}</div>
           <div className="text-xs text-gray-400">{stats.totalQtyTerjual} pcs</div>
@@ -336,23 +308,13 @@ export const KilatManagementView: React.FC = () => {
             <span className="text-sm font-medium">Avg. Aging</span>
           </div>
           <div className="text-2xl font-bold text-white">{stats.avgAgingDays}</div>
-          <div className="text-xs text-gray-400">hari</div>
-        </div>
-        
-        <div className="bg-gradient-to-br from-purple-900/30 to-purple-900/10 border border-purple-800/30 rounded-xl p-4">
-          <div className="flex items-center gap-2 text-purple-400 mb-1">
-            <Package size={18} />
-            <span className="text-sm font-medium">Dari Scan Resi</span>
-          </div>
-          <div className="text-2xl font-bold text-white">{scanResiKilat.length}</div>
-          <div className="text-xs text-gray-400">entries</div>
+          <div className="text-xs text-gray-400">hari di gudang</div>
         </div>
       </div>
       
       {/* Tabs */}
       <div className="flex overflow-x-auto gap-1 bg-gray-800/50 p-1 rounded-lg">
         {[
-          { id: 'scan_resi', label: 'Dari Scan Resi', icon: Database },
           { id: 'prestock', label: 'Prestock', icon: Package },
           { id: 'penjualan', label: 'Penjualan', icon: ShoppingCart },
           { id: 'input', label: 'Input Baru', icon: Plus }
@@ -410,73 +372,6 @@ export const KilatManagementView: React.FC = () => {
           </div>
         ) : (
           <>
-            {/* Tab: Scan Resi */}
-            {activeTab === 'scan_resi' && (
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead className="bg-gray-900/50">
-                    <tr className="text-left text-gray-400 text-sm">
-                      <th className="px-4 py-3">Tanggal</th>
-                      <th className="px-4 py-3">Resi</th>
-                      <th className="px-4 py-3">Part Number</th>
-                      <th className="px-4 py-3">Nama Barang</th>
-                      <th className="px-4 py-3">Customer</th>
-                      <th className="px-4 py-3">Qty</th>
-                      <th className="px-4 py-3">Status</th>
-                      <th className="px-4 py-3">Aksi</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-700/50">
-                    {filteredScanResi.length === 0 ? (
-                      <tr>
-                        <td colSpan={8} className="px-4 py-8 text-center text-gray-500">
-                          Tidak ada data KILAT dari Scan Resi
-                        </td>
-                      </tr>
-                    ) : (
-                      filteredScanResi.map((item) => (
-                        <tr key={item.id} className="hover:bg-gray-700/30">
-                          <td className="px-4 py-3 text-gray-300 text-sm">
-                            {new Date(item.tanggal).toLocaleDateString('id-ID')}
-                          </td>
-                          <td className="px-4 py-3 text-white font-mono text-sm">{item.resi}</td>
-                          <td className="px-4 py-3 text-yellow-400 font-mono text-sm">{item.part_number || '-'}</td>
-                          <td className="px-4 py-3 text-gray-300 text-sm max-w-[200px] truncate">{item.nama_produk || '-'}</td>
-                          <td className="px-4 py-3 text-gray-300 text-sm">{item.customer || '-'}</td>
-                          <td className="px-4 py-3 text-white text-sm">{item.jumlah || 1}</td>
-                          <td className="px-4 py-3">{getStatusBadge(item.status)}</td>
-                          <td className="px-4 py-3">
-                            <button
-                              onClick={() => {
-                                // Add to prestock from scan_resi
-                                if (item.part_number) {
-                                  addKilatPrestock(currentStore, {
-                                    scan_resi_id: item.id,
-                                    resi_kirim: item.resi,
-                                    part_number: item.part_number,
-                                    nama_barang: item.nama_produk,
-                                    qty_kirim: item.jumlah || 1,
-                                    sub_toko: item.sub_toko
-                                  }, false).then(() => {
-                                    showToast('Berhasil ditambahkan ke Prestock', 'success');
-                                    loadData();
-                                  });
-                                }
-                              }}
-                              className="p-1.5 bg-yellow-900/50 hover:bg-yellow-800/50 text-yellow-400 rounded-lg"
-                              title="Tambah ke Prestock"
-                            >
-                              <Plus size={16} />
-                            </button>
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            )}
-            
             {/* Tab: Prestock */}
             {activeTab === 'prestock' && (
               <div className="overflow-x-auto">

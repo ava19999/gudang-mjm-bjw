@@ -128,30 +128,40 @@ CREATE TABLE IF NOT EXISTS kilat_penjualan_bjw (
 -- 3. VIEW UNTUK KILAT SUMMARY (Menghitung qty_sisa otomatis)
 -- ============================================================================
 
-CREATE OR REPLACE VIEW kilat_summary_mjm AS
-SELECT 
-  kp.*,
-  (kp.qty_kirim - kp.qty_terjual) AS qty_sisa,
-  CASE 
-    WHEN kp.qty_terjual >= kp.qty_kirim THEN 'HABIS_TERJUAL'
-    WHEN kp.qty_terjual > 0 THEN 'SEBAGIAN_TERJUAL'
-    ELSE 'MENUNGGU_TERJUAL'
-  END AS status_calculated,
-  -- Aging: berapa hari sejak dikirim
-  EXTRACT(DAY FROM (NOW() - kp.tanggal_kirim)) AS aging_days
-FROM kilat_prestock_mjm kp;
 
-CREATE OR REPLACE VIEW kilat_summary_bjw AS
+-- View untuk KILAT yang masih pending (belum terjual)
+CREATE OR REPLACE VIEW kilat_pending_mjm AS
 SELECT 
   kp.*,
   (kp.qty_kirim - kp.qty_terjual) AS qty_sisa,
-  CASE 
-    WHEN kp.qty_terjual >= kp.qty_kirim THEN 'HABIS_TERJUAL'
-    WHEN kp.qty_terjual > 0 THEN 'SEBAGIAN_TERJUAL'
-    ELSE 'MENUNGGU_TERJUAL'
-  END AS status_calculated,
   EXTRACT(DAY FROM (NOW() - kp.tanggal_kirim)) AS aging_days
-FROM kilat_prestock_bjw kp;
+FROM kilat_prestock_mjm kp
+WHERE kp.status = 'MENUNGGU_TERJUAL';
+
+CREATE OR REPLACE VIEW kilat_pending_bjw AS
+SELECT 
+  kp.*,
+  (kp.qty_kirim - kp.qty_terjual) AS qty_sisa,
+  EXTRACT(DAY FROM (NOW() - kp.tanggal_kirim)) AS aging_days
+FROM kilat_prestock_bjw kp
+WHERE kp.status = 'MENUNGGU_TERJUAL';
+
+-- View untuk KILAT yang sudah terjual (sebagian/habis)
+CREATE OR REPLACE VIEW kilat_sold_mjm AS
+SELECT 
+  kp.*,
+  (kp.qty_kirim - kp.qty_terjual) AS qty_sisa,
+  EXTRACT(DAY FROM (NOW() - kp.tanggal_kirim)) AS aging_days
+FROM kilat_prestock_mjm kp
+WHERE kp.status IN ('SEBAGIAN_TERJUAL', 'HABIS_TERJUAL');
+
+CREATE OR REPLACE VIEW kilat_sold_bjw AS
+SELECT 
+  kp.*,
+  (kp.qty_kirim - kp.qty_terjual) AS qty_sisa,
+  EXTRACT(DAY FROM (NOW() - kp.tanggal_kirim)) AS aging_days
+FROM kilat_prestock_bjw kp
+WHERE kp.status IN ('SEBAGIAN_TERJUAL', 'HABIS_TERJUAL');
 
 -- ============================================================================
 -- 4. INDEXES FOR PERFORMANCE
