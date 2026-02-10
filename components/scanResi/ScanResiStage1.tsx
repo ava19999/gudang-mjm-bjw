@@ -129,10 +129,17 @@ export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh, refre
   const [searchTerm, setSearchTerm] = useState('');
   const [searchEcommerce, setSearchEcommerce] = useState('');
   const [searchToko, setSearchToko] = useState('');
+  const [activeResiTab, setActiveResiTab] = useState<'regular' | 'kilat'>('regular');
 
   // Ambil unique e-commerce dan toko dari data
-  const ecommerceOptions = Array.from(new Set(resiList.map(r => r.ecommerce))).filter(Boolean);
-  const tokoOptions = Array.from(new Set(resiList.map(r => r.sub_toko))).filter(Boolean);
+  const isKilatResi = (resi: ResiScanStage) => resi.ecommerce?.toUpperCase().includes('KILAT');
+  const kilatResiCount = resiList.filter(isKilatResi).length;
+  const regularResiCount = resiList.length - kilatResiCount;
+  const baseResiList = activeResiTab === 'kilat'
+    ? resiList.filter(isKilatResi)
+    : resiList.filter(resi => !isKilatResi(resi));
+  const ecommerceOptions = Array.from(new Set(baseResiList.map(r => r.ecommerce))).filter(Boolean);
+  const tokoOptions = Array.from(new Set(baseResiList.map(r => r.sub_toko))).filter(Boolean);
   
   // State untuk Reseller
   const [showResellerForm, setShowResellerForm] = useState(false);
@@ -395,7 +402,7 @@ export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh, refre
     }
   };
   
-  const filteredResiList = resiList.filter(resi => {
+  const filteredResiList = baseResiList.filter(resi => {
     const matchSearch =
       resi.resi.toLowerCase().includes(searchTerm.toLowerCase()) ||
       resi.ecommerce.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -753,6 +760,28 @@ export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh, refre
             <div className="text-sm text-gray-400">
               Total: <span className="font-semibold text-blue-400">{filteredResiList.length}</span>
             </div>
+          </div>
+          <div className="flex items-center gap-2 mb-4">
+            <button
+              onClick={() => setActiveResiTab('regular')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                activeResiTab === 'regular'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+              }`}
+            >
+              Reguler ({regularResiCount})
+            </button>
+            <button
+              onClick={() => setActiveResiTab('kilat')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                activeResiTab === 'kilat'
+                  ? 'bg-yellow-500 text-black'
+                  : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+              }`}
+            >
+              KILAT ({kilatResiCount})
+            </button>
           </div>
           {/* Filter Bar */}
           <div className="flex flex-col md:flex-row gap-2">
