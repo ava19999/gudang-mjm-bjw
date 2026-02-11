@@ -16,15 +16,108 @@ interface PartNumberOption {
   name: string;
 }
 
+interface NormalizedOption extends PartNumberOption {
+  normPart: string;
+  normName: string;
+}
+
+const parseSkuCsv = (sku: string | null | undefined): string[] => {
+  if (!sku || !sku.trim()) return [];
+  const input = sku.trim();
+  const result: string[] = [];
+  let current = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < input.length; i++) {
+    const ch = input[i];
+    if (ch === '"') {
+      if (inQuotes && input[i + 1] === '"') {
+        current += '"';
+        i += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+
+    if (ch === ',' && !inQuotes) {
+      const value = current.trim();
+      if (value) result.push(value);
+      current = '';
+      continue;
+    }
+
+    current += ch;
+  }
+
+  const last = current.trim();
+  if (last) result.push(last);
+  return result;
+};
+
+const escapeSkuCsv = (value: string): string => {
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+  if (/[",]/.test(trimmed)) {
+    return `"${trimmed.replace(/"/g, '""')}"`;
+  }
+  return trimmed;
+};
+
 // Helper to parse SKU string to array
 const parseSkus = (sku: string | null | undefined): string[] => {
-  if (!sku || !sku.trim()) return [];
-  return sku.split(',').map(s => s.trim()).filter(Boolean);
+  return parseSkuCsv(sku);
 };
 
 // Helper to join SKU array to string
 const joinSkus = (skus: string[]): string => {
-  return skus.filter(Boolean).join(', ');
+  return skus.map(escapeSkuCsv).filter(Boolean).join(', ');
+};
+
+const stripZeroDecimal = (value: string): string => {
+  return value.replace(/(\d+)[.,](0+)(?=\b)/g, '$1');
+};
+
+// Normalize input for matching SKUs (ignore punctuation)
+const normalizeSkuKey = (value: string): string => {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+};
+
+const findBestSkuMatch = (rawText: string, options: NormalizedOption[]): string | null => {
+  const normalizedRaw = normalizeSkuKey(stripZeroDecimal(rawText));
+  if (!normalizedRaw) return null;
+
+  const exact = options.find(o => o.normPart === normalizedRaw);
+  if (exact) return exact.part_number;
+
+  const candidates = options.filter(o => o.normPart && normalizedRaw.includes(o.normPart));
+  if (candidates.length === 0) return null;
+
+  candidates.sort((a, b) => b.normPart.length - a.normPart.length);
+  return candidates[0].part_number || null;
+};
+
+const parseRawSkuInput = (rawText: string, options: NormalizedOption[]): string[] => {
+  if (!rawText.trim()) return [];
+  const tokens = rawText.split(/[\r\n\t]+/).map(s => s.trim()).filter(Boolean);
+  const results: string[] = [];
+
+  const addMatch = (text: string) => {
+    const match = findBestSkuMatch(text, options);
+    if (match) results.push(match);
+  };
+
+  if (tokens.length <= 1) {
+    addMatch(rawText);
+  } else {
+    tokens.forEach(addMatch);
+  }
+
+  return Array.from(new Set(results));
 };
 
 // Multi-SKU Input with Chips/Tags - Auto-save on select with multi-select support
@@ -49,18 +142,27 @@ const MultiSkuInput: React.FC<{
   const dropdownRef = useRef<HTMLDivElement>(null);
   const optionRefs = useRef<Map<number, HTMLDivElement>>(new Map());
 
+  const normalizedOptions = useMemo<NormalizedOption[]>(() => {
+    return options.map(opt => ({
+      ...opt,
+      normPart: normalizeSkuKey(stripZeroDecimal(opt.part_number)),
+      normName: normalizeSkuKey(stripZeroDecimal(opt.name || ''))
+    }));
+  }, [options]);
+
   const filteredOptions = useMemo(() => {
     if (!inputValue.trim()) return [];
-    const lowerSearch = inputValue.toLowerCase();
+    const normalizedSearch = normalizeSkuKey(stripZeroDecimal(inputValue));
+    if (!normalizedSearch) return [];
     // Filter out already selected SKUs
-    return options
-      .filter(o => 
+    return normalizedOptions
+      .filter(o =>
         !skus.includes(o.part_number) &&
-        (o.part_number.toLowerCase().includes(lowerSearch) || 
-         o.name.toLowerCase().includes(lowerSearch))
+        (o.normPart.includes(normalizedSearch) ||
+         o.normName.includes(normalizedSearch))
       )
       .slice(0, 30);
-  }, [options, inputValue, skus]);
+  }, [normalizedOptions, inputValue, skus]);
 
   // Reset highlight and selection when options change
   useEffect(() => {
@@ -99,6 +201,23 @@ const MultiSkuInput: React.FC<{
       }
     }
   }, [highlightIndex]);
+
+  const tryAddFromRawInput = (rawText: string) => {
+    const parsed = parseRawSkuInput(rawText, normalizedOptions);
+    if (parsed.length === 0) return false;
+
+    if (parsed.length === 1) {
+      onAddSku(parsed[0]);
+    } else {
+      onAddMultipleSkus(parsed);
+    }
+    setSelectedForAdd(new Set());
+    setInputValue('');
+    setIsOpen(false);
+    setHighlightIndex(-1);
+    inputRef.current?.focus();
+    return true;
+  };
 
   const toggleSelection = (sku: string) => {
     setSelectedForAdd(prev => {
@@ -169,6 +288,14 @@ const MultiSkuInput: React.FC<{
           // Single select
           addSku(filteredOptions[highlightIndex].part_number);
         }
+        return;
+      }
+    }
+
+    if (e.key === 'Enter' && (!isOpen || filteredOptions.length === 0) && inputValue.trim()) {
+      const didAdd = tryAddFromRawInput(inputValue);
+      if (didAdd) {
+        e.preventDefault();
         return;
       }
     }
@@ -254,6 +381,12 @@ const MultiSkuInput: React.FC<{
           onChange={(e) => {
             setInputValue(e.target.value);
             setIsOpen(true);
+          }}
+          onPaste={(e) => {
+            const pastedText = e.clipboardData.getData('text');
+            if (pastedText && tryAddFromRawInput(pastedText)) {
+              e.preventDefault();
+            }
           }}
           onFocus={() => inputValue && setIsOpen(true)}
           onKeyDown={handleKeyDown}

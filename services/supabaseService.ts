@@ -650,8 +650,55 @@ export const insertFotoLinkBatch = async (
   }
 };
 
+const parseSkuCsvString = (skuString: string): string[] => {
+  if (!skuString || !skuString.trim()) return [];
+  const input = skuString.trim();
+  const result: string[] = [];
+  let current = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < input.length; i++) {
+    const ch = input[i];
+    if (ch === '"') {
+      if (inQuotes && input[i + 1] === '"') {
+        current += '"';
+        i += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+
+    if (ch === ',' && !inQuotes) {
+      const value = current.trim();
+      if (value) result.push(value);
+      current = '';
+      continue;
+    }
+
+    current += ch;
+  }
+
+  const last = current.trim();
+  if (last) result.push(last);
+  return result;
+};
+
+const escapeSkuCsvValue = (value: string): string => {
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+  if (/[",]/.test(trimmed)) {
+    return `"${trimmed.replace(/"/g, '""')}"`;
+  }
+  return trimmed;
+};
+
+const formatSkuCsvString = (skus: string[]): string => {
+  return skus.map(escapeSkuCsvValue).filter(Boolean).join(', ');
+};
+
 // Update SKU in foto_link and sync to foto + product_alias + base_mjm image_url
-// Supports multiple SKUs separated by comma
+// Supports multiple SKUs separated by comma (CSV-style quotes supported)
 export const updateFotoLinkSku = async (
   namaCsv: string,
   skuString: string
@@ -677,8 +724,8 @@ export const updateFotoLinkSku = async (
     }
   }
 
-  // Parse comma-separated SKUs
-  const skuArray = skuString.split(',').map(s => s.trim()).filter(Boolean);
+  // Parse comma-separated SKUs (CSV-style quotes supported)
+  const skuArray = parseSkuCsvString(skuString);
   if (skuArray.length === 0) {
     // All SKUs cleared
     try {
@@ -708,10 +755,12 @@ export const updateFotoLinkSku = async (
       return { success: false, error: 'foto_link entry not found: ' + (fetchError?.message || 'unknown') };
     }
 
+    const canonicalSkuString = formatSkuCsvString(skuArray);
+
     // 2. Update the sku in foto_link (store as comma-separated string)
     const { error: updateError } = await supabase
       .from('foto_link')
-      .update({ sku: skuString })
+      .update({ sku: canonicalSkuString })
       .eq('nama_csv', namaCsv);
 
     if (updateError) {

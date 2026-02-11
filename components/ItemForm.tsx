@@ -33,7 +33,7 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
 
   // UI State
   const [loading, setLoading] = useState(false);
-  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [activeImageIndex, setActiveImageIndex] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showPricePopup, setShowPricePopup] = useState(false);
   const [showSellPricePopup, setShowSellPricePopup] = useState(false);
@@ -47,18 +47,18 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
 
   useEffect(() => {
     if (initialData) {
+      const images = initialData.images || (initialData.imageUrl ? [initialData.imageUrl] : []);
       setFormData({
         partNumber: initialData.partNumber, name: initialData.name, brand: initialData.brand,
         application: initialData.application, quantity: initialData.quantity, shelf: initialData.shelf,
         price: initialData.price, costPrice: initialData.costPrice, ecommerce: initialData.ecommerce || '',
-        imageUrl: initialData.imageUrl, 
+        imageUrl: images[0] || initialData.imageUrl || '', 
         // SAFETY CHECK: Gunakan fallback ke array kosong
-        images: initialData.images || (initialData.imageUrl ? [initialData.imageUrl] : []), 
+        images, 
         initialStock: initialData.initialStock,
         qtyIn: initialData.qtyIn, qtyOut: initialData.qtyOut
       });
-      // Safety check untuk preview juga
-      setImagePreview(initialData.imageUrl || (initialData.images && initialData.images[0]) || null);
+      setActiveImageIndex(0);
     }
   }, [initialData]);
 
@@ -97,7 +97,7 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
             images: newImages, 
             imageUrl: newImages[0] || '' 
         }));
-        setImagePreview(newImages[0]);
+        setActiveImageIndex(prevIndex => newImages.length > 0 ? Math.min(prevIndex, newImages.length - 1) : 0);
         setError(null);
       } catch (err) {
         console.error(err);
@@ -116,7 +116,12 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
           images: newImages,
           imageUrl: newImages[0] || ''
       }));
-      setImagePreview(newImages[0] || null);
+      setActiveImageIndex(prevIndex => {
+        if (newImages.length === 0) return 0;
+        if (index < prevIndex) return prevIndex - 1;
+        if (index === prevIndex) return Math.max(0, prevIndex - 1);
+        return prevIndex;
+      });
   };
 
   const handleCheckPrices = async () => {
@@ -231,6 +236,10 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
       formData.quantity
   ) : formData.quantity;
 
+  const hasImages = formData.images.length > 0;
+  const previewImage = hasImages ? (formData.images[activeImageIndex] || formData.images[0]) : null;
+  const canAddMoreImages = formData.images.length < 10;
+
   let modalBorderClass = "border-gray-700";
   let modalHeaderClass = "bg-gray-900/80 border-gray-700";
   
@@ -270,13 +279,13 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
             
             <div className="w-full lg:w-1/3 flex flex-col gap-4">
               <div 
-                className={`aspect-video lg:aspect-square w-full rounded-2xl border-2 border-dashed flex flex-col items-center justify-center transition-all relative overflow-hidden group shadow-sm bg-gray-700 ${formData.images.length > 0 ? 'border-blue-500' : 'border-gray-600 hover:border-gray-500'}`}
+                className={`aspect-video lg:aspect-square w-full rounded-2xl border-2 border-dashed flex flex-col items-center justify-center transition-all relative overflow-hidden group shadow-sm bg-gray-700 ${hasImages ? 'border-blue-500' : 'border-gray-600 hover:border-gray-500'}`}
               >
-                {formData.images.length > 0 ? (
+                {hasImages ? (
                   <>
-                    <img src={formData.images[0]} alt="Preview" className="w-full h-full object-cover" />
+                    {previewImage && <img src={previewImage} alt="Preview" className="w-full h-full object-cover" />}
                     <div 
-                        className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                        className="absolute inset-0 bg-black/50 flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
                         onClick={() => fileInputRef.current?.click()}
                     >
                       <Plus size={32} className="text-white"/>
@@ -295,25 +304,65 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
                 <input type="file" ref={fileInputRef} onChange={handleImageChange} accept="image/*" multiple className="hidden" />
               </div>
 
-              {formData.images.length > 0 && (
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={loading || !canAddMoreImages}
+                  className="flex-1 py-2 bg-gray-700 border border-gray-600 text-gray-200 rounded-lg text-xs font-bold flex items-center justify-center gap-2 hover:bg-gray-600 disabled:opacity-60"
+                >
+                  <Plus size={14} /> Tambah Foto
+                </button>
+                {hasImages && (
+                  <button
+                    type="button"
+                    onClick={() => removePhoto(activeImageIndex)}
+                    disabled={loading}
+                    className="flex-1 py-2 bg-red-900/40 border border-red-800 text-red-200 rounded-lg text-xs font-bold flex items-center justify-center gap-2 hover:bg-red-900/60 disabled:opacity-60"
+                  >
+                    <X size={14} /> Hapus Foto
+                  </button>
+                )}
+              </div>
+
+              {hasImages && (
                   <div className="grid grid-cols-5 gap-2">
                       {formData.images.map((img, idx) => (
-                          <div key={idx} className="relative aspect-square rounded-lg overflow-hidden border border-gray-600 group/thumb">
-                              <img src={img} className="w-full h-full object-cover" />
-                              <button 
-                                  type="button"
-                                  onClick={() => removePhoto(idx)}
-                                  className="absolute inset-0 bg-red-900/80 flex items-center justify-center opacity-0 group-hover/thumb:opacity-100 transition-opacity text-white"
-                              >
-                                  <X size={16} />
-                              </button>
+                          <div
+                            key={idx}
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => setActiveImageIndex(idx)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault();
+                                setActiveImageIndex(idx);
+                              }
+                            }}
+                            className={`relative aspect-square rounded-lg overflow-hidden border ${idx === activeImageIndex ? 'border-blue-500 ring-2 ring-blue-500/60' : 'border-gray-600'} focus:outline-none cursor-pointer`}
+                          >
+                            <img src={img} className="w-full h-full object-cover" />
+                            <span className="absolute bottom-1 left-1 px-1.5 py-0.5 rounded bg-black/60 text-[9px] text-gray-200 font-bold">
+                              {idx + 1}
+                            </span>
+                            <button 
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); removePhoto(idx); }}
+                                className="absolute top-1 right-1 bg-red-600/90 hover:bg-red-600 text-white rounded-full p-1 shadow"
+                                aria-label="Hapus foto"
+                            >
+                                <X size={12} />
+                            </button>
                           </div>
                       ))}
-                      {formData.images.length < 10 && (
-                           <div className="aspect-square rounded-lg border border-dashed border-gray-600 flex items-center justify-center relative hover:bg-gray-700 cursor-pointer text-gray-500 hover:text-white transition-colors">
+                      {canAddMoreImages && (
+                           <button
+                             type="button"
+                             onClick={() => fileInputRef.current?.click()}
+                             className="aspect-square rounded-lg border border-dashed border-gray-600 flex items-center justify-center hover:bg-gray-700 cursor-pointer text-gray-500 hover:text-white transition-colors"
+                           >
                                <Plus size={20} />
-                               <input type="file" multiple onChange={handleImageChange} className="absolute inset-0 opacity-0 cursor-pointer" accept="image/*" />
-                           </div>
+                           </button>
                       )}
                   </div>
               )}

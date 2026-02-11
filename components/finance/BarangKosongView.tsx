@@ -100,6 +100,11 @@ const formatDate = (dateStr: string) => {
   return date.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' });
 };
 
+const isUnknownSupplierLabel = (supplier: string) => {
+  const normalized = (supplier || '').toUpperCase();
+  return normalized.includes('TANPA SUPPLIER') || normalized.includes('UNKNOWN');
+};
+
 // Purchase History Modal Component
 const PurchaseHistoryModal: React.FC<{
   partNumber: string;
@@ -958,10 +963,13 @@ const SupplierCard: React.FC<{
   onRemoveFromCart: (partNumber: string) => void;
   onUpdateQty: (partNumber: string, qty: number) => void;
   onViewHistory: (item: SupplierItem) => void;
+  supplierOptions: string[];
   isBJW?: boolean;
-}> = ({ group, isExpanded, onToggle, cart, onAddToCart, onRemoveFromCart, onUpdateQty, onViewHistory, isBJW = false }) => {
+}> = ({ group, isExpanded, onToggle, cart, onAddToCart, onRemoveFromCart, onUpdateQty, onViewHistory, supplierOptions, isBJW = false }) => {
   const cartItemsFromSupplier = cart.filter(c => c.supplier === group.supplier);
   const totalInCart = cartItemsFromSupplier.reduce((sum, c) => sum + c.qty, 0);
+  const isUnknownGroup = isUnknownSupplierLabel(group.supplier);
+  const [selectedSupplierByItem, setSelectedSupplierByItem] = useState<Record<string, string>>({});
   
   return (
     <div className="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden">
@@ -1156,12 +1164,37 @@ const SupplierCard: React.FC<{
                             </button>
                           </div>
                         ) : (
-                          <button
-                            onClick={() => onAddToCart(item, group.supplier)}
-                            className="w-full flex items-center justify-center gap-1 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded transition-colors"
-                          >
-                            <Plus size={14} /> Keranjang
-                          </button>
+                          isUnknownGroup && supplierOptions.length > 0 ? (
+                            <div className="flex flex-col gap-1">
+                              <select
+                                value={selectedSupplierByItem[item.part_number] || ''}
+                                onChange={(e) => {
+                                  const value = e.target.value;
+                                  setSelectedSupplierByItem(prev => ({ ...prev, [item.part_number]: value }));
+                                }}
+                                className="w-full px-2 py-1 bg-gray-700 border border-gray-600 rounded text-[10px] text-gray-200 focus:border-blue-500 outline-none"
+                              >
+                                <option value="">Pilih Supplier</option>
+                                {supplierOptions.map(s => (
+                                  <option key={s} value={s}>{s}</option>
+                                ))}
+                              </select>
+                              <button
+                                onClick={() => onAddToCart(item, selectedSupplierByItem[item.part_number])}
+                                disabled={!selectedSupplierByItem[item.part_number]}
+                                className="w-full flex items-center justify-center gap-1 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded transition-colors disabled:opacity-60"
+                              >
+                                <Plus size={14} /> Keranjang
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => onAddToCart(item, group.supplier)}
+                              className="w-full flex items-center justify-center gap-1 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded transition-colors"
+                            >
+                              <Plus size={14} /> Keranjang
+                            </button>
+                          )
                         )}
                       </td>
                     </tr>
@@ -1721,6 +1754,13 @@ export const BarangKosongView: React.FC = () => {
   const allSuppliers = useMemo(() => {
     return supplierGroups.map(g => g.supplier).sort((a, b) => a.localeCompare(b));
   }, [supplierGroups]);
+
+  const knownSuppliers = useMemo(() => {
+    return supplierGroups
+      .map(g => g.supplier)
+      .filter(s => !isUnknownSupplierLabel(s))
+      .sort((a, b) => a.localeCompare(b));
+  }, [supplierGroups]);
   
   // Get unique part numbers list
   const allPartNumbers = useMemo(() => {
@@ -2152,6 +2192,7 @@ export const BarangKosongView: React.FC = () => {
                 onRemoveFromCart={removeFromCart}
                 onUpdateQty={updateCartQty}
                 onViewHistory={setHistoryItem}
+                supplierOptions={knownSuppliers}
                 isBJW={selectedStore === 'bjw'}
               />
             ))
