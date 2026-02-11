@@ -538,11 +538,11 @@ export const FotoLinkManager: React.FC = () => {
   
   const itemsPerPage = 30; // Fewer items per page for better batch editing experience
 
-  const loadData = async (searchTerm?: string) => {
+  const loadData = async () => {
     setLoading(true);
     setError(null);
     try {
-      const result = await fetchFotoLink(searchTerm);
+      const result = await fetchFotoLink(); // tanpa parameter search
       setData(result || []);
     } catch (err: any) {
       console.error('Error loading foto link:', err);
@@ -568,11 +568,8 @@ export const FotoLinkManager: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    const timer = setTimeout(() => {
-      loadData(search);
-      setPage(1);
-    }, 300);
-    return () => clearTimeout(timer);
+    // Tidak perlu reload data dari backend saat search berubah, hanya filter di frontend
+    setPage(1);
   }, [search]);
 
   // Auto-hide success message
@@ -585,19 +582,26 @@ export const FotoLinkManager: React.FC = () => {
 
   const filteredData = useMemo(() => {
     let result = data;
-    
     // Filter by SKU presence
     if (filter === 'with_sku') result = result.filter(d => d.sku && d.sku.trim() !== '');
     if (filter === 'without_sku') result = result.filter(d => !d.sku || d.sku.trim() === '');
-    
+
+    // Filter by nama_csv (multi-keyword, semua kata harus ada, urutan bebas)
+    if (search.trim()) {
+      const keywords = search.toLowerCase().split(/\s+/).filter(Boolean);
+      result = result.filter(d =>
+        keywords.every(kw => d.nama_csv && d.nama_csv.toLowerCase().includes(kw))
+      );
+    }
+
     // Filter by SKU search
     if (searchSku.trim()) {
       const skuLower = searchSku.toLowerCase().trim();
       result = result.filter(d => d.sku && d.sku.toLowerCase().includes(skuLower));
     }
-    
+
     return result;
-  }, [data, filter, searchSku]);
+  }, [data, filter, search, searchSku]);
 
   const totalPages = Math.ceil(filteredData.length / itemsPerPage) || 1;
   const paginatedData = filteredData.slice((page - 1) * itemsPerPage, page * itemsPerPage);
@@ -873,7 +877,7 @@ export const FotoLinkManager: React.FC = () => {
           </div>
         </div>
         <button
-          onClick={() => loadData(search)}
+          onClick={() => loadData()}
           disabled={loading}
           className="p-2 bg-gray-700 hover:bg-gray-600 rounded-lg"
           title="Refresh"

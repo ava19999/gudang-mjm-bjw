@@ -1170,6 +1170,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
   const [filterPartNumber, setFilterPartNumber] = useState<string>('');
   const [showPartNumberDropdown, setShowPartNumberDropdown] = useState(false);
   const partNumberSearchRef = useRef<HTMLDivElement>(null);
+  const [activeResiTab, setActiveResiTab] = useState<'regular' | 'kilat'>('regular');
 
   // UPLOAD SETTINGS STATES (Seperti Stage 1)
   const [uploadEcommerce, setUploadEcommerce] = useState<EcommercePlatform>('SHOPEE');
@@ -3059,7 +3060,14 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
     if (onRefresh) onRefresh();
   };
 
-  const displayedRows = rows.filter(row => {
+  const isKilatRow = (row: Stage3Row) => row.ecommerce?.toUpperCase().includes('KILAT');
+  const kilatRowCount = rows.filter(isKilatRow).length;
+  const regularRowCount = rows.length - kilatRowCount;
+  const baseRows = activeResiTab === 'kilat'
+    ? rows.filter(isKilatRow)
+    : rows.filter(row => !isKilatRow(row));
+
+  const displayedRows = baseRows.filter(row => {
     // Filter by status - 'all' menampilkan semua, selain itu filter berdasarkan status_message
     if (filterStatus !== 'all' && row.status_message !== filterStatus) return false;
     
@@ -3745,6 +3753,30 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                     title="Simpan hanya resi KILAT"
                 >
                     <Zap size={12}/> Kilat ({rows.filter(r => r.ecommerce?.toUpperCase() === 'KILAT').length})
+                </button>
+            </div>
+
+            {/* TAB RESI */}
+            <div className="flex items-center gap-2 mb-2">
+                <button
+                    onClick={() => setActiveResiTab('regular')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                        activeResiTab === 'regular'
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                    }`}
+                >
+                    Reguler ({regularRowCount})
+                </button>
+                <button
+                    onClick={() => setActiveResiTab('kilat')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                        activeResiTab === 'kilat'
+                            ? 'bg-yellow-500 text-black'
+                            : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                    }`}
+                >
+                    KILAT ({kilatRowCount})
                 </button>
             </div>
 
