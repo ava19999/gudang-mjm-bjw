@@ -61,8 +61,8 @@ export interface ReturRow {
   quantity: number;
   harga_satuan: number;
   harga_total: number;
-  // Tipe retur: 'BALIK_STOK' | 'RUSAK' | 'TUKAR_SUPPLIER'
-  tipe_retur: 'BALIK_STOK' | 'RUSAK' | 'TUKAR_SUPPLIER';
+  // Tipe retur: 'BALIK_STOK' | 'RUSAK' | 'TUKAR_SUPPLIER' | 'TUKAR_SUPPLIER_GANTI'
+  tipe_retur: 'BALIK_STOK' | 'RUSAK' | 'TUKAR_SUPPLIER' | 'TUKAR_SUPPLIER_GANTI';
   status: string; // 'Pending' | 'Selesai' | 'Sudah Ditukar' (untuk tukar supplier)
   keterangan: string;
   ecommerce?: string;

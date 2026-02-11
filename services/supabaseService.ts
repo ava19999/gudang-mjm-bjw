@@ -2200,7 +2200,7 @@ const getReturTableName = (store: string | null | undefined) => {
 // Create retur from sold item
 export const createReturFromSold = async (
   soldItem: any,
-  tipeRetur: 'BALIK_STOK' | 'RUSAK' | 'TUKAR_SUPPLIER',
+  tipeRetur: 'BALIK_STOK' | 'RUSAK' | 'TUKAR_SUPPLIER' | 'TUKAR_SUPPLIER_GANTI',
   qty: number,
   keterangan: string,
   store: string | null
@@ -2328,6 +2328,44 @@ export const createReturFromSold = async (
     if (tipeRetur === 'TUKAR_SUPPLIER') {
       return { success: true, msg: `Retur dikirim ke supplier (menunggu penukaran)` };
     }
+
+    // 6. Jika TUKAR_SUPPLIER_GANTI, kurangi stok (ganti barang) dan pending penukaran supplier
+    if (tipeRetur === 'TUKAR_SUPPLIER_GANTI') {
+      if (!partNum) {
+        return { success: true, msg: `Retur tercatat, tapi part_number kosong!` };
+      }
+
+      // Ambil stok saat ini
+      const { data: currentItem, error: fetchError } = await supabase
+        .from(stockTable)
+        .select('quantity, name, part_number')
+        .ilike('part_number', partNum)
+        .single();
+
+      if (fetchError) {
+        console.error('TUKAR_SUPPLIER_GANTI: Error fetching item:', fetchError);
+        return { success: true, msg: `Retur tercatat, tapi gagal update stok: ${fetchError.message}` };
+      }
+
+      if (currentItem) {
+        const newQty = (currentItem.quantity || 0) - qty;
+        const actualPartNumber = currentItem.part_number || partNum;
+
+        const { error: updateError } = await supabase
+          .from(stockTable)
+          .update({ quantity: newQty })
+          .eq('part_number', actualPartNumber);
+
+        if (updateError) {
+          console.error('TUKAR_SUPPLIER_GANTI: Error updating stock:', updateError);
+          return { success: true, msg: `Retur tercatat, tapi gagal update stok: ${updateError.message}` };
+        }
+
+        return { success: true, msg: `Stok berkurang (${qty}) untuk ganti barang, menunggu tukar supplier` };
+      }
+
+      return { success: true, msg: `Retur tercatat, tapi item tidak ditemukan di inventory` };
+    }
     
     return { success: true, msg: 'Retur berhasil' };
   } catch (e: any) {
@@ -2366,7 +2404,7 @@ export const updateReturStatus = async (
     if (updateError) throw new Error('Gagal update status: ' + updateError.message);
     
     // If "Sudah Ditukar", return item to stock
-    if (newStatus === 'Sudah Ditukar' && returData.tipe_retur === 'TUKAR_SUPPLIER') {
+    if (newStatus === 'Sudah Ditukar' && (returData.tipe_retur === 'TUKAR_SUPPLIER' || returData.tipe_retur === 'TUKAR_SUPPLIER_GANTI')) {
       const partNum = (returData.part_number || '').trim();
       console.log('TUKAR_SUPPLIER: Looking for part_number:', partNum, 'in table:', stockTable);
       

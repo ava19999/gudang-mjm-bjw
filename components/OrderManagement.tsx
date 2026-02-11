@@ -166,11 +166,11 @@ interface ReturModalProps {
   isOpen: boolean;
   item: SoldItemRow | null;
   onClose: () => void;
-  onConfirm: (item: SoldItemRow, tipeRetur: 'BALIK_STOK' | 'RUSAK' | 'TUKAR_SUPPLIER', qty: number, keterangan: string) => void;
+  onConfirm: (item: SoldItemRow, tipeRetur: 'BALIK_STOK' | 'RUSAK' | 'TUKAR_SUPPLIER' | 'TUKAR_SUPPLIER_GANTI', qty: number, keterangan: string) => void;
 }
 
 const ReturModal: React.FC<ReturModalProps> = ({ isOpen, item, onClose, onConfirm }) => {
-  const [tipeRetur, setTipeRetur] = useState<'BALIK_STOK' | 'RUSAK' | 'TUKAR_SUPPLIER'>('BALIK_STOK');
+  const [tipeRetur, setTipeRetur] = useState<'BALIK_STOK' | 'RUSAK' | 'TUKAR_SUPPLIER' | 'TUKAR_SUPPLIER_GANTI'>('BALIK_STOK');
   const [qty, setQty] = useState(1);
   const [keterangan, setKeterangan] = useState('');
 
@@ -251,6 +251,15 @@ const ReturModal: React.FC<ReturModalProps> = ({ isOpen, item, onClose, onConfir
                 <div>
                   <p className="font-bold text-white text-sm">Tukar Supplier</p>
                   <p className="text-[10px] text-gray-400">Dikirim ke supplier, bisa balik stok nanti</p>
+                </div>
+              </label>
+
+              <label className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-all ${tipeRetur === 'TUKAR_SUPPLIER_GANTI' ? 'bg-amber-900/30 border-amber-600' : 'bg-gray-800 border-gray-700 hover:border-gray-600'}`}>
+                <input type="radio" name="tipeRetur" checked={tipeRetur === 'TUKAR_SUPPLIER_GANTI'} onChange={() => setTipeRetur('TUKAR_SUPPLIER_GANTI')} className="hidden"/>
+                <ArrowLeftRight size={20} className="text-amber-400"/>
+                <div>
+                  <p className="font-bold text-white text-sm">Tukar Supplier + Ganti Stok</p>
+                  <p className="text-[10px] text-gray-400">Ambil stok 1 untuk ganti, 1 lagi menunggu tukar supplier</p>
                 </div>
               </label>
             </div>
@@ -718,7 +727,7 @@ export const OrderManagement: React.FC = () => {
     loadData();
   };
 
-  const handleReturConfirm = async (item: SoldItemRow, tipeRetur: 'BALIK_STOK' | 'RUSAK' | 'TUKAR_SUPPLIER', qty: number, keterangan: string) => {
+  const handleReturConfirm = async (item: SoldItemRow, tipeRetur: 'BALIK_STOK' | 'RUSAK' | 'TUKAR_SUPPLIER' | 'TUKAR_SUPPLIER_GANTI', qty: number, keterangan: string) => {
     setLoading(true);
     const result = await createReturFromSold(item, tipeRetur, qty, keterangan, selectedStore);
     setLoading(false);
@@ -1845,7 +1854,8 @@ export const OrderManagement: React.FC = () => {
             {filterList(returData).length === 0 && <EmptyState msg="Tidak ada data retur." />}
             {filterList(returData).map((item, idx) => {
               const tipeRetur = (item as any).tipe_retur || 'BALIK_STOK';
-              const isTukarSupplier = tipeRetur === 'TUKAR_SUPPLIER';
+              const isTukarSupplier = tipeRetur === 'TUKAR_SUPPLIER' || tipeRetur === 'TUKAR_SUPPLIER_GANTI';
+              const isTukarGanti = tipeRetur === 'TUKAR_SUPPLIER_GANTI';
               const isRusak = tipeRetur === 'RUSAK';
               const isSudahDitukar = item.status === 'Sudah Ditukar';
               
@@ -1862,7 +1872,7 @@ export const OrderManagement: React.FC = () => {
                         isTukarSupplier ? 'bg-orange-900/50 text-orange-300 border-orange-800' :
                         'bg-green-900/50 text-green-300 border-green-800'
                       }`}>
-                        {isRusak ? 'RUSAK' : isTukarSupplier ? 'TUKAR SUPPLIER' : 'BALIK STOK'}
+                        {isRusak ? 'RUSAK' : isTukarGanti ? 'TUKAR + GANTI' : isTukarSupplier ? 'TUKAR SUPPLIER' : 'BALIK STOK'}
                       </span>
                       {item.ecommerce && (
                         <span className="text-[10px] bg-gray-700 px-1.5 rounded text-gray-400">{item.ecommerce}</span>
