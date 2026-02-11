@@ -263,9 +263,7 @@ const mapItemFromDB = (item: any, photoData?: any): InventoryItem => {
   const pk = item.part_number || item.partNumber || '';
   
   const imagesFromTable = photoData ? mapPhotoRowToImages(photoData) : [];
-  const finalImages = imagesFromTable.length > 0 
-    ? imagesFromTable 
-    : (item.image_url ? [item.image_url] : []);
+  const finalImages = imagesFromTable;
 
   return {
     ...item,
@@ -279,7 +277,7 @@ const mapItemFromDB = (item: any, photoData?: any): InventoryItem => {
     quantity: Number(item.quantity || 0),
     price: 0, 
     costPrice: 0, 
-    imageUrl: finalImages[0] || item.image_url || '',
+    imageUrl: finalImages[0] || '',
     images: finalImages,
     ecommerce: '', 
     initialStock: 0, 
@@ -422,6 +420,10 @@ const fetchPhotosForItems = async (items: any[]) => {
 const savePhotosToTable = async (partNumber: string, images: string[]) => {
   if (!partNumber) return;
   try {
+    if (!images || images.length === 0) {
+      await supabase.from('foto').delete().eq('part_number', partNumber);
+      return;
+    }
     const photoPayload = mapImagesToPhotoRow(partNumber, images);
     await supabase.from('foto').upsert(photoPayload, { onConflict: 'part_number' });
   } catch (e) { console.error('Error saving photos:', e); }

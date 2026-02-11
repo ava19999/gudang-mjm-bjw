@@ -47,12 +47,12 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
 
   useEffect(() => {
     if (initialData) {
-      const images = initialData.images || (initialData.imageUrl ? [initialData.imageUrl] : []);
+      const images = initialData.images || [];
       setFormData({
         partNumber: initialData.partNumber, name: initialData.name, brand: initialData.brand,
         application: initialData.application, quantity: initialData.quantity, shelf: initialData.shelf,
         price: initialData.price, costPrice: initialData.costPrice, ecommerce: initialData.ecommerce || '',
-        imageUrl: images[0] || initialData.imageUrl || '', 
+        imageUrl: images[0] || '', 
         // SAFETY CHECK: Gunakan fallback ke array kosong
         images, 
         initialStock: initialData.initialStock,
