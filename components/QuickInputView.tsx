@@ -17,12 +17,45 @@ interface QuickInputViewProps {
   showToast?: (msg: string, type: 'success' | 'error') => void;
 }
 
+const MIN_QUICK_INPUT_ROWS = 10;
+
+const getQuickInputDraftKey = (store: string | null, mode: 'in' | 'out') =>
+  `quick_input_draft_${store || 'mjm'}_${mode}`;
+
+const createInitialRowsForMode = (mode: 'in' | 'out', count: number = MIN_QUICK_INPUT_ROWS): QuickInputRow[] => {
+  return Array.from({ length: count }).map((_, index) => {
+    const row = createEmptyRow(index + 1);
+    row.operation = mode;
+    return row;
+  });
+};
+
+const normalizeDraftRows = (raw: unknown, mode: 'in' | 'out'): QuickInputRow[] => {
+  if (!Array.isArray(raw)) return createInitialRowsForMode(mode);
+
+  const hydrated = raw.map((entry, index) => {
+    const baseRow = createEmptyRow(index + 1);
+    const draft = entry && typeof entry === 'object' ? (entry as Partial<QuickInputRow>) : {};
+
+    return {
+      ...baseRow,
+      ...draft,
+      id: index + 1,
+      operation: mode,
+      error: undefined,
+      isLoading: false
+    };
+  });
+
+  return hydrated.length > 0 ? hydrated : createInitialRowsForMode(mode);
+};
+
 export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh, showToast }) => {
   const { selectedStore } = useStore();
   
   // --- STATE ---
   const [mode, setMode] = useState<'in' | 'out'>('in'); // State untuk mode Masuk/Keluar
-  const [rows, setRows] = useState<QuickInputRow[]>([]);
+  const [rows, setRows] = useState<QuickInputRow[]>(() => createInitialRowsForMode('in'));
   const [suggestions, setSuggestions] = useState<InventoryItem[]>([]);
   const [supplierList, setSupplierList] = useState<string[]>([]);
   const [customerList, setCustomerList] = useState<string[]>([]);
@@ -59,17 +92,41 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
     loadCustomers();
   }, [selectedStore]);
 
-  // --- INITIALIZATION ---
+  // --- INITIALIZATION / RESTORE DRAFT ---
   useEffect(() => {
-    // Reset rows saat mode berubah atau saat pertama load
-    const initialRows = Array.from({ length: 10 }).map((_, index) => {
-        const row = createEmptyRow(index + 1);
-        row.operation = mode; // Set operasi default sesuai tab
-        return row;
-    });
-    setRows(initialRows);
+    if (!selectedStore) return;
+
+    const storageKey = getQuickInputDraftKey(selectedStore, mode);
+    const savedDraft = localStorage.getItem(storageKey);
+
+    if (savedDraft) {
+      try {
+        const parsed = JSON.parse(savedDraft);
+        setRows(normalizeDraftRows(parsed, mode));
+      } catch (error) {
+        console.warn('Failed to parse quick input draft, reset to initial rows:', error);
+        setRows(createInitialRowsForMode(mode));
+      }
+    } else {
+      setRows(createInitialRowsForMode(mode));
+    }
+
+    setCurrentPage(1);
     setTimeout(() => { inputRefs.current[0]?.focus(); }, 100);
-  }, [mode]);
+  }, [mode, selectedStore]);
+
+  // --- PERSIST DRAFT ---
+  useEffect(() => {
+    if (!selectedStore) return;
+
+    const storageKey = getQuickInputDraftKey(selectedStore, mode);
+    const draftRows = rows.map(({ error, isLoading, ...rest }) => ({
+      ...rest,
+      operation: mode
+    }));
+
+    localStorage.setItem(storageKey, JSON.stringify(draftRows));
+  }, [rows, mode, selectedStore]);
 
   // --- HANDLERS ---
   const handleSearchKeyDown = (e: React.KeyboardEvent, id: number) => {
@@ -393,11 +450,7 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
       
       if (successCount === rowsToSave.length) {
         // Reset with empty rows
-        const initialRows = Array.from({ length: 10 }).map((_, index) => {
-          const r = createEmptyRow(index + 1);
-          r.operation = mode;
-          return r;
-        });
+        const initialRows = createInitialRowsForMode(mode);
         setRows(initialRows);
       }
       
@@ -417,11 +470,7 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
       const remainingRows = rows.length - successCount;
       if (remainingRows === 0) {
          // Reset dengan rows kosong baru sesuai mode
-         const initialRows = Array.from({ length: 10 }).map((_, index) => {
-             const r = createEmptyRow(index + 1);
-             r.operation = mode;
-             return r;
-         });
+         const initialRows = createInitialRowsForMode(mode);
          setRows(initialRows);
       }
     }
