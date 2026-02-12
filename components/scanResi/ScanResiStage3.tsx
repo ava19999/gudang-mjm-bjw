@@ -2683,6 +2683,8 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
         if (partNumberDropdown.selectedIndex >= 0 && filteredParts[partNumberDropdown.selectedIndex]) {
           const selectedPart = filteredParts[partNumberDropdown.selectedIndex].part_number;
           if (rowId) {
+            // Tandai selection supaya onBlur tidak meng-overwrite dengan nilai ketikan lama
+            partNumberSelectedRef.current = { rowId, value: selectedPart };
             updateRow(rowId, 'part_number', selectedPart);
             handlePartNumberBlur(rowId, selectedPart);
           }
