@@ -3013,7 +3013,8 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
       });
       
       if (rowToSave) {
-        handleSaveRow(rowToSave);
+        // Pakai jalur autosave debounce supaya tidak double insert
+        autoSaveRow(rowToSave);
       }
       return;
     }
@@ -3060,7 +3061,8 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
     });
 
     if (rowToSave) {
-        handleSaveRow(rowToSave);
+      // Hindari double insert: cukup jadwalkan autosave (akan merge dengan pending timer sebelumnya)
+      autoSaveRow(rowToSave);
     }
   };
 
