@@ -603,20 +603,28 @@ export const OrderManagement: React.FC = () => {
     });
   }, [soldData, searchTerm, customerFilter, partNumberFilter, ecommerceFilter, stockSortOrder, dateSortOrder, selectedStore, inventoryMjmMap, inventoryBjwMap]);
 
-  // Extract unique customers and part numbers from soldData for autocomplete - filtered and limited for performance
+  // Extract unique customers and part numbers for autocomplete - follow active tab data
   const filteredCustomerOptions = useMemo(() => {
     if (!customerFilter || customerFilter.length < 1) return [];
     const search = customerFilter.toLowerCase();
-    const customers = [...new Set(soldData.map(item => item.customer).filter(Boolean))];
+    const customers = activeTab === 'OFFLINE'
+      ? [...new Set(groupedOfflineOrders.map(group => group.customer).filter(Boolean))]
+      : activeTab === 'RETUR'
+        ? [...new Set(returData.map(item => item.customer).filter(Boolean))]
+        : [...new Set(soldData.map(item => item.customer).filter(Boolean))];
     return customers.filter(c => c.toLowerCase().includes(search)).slice(0, 50);
-  }, [soldData, customerFilter]);
+  }, [activeTab, groupedOfflineOrders, soldData, returData, customerFilter]);
 
   const filteredPartNumberOptions = useMemo(() => {
     if (!partNumberFilter || partNumberFilter.length < 1) return [];
     const search = partNumberFilter.toLowerCase();
-    const partNumbers = [...new Set(soldData.map(item => item.part_number).filter(Boolean))];
+    const partNumbers = activeTab === 'OFFLINE'
+      ? [...new Set(offlineData.map(item => item.part_number).filter(Boolean))]
+      : activeTab === 'RETUR'
+        ? [...new Set(returData.map(item => item.part_number).filter(Boolean))]
+        : [...new Set(soldData.map(item => item.part_number).filter(Boolean))];
     return partNumbers.filter(p => p.toLowerCase().includes(search)).slice(0, 50);
-  }, [soldData, partNumberFilter]);
+  }, [activeTab, offlineData, soldData, returData, partNumberFilter]);
 
   // Pagination for grouped sold data
   const paginatedSoldGroups = useMemo(() => {
@@ -1000,10 +1008,49 @@ export const OrderManagement: React.FC = () => {
     );
   };
 
-  const filteredGroupedOffline = groupedOfflineOrders.filter(group => 
-    group.customer.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    group.items.some(i => i.nama_barang.toLowerCase().includes(searchTerm.toLowerCase()))
-  );
+  const filteredGroupedOffline = useMemo(() => {
+    const lowerSearch = searchTerm.trim().toLowerCase();
+    const lowerCustomerFilter = customerFilter.trim().toLowerCase();
+    const lowerPartNumberFilter = partNumberFilter.trim().toLowerCase();
+    const sourceFilter = ecommerceFilter.trim().toUpperCase();
+
+    return groupedOfflineOrders.filter(group => {
+      // Ecommerce filter for OFFLINE tab: only OFFLINE is valid source.
+      if (sourceFilter !== 'ALL' && sourceFilter !== 'OFFLINE') return false;
+
+      // Customer filter
+      if (lowerCustomerFilter && !group.customer.toLowerCase().includes(lowerCustomerFilter)) {
+        return false;
+      }
+
+      // Part number filter
+      if (
+        lowerPartNumberFilter &&
+        !group.items.some(item => (item.part_number || '').toLowerCase().includes(lowerPartNumberFilter))
+      ) {
+        return false;
+      }
+
+      // General search (customer, item name, part number, tempo, date)
+      if (lowerSearch) {
+        const matchGroup =
+          group.customer.toLowerCase().includes(lowerSearch) ||
+          group.tempo.toLowerCase().includes(lowerSearch) ||
+          new Date(group.date).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' }).toLowerCase().includes(lowerSearch);
+
+        const matchItems = group.items.some(item =>
+          (item.nama_barang || '').toLowerCase().includes(lowerSearch) ||
+          (item.part_number || '').toLowerCase().includes(lowerSearch)
+        );
+
+        if (!matchGroup && !matchItems) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }, [groupedOfflineOrders, searchTerm, customerFilter, partNumberFilter, ecommerceFilter]);
 
   return (
     <div className="bg-gray-800 m-4 rounded-2xl border border-gray-700 shadow-xl flex flex-col text-gray-100" style={{ height: 'calc(100vh - 120px)' }}>

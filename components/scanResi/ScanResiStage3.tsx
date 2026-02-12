@@ -1134,6 +1134,7 @@ const SkippedItemsModal = ({
 export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
   const { selectedStore } = useStore();
   const [rows, setRows] = useState<Stage3Row[]>([]);
+  const rowsRef = useRef<Stage3Row[]>([]);
   const [loading, setLoading] = useState(false);
   const [savingStatus, setSavingStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
   const [partOptions, setPartOptions] = useState<{part_number: string, name: string}[]>([]);
@@ -1141,6 +1142,8 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
   // AUTO-SAVE DEBOUNCE REFS
   const autoSaveTimers = useRef<Map<string, NodeJS.Timeout>>(new Map());
   const pendingUpdates = useRef<Map<string, Stage3Row>>(new Map());
+  const isFlushingPendingRef = useRef(false);
+  const isMountedRef = useRef(true);
   
   // SELECTED RESI FOR PROCESS
   const [selectedResis, setSelectedResis] = useState<Set<string>>(new Set());
@@ -1263,6 +1266,17 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  useEffect(() => {
+    rowsRef.current = rows;
+  }, [rows]);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
   // Ambil list reseller unik dari data yang sudah ada untuk suggestion
   const resellerTokoList: string[] = Array.from(new Set(rows.filter(r => r.ecommerce === 'RESELLER').map(r => r.sub_toko)))
     .filter(Boolean)
@@ -1335,7 +1349,8 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
           console.log('[Realtime] UPDATE received:', payload.new);
           
           const newData = payload.new as any;
-          const rowId = String(newData.id);
+          const rowId = `db-${String(newData.id)}`;
+          const legacyRowId = String(newData.id);
           
           // Flash effect untuk cell yang berubah
           const changedFields: string[] = [];
@@ -1349,7 +1364,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
           // STEP 1: Update data segera (tanpa menunggu lookup) - untuk kecepatan
           setRows(prevRows => 
             prevRows.map(row => {
-              if (row.id !== rowId) return row;
+              if (row.id !== rowId && row.id !== legacyRowId) return row;
               return { 
                 ...row, 
                 part_number: newData.part_number ?? row.part_number,
@@ -1370,7 +1385,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
               if (partInfo) {
                 setRows(prevRows => 
                   prevRows.map(row => {
-                    if (row.id !== rowId) return row;
+                    if (row.id !== rowId && row.id !== legacyRowId) return row;
                     return {
                       ...row,
                       nama_barang_base: partInfo.name || '',
@@ -1401,7 +1416,11 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
           console.log('[Realtime] INSERT received:', payload.new);
           
           const newData = payload.new as any;
-          const newRowId = String(newData.id);
+          const newRowId = `db-${String(newData.id)}`;
+          const resiUpper = String(newData.resi || '').trim().toUpperCase();
+          const orderUpper = String(newData.order_id || '').trim().toUpperCase();
+          const customerUpper = String(newData.customer || '').trim().toUpperCase();
+          const partUpper = String(newData.part_number || '').trim().toUpperCase();
           
           // Cek apakah row dengan ID ini sudah ada (untuk menghindari duplikat)
           setRows(prevRows => {
@@ -1436,6 +1455,31 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
               force_override_double: false
             };
             
+            // Cari row lokal yang ekuivalen (apapun prefix id-nya, bukan hanya s1-)
+            const matchingIdx = prevRows.findIndex(row => {
+              // Jangan match dengan row DB lain
+              if (String(row.id).startsWith('db-')) return false;
+              const rowResiUpper = String(row.resi || '').trim().toUpperCase();
+              const rowOrderUpper = String(row.no_pesanan || '').trim().toUpperCase();
+              const rowCustomerUpper = String(row.customer || '').trim().toUpperCase();
+              const rowPartUpper = String(row.part_number || '').trim().toUpperCase();
+              const orderMatch = rowOrderUpper === orderUpper || (!rowOrderUpper && !orderUpper);
+              const customerMatch = rowCustomerUpper === customerUpper || !rowCustomerUpper || !customerUpper;
+              const partMatch = !rowPartUpper || !partUpper || rowPartUpper === partUpper;
+              return rowResiUpper === resiUpper && orderMatch && customerMatch && partMatch;
+            });
+
+            if (matchingIdx >= 0) {
+              const nextRows = [...prevRows];
+              nextRows[matchingIdx] = {
+                ...nextRows[matchingIdx],
+                ...newRow,
+                id: newRowId
+              };
+              console.log('[Realtime] INSERT merged into existing local row:', newRowId);
+              return nextRows;
+            }
+
             console.log('[Realtime] Adding new row:', newRow);
             return [...prevRows, newRow];
           });
@@ -1477,7 +1521,9 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
         (payload) => {
           console.log('[Realtime] DELETE received:', payload.old);
           // Remove deleted row
-          setRows(prevRows => prevRows.filter(row => row.id !== String(payload.old.id)));
+          const deletedDbId = `db-${String(payload.old.id)}`;
+          const legacyDeletedId = String(payload.old.id);
+          setRows(prevRows => prevRows.filter(row => row.id !== deletedDbId && row.id !== legacyDeletedId));
         }
       )
       .subscribe((status) => {
@@ -1657,16 +1703,6 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
     const cellKey = `${rowId}-${field}`;
     return editingCells[cellKey] || null;
   }, [editingCells]);
-
-  // Cleanup auto-save timers on unmount
-  useEffect(() => {
-    return () => {
-      // Clear all pending timers
-      autoSaveTimers.current.forEach(timer => clearTimeout(timer));
-      autoSaveTimers.current.clear();
-      pendingUpdates.current.clear();
-    };
-  }, []);
 
   const loadSavedDataFromDB = async () => {
     setLoading(true);
@@ -1966,8 +2002,10 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
     }
   };
 
-  const handleSaveRow = async (row: Stage3Row) => {
-    setSavingStatus('saving');
+  const handleSaveRow = useCallback(async (row: Stage3Row) => {
+    if (isMountedRef.current) {
+      setSavingStatus('saving');
+    }
     try {
       if (row.id.startsWith('db-')) {
          const dbId = row.id.replace('db-', '');
@@ -2000,17 +2038,91 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
          
          const newId = await insertResiItem(selectedStore, payload);
          
-         if (newId) {
-             setRows(prev => prev.map(r => r.id === row.id ? { ...r, id: `db-${newId}` } : r));
+         if (newId && isMountedRef.current) {
+           setRows(prev => prev.map(r => r.id === row.id ? { ...r, id: `db-${newId}` } : r));
          }
       }
-      setSavingStatus('saved');
-      setTimeout(() => setSavingStatus('idle'), 2000);
+      if (isMountedRef.current) {
+        setSavingStatus('saved');
+        setTimeout(() => {
+          if (isMountedRef.current) {
+            setSavingStatus('idle');
+          }
+        }, 2000);
+      }
+
+      // Clear pending state for this row after successful save.
+      const existingTimer = autoSaveTimers.current.get(row.id);
+      if (existingTimer) {
+        clearTimeout(existingTimer);
+        autoSaveTimers.current.delete(row.id);
+      }
+      pendingUpdates.current.delete(row.id);
     } catch (e) {
       console.error("Auto-save failed:", e);
-      setSavingStatus('idle');
+      if (isMountedRef.current) {
+        setSavingStatus('idle');
+      }
     }
-  };
+  }, [selectedStore]);
+
+  const flushPendingUpdates = useCallback(async (reason: string = 'manual') => {
+    if (isFlushingPendingRef.current) return;
+    if (pendingUpdates.current.size === 0) return;
+
+    isFlushingPendingRef.current = true;
+    try {
+      // Stop all debounce timers, then flush latest pending snapshots.
+      autoSaveTimers.current.forEach(timer => clearTimeout(timer));
+      autoSaveTimers.current.clear();
+
+      const pendingRows = Array.from(pendingUpdates.current.values());
+      const uniqueRows = Array.from(
+        new Map(pendingRows.map(row => [row.id, row])).values()
+      );
+
+      for (const row of uniqueRows) {
+        await handleSaveRow(row);
+      }
+
+      pendingUpdates.current.clear();
+      console.log(`[AutoSave] Flushed ${uniqueRows.length} pending row(s) (${reason})`);
+    } catch (error) {
+      console.error(`[AutoSave] Failed to flush pending updates (${reason}):`, error);
+    } finally {
+      isFlushingPendingRef.current = false;
+    }
+  }, [handleSaveRow]);
+
+  // Flush pending edits when page/tab state changes or component unmounts.
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        void flushPendingUpdates('visibilitychange');
+      }
+    };
+
+    const handlePageHide = () => {
+      void flushPendingUpdates('pagehide');
+    };
+
+    const handleBeforeUnload = () => {
+      if (pendingUpdates.current.size > 0) {
+        void flushPendingUpdates('beforeunload');
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('pagehide', handlePageHide);
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('pagehide', handlePageHide);
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      void flushPendingUpdates('unmount');
+    };
+  }, [flushPendingUpdates]);
 
   // SAVE ALL ROWS - Force save semua baris sekaligus ke database dengan batch update
   const handleSaveAllRows = async () => {
@@ -2658,7 +2770,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
     // Store the updated row in pending updates
     pendingUpdates.current.set(updatedRow.id, updatedRow);
     
-    // Set new timer for 1 second debounce
+    // Set new timer for faster autosave.
     const timer = setTimeout(async () => {
       const rowToSave = pendingUpdates.current.get(updatedRow.id);
       if (rowToSave) {
@@ -2666,79 +2778,85 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
         pendingUpdates.current.delete(updatedRow.id);
         autoSaveTimers.current.delete(updatedRow.id);
       }
-    }, 1000);
+    }, 600);
     
     autoSaveTimers.current.set(updatedRow.id, timer);
   };
 
   const updateRow = (id: string, field: keyof Stage3Row, value: any) => {
-    let updatedRow: Stage3Row | null = null;
-    
-    setRows(prev => prev.map(r => {
-        if (r.id !== id) return r;
-        const updated = { ...r, [field]: value };
-        if (field === 'harga_total') {
-            // Ketika harga_total diubah, hitung ulang harga_satuan
-            updated.harga_satuan = updated.qty_keluar > 0 ? updated.harga_total / updated.qty_keluar : 0;
-        } else if (field === 'harga_satuan') {
-            // Ketika harga_satuan diubah, hitung ulang harga_total
-            updated.harga_total = updated.harga_satuan * updated.qty_keluar;
-        } else if (field === 'qty_keluar') {
-            // Ketika qty diubah, hitung ulang harga_satuan dari harga_total yang ada
-            // Rumus: harga_satuan = harga_total / qty
-            updated.harga_satuan = updated.qty_keluar > 0 ? updated.harga_total / updated.qty_keluar : 0;
+    const editableFields: Array<keyof Stage3Row> = [
+      'part_number',
+      'qty_keluar',
+      'harga_total',
+      'harga_satuan',
+      'customer',
+      'ecommerce',
+      'sub_toko',
+      'tanggal'
+    ];
+
+    const currentRows = rowsRef.current;
+    const rowIdx = currentRows.findIndex(r => r.id === id);
+    if (rowIdx === -1) return;
+
+    const currentRow = currentRows[rowIdx];
+    const updatedRow: Stage3Row = { ...currentRow, [field]: value };
+
+    if (field === 'harga_total') {
+      // Ketika harga_total diubah, hitung ulang harga_satuan
+      updatedRow.harga_satuan = updatedRow.qty_keluar > 0 ? updatedRow.harga_total / updatedRow.qty_keluar : 0;
+    } else if (field === 'harga_satuan') {
+      // Ketika harga_satuan diubah, hitung ulang harga_total
+      updatedRow.harga_total = updatedRow.harga_satuan * updatedRow.qty_keluar;
+    } else if (field === 'qty_keluar') {
+      // Ketika qty diubah, hitung ulang harga_satuan dari harga_total yang ada
+      // Rumus: harga_satuan = harga_total / qty
+      updatedRow.harga_satuan = updatedRow.qty_keluar > 0 ? updatedRow.harga_total / updatedRow.qty_keluar : 0;
+    }
+
+    // Update status_message secara real-time berdasarkan kondisi saat ini
+    if (field === 'part_number' || field === 'qty_keluar') {
+      // Recalculate status
+      if (!updatedRow.is_db_verified) {
+        // Masih belum verifikasi Stage 1/2
+        if (updatedRow.status_message === 'Belum Scan S1' || updatedRow.status_message === 'Pending S2') {
+          // Keep status as is
         }
-        
-        // Update status_message secara real-time berdasarkan kondisi saat ini
-        if (field === 'part_number' || field === 'qty_keluar') {
-            // Recalculate status
-            if (!updated.is_db_verified) {
-                // Masih belum verifikasi Stage 1/2
-                if (updated.status_message === 'Belum Scan S1' || updated.status_message === 'Pending S2') {
-                    // Keep status as is
-                }
-            } else if (!updated.part_number) {
-                updated.status_message = 'Butuh Input';
-                updated.is_db_verified = false;
-            } else if (updated.stock_saat_ini < updated.qty_keluar && updated.qty_keluar > 0) {
-                updated.status_message = 'Stok Kurang';
-                updated.is_stock_valid = false;
-            } else if (!updated.nama_barang_base && updated.part_number) {
-                updated.status_message = 'Base Kosong';
-                updated.is_db_verified = false;
-            } else {
-                // Semua valid
-                updated.status_message = 'Ready';
-                updated.is_db_verified = true;
-                updated.is_stock_valid = true;
-            }
-        }
-        
-        updatedRow = updated;
-        return updated;
-    }));
+      } else if (!updatedRow.part_number) {
+        updatedRow.status_message = 'Butuh Input';
+        updatedRow.is_db_verified = false;
+      } else if (updatedRow.stock_saat_ini < updatedRow.qty_keluar && updatedRow.qty_keluar > 0) {
+        updatedRow.status_message = 'Stok Kurang';
+        updatedRow.is_stock_valid = false;
+      } else if (!updatedRow.nama_barang_base && updatedRow.part_number) {
+        updatedRow.status_message = 'Base Kosong';
+        updatedRow.is_db_verified = false;
+      } else {
+        // Semua valid
+        updatedRow.status_message = 'Ready';
+        updatedRow.is_db_verified = true;
+        updatedRow.is_stock_valid = true;
+      }
+    }
+
+    const nextRows = [...currentRows];
+    nextRows[rowIdx] = updatedRow;
+    rowsRef.current = nextRows;
+    setRows(nextRows);
     
     // Auto-save to database with debounce (only for editable fields)
-    if (updatedRow && ['part_number', 'qty_keluar', 'harga_total', 'harga_satuan', 'customer', 'ecommerce', 'sub_toko', 'tanggal'].includes(field)) {
+    if (editableFields.includes(field)) {
       // INSTANT: Broadcast perubahan ke user lain (tanpa menunggu database)
       broadcastDataChange(id, field, value);
       
       // Broadcast editing status
       broadcastEditingCell(`${id}-${field}`);
-      
-      // Get the latest row data after state update
-      setTimeout(() => {
-        setRows(currentRows => {
-          const latestRow = currentRows.find(r => r.id === id);
-          if (latestRow) {
-            autoSaveRow(latestRow);
-          }
-          return currentRows;
-        });
-        
-        // Clear editing status after save
-        setTimeout(() => broadcastEditingCell(null), 500);
-      }, 0);
+
+      // Schedule debounced autosave immediately from the updated snapshot.
+      autoSaveRow(updatedRow);
+
+      // Clear editing status after save
+      setTimeout(() => broadcastEditingCell(null), 500);
     }
   };
 
