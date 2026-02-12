@@ -273,11 +273,54 @@ export const ClosingView: React.FC = () => {
     });
   };
 
+  const shouldExcludeFromClosingMasuk = (item: BarangMasukRow) => {
+    const tempo = (item.tempo || '').toUpperCase();
+    const supplier = (item.customer || '').toUpperCase();
+    const keterangan = ((item as any).keterangan || '').toUpperCase();
+
+    // Exclude retur rows from closing.
+    if (tempo === 'RETUR' || tempo.includes('RETUR') || keterangan.includes('RETUR')) {
+      return true;
+    }
+
+    // Exclude Nadir rows as requested.
+    if (tempo.includes('NADIR') || supplier.includes('NADIR') || keterangan.includes('NADIR')) {
+      return true;
+    }
+
+    return false;
+  };
+
+  const closingBarangMasuk = useMemo(() => {
+    return barangMasuk.filter(item => !shouldExcludeFromClosingMasuk(item));
+  }, [barangMasuk]);
+
+  const normalizeClosingEcommerceLabel = (ecommerce?: string) => {
+    const raw = (ecommerce || 'OFFLINE').trim().toUpperCase();
+    if (!raw) return 'OFFLINE';
+    if (raw === 'SHOPPE') return 'SHOPEE';
+    return raw;
+  };
+
+  const shouldSplitByKodeToko = (ecommerce: string) => {
+    return ['SHOPEE', 'RESELLER', 'EKSPOR - PH', 'EKSPOR - MY'].includes(ecommerce);
+  };
+
+  const getClosingKodeTokoLabel = (kodeToko?: string) => {
+    const toko = (kodeToko || '').trim().toUpperCase();
+    return toko || 'UNKNOWN';
+  };
+
+  const getClosingCustomerLabel = (item: BarangKeluarRow) => {
+    const customerRaw = (item.customer || '').trim();
+    return customerRaw || 'Unknown';
+  };
+
   // Get unique tempo values from data
   const availableTempoMasuk = useMemo(() => {
-    const tempos = new Set(barangMasuk.map(item => item.tempo || 'CASH'));
+    const tempos = new Set(closingBarangMasuk.map(item => item.tempo || 'CASH'));
     return Array.from(tempos).sort();
-  }, [barangMasuk]);
+  }, [closingBarangMasuk]);
 
   const availableTempoKeluar = useMemo(() => {
     const tempos = new Set(barangKeluar.map(item => item.tempo || 'CASH'));
@@ -286,24 +329,24 @@ export const ClosingView: React.FC = () => {
 
   // Get unique ecommerce values from barang keluar
   const availableEcommerce = useMemo(() => {
-    const ecoms = new Set(barangKeluar.map(item => item.ecommerce || 'OFFLINE'));
+    const ecoms = new Set(barangKeluar.map(item => normalizeClosingEcommerceLabel(item.ecommerce)));
     return Array.from(ecoms).sort();
   }, [barangKeluar]);
 
   const availableSuppliers = useMemo(() => {
-    const suppliers = new Set(barangMasuk.map(item => item.customer || 'Unknown'));
+    const suppliers = new Set(closingBarangMasuk.map(item => item.customer || 'Unknown'));
     return Array.from(suppliers).sort();
-  }, [barangMasuk]);
+  }, [closingBarangMasuk]);
 
   const availableCustomers = useMemo(() => {
-    const customers = new Set(barangKeluar.map(item => item.customer || 'Unknown'));
+    const customers = new Set(barangKeluar.map(item => getClosingCustomerLabel(item)));
     return Array.from(customers).sort();
   }, [barangKeluar]);
 
   const availablePartNumbersMasuk = useMemo(() => {
-    const parts = new Set(barangMasuk.map(item => item.part_number).filter(Boolean));
+    const parts = new Set(closingBarangMasuk.map(item => item.part_number).filter(Boolean));
     return Array.from(parts).sort();
-  }, [barangMasuk]);
+  }, [closingBarangMasuk]);
 
   const availablePartNumbersKeluar = useMemo(() => {
     const parts = new Set(barangKeluar.map(item => item.part_number).filter(Boolean));
@@ -380,16 +423,9 @@ export const ClosingView: React.FC = () => {
     setPartNumberFilterKeluar(prev => pruneFilterValues(prev, availablePartNumbersKeluar));
   }, [availablePartNumbersKeluar]);
 
-  // Filtered data based on selected filters (exclude RETUR from closing)
+  // Filtered data based on selected filters (base data already excludes RETUR and NADIR)
   const filteredBarangMasuk = useMemo(() => {
-    return barangMasuk.filter(item => {
-      // Exclude RETUR items - check tempo field and keterangan field
-      const tempo = (item.tempo || '').toUpperCase();
-      const keterangan = ((item as any).keterangan || '').toUpperCase();
-      if (tempo === 'RETUR' || tempo.includes('RETUR') || keterangan.includes('RETUR')) {
-        return false;
-      }
-
+    return closingBarangMasuk.filter(item => {
       const tempoValue = item.tempo || 'CASH';
       const supplierValue = item.customer || 'Unknown';
       const partNumberValue = item.part_number || '';
@@ -401,7 +437,7 @@ export const ClosingView: React.FC = () => {
       return true;
     });
   }, [
-    barangMasuk,
+    closingBarangMasuk,
     tempoFilterMasuk,
     supplierFilter,
     partNumberFilterMasuk,
@@ -419,9 +455,14 @@ export const ClosingView: React.FC = () => {
         return false;
       }
 
+      // Hide OFFLINE with tempo NADIR from closing output.
+      const ecommerceValue = normalizeClosingEcommerceLabel(item.ecommerce);
+      if (ecommerceValue === 'OFFLINE' && tempo.trim() === 'NADIR') {
+        return false;
+      }
+
       const tempoValue = item.tempo || 'CASH';
-      const ecommerceValue = item.ecommerce || 'OFFLINE';
-      const customerValue = item.customer || 'Unknown';
+      const customerValue = getClosingCustomerLabel(item);
       const partNumberValue = item.part_number || '';
 
       if (!shouldInclude(tempoValue, tempoFilterKeluar, availableTempoKeluar)) return false;
@@ -528,15 +569,47 @@ export const ClosingView: React.FC = () => {
     return Array.from(dateGroups.values()).sort((a, b) => a.label.localeCompare(b.label));
   }, [filteredBarangMasuk]);
 
-  // Build Pivot Data for Barang Keluar: Date -> Ecommerce -> Tempo -> Customer -> Items
+  // Build Pivot Data for Barang Keluar:
+  // Date -> Ecommerce -> Kode Toko (for Shopee/Ekspor PH/Ekspor MY) -> Tempo -> Customer -> Items
   const pivotDataKeluar = useMemo(() => {
     const dateGroups: Map<string, PivotGroup> = new Map();
 
+    const ensureChildGroup = (
+      parent: PivotGroup,
+      label: string,
+      key: string,
+      level: number
+    ) => {
+      let child = parent.children.find(g => g.label === label);
+      if (!child) {
+        child = {
+          key,
+          label,
+          level,
+          totalQty: 0,
+          totalHarga: 0,
+          isExpanded: true,
+          children: [],
+          items: []
+        };
+        parent.children.push(child);
+      }
+      return child;
+    };
+
     filteredBarangKeluar.forEach(item => {
       const dateKey = item.created_at.split('T')[0];
-      const ecommerce = item.ecommerce || 'OFFLINE';
+      const ecommerce = normalizeClosingEcommerceLabel(item.ecommerce);
+      const kodeToko = getClosingKodeTokoLabel(item.kode_toko);
+      const useKodeTokoGroup = shouldSplitByKodeToko(ecommerce);
       const tempo = item.tempo || 'CASH';
-      const customer = item.customer || 'Unknown';
+      const isEcommerceChannel = ecommerce !== 'OFFLINE';
+      const tempoUpper = tempo.trim().toUpperCase();
+      const shouldHideTempoTabForEcommerce =
+        isEcommerceChannel && (tempoUpper === 'LUNAS' || tempoUpper === 'NADIR');
+      const customer = getClosingCustomerLabel(item);
+      const qty = item.qty_keluar || 0;
+      const harga = item.harga_total || 0;
 
       // Date level
       if (!dateGroups.has(dateKey)) {
@@ -554,67 +627,64 @@ export const ClosingView: React.FC = () => {
       const dateGroup = dateGroups.get(dateKey)!;
 
       // Ecommerce level
-      let ecomGroup = dateGroup.children.find(g => g.label === ecommerce);
-      if (!ecomGroup) {
-        ecomGroup = {
-          key: `${dateKey}-ecom-${ecommerce}`,
-          label: ecommerce,
-          level: 1,
-          totalQty: 0,
-          totalHarga: 0,
-          isExpanded: true,
-          children: [],
-          items: []
-        };
-        dateGroup.children.push(ecomGroup);
-      }
+      const ecomGroup = ensureChildGroup(
+        dateGroup,
+        ecommerce,
+        `${dateKey}-ecom-${ecommerce}`,
+        1
+      );
 
-      // Tempo level
-      let tempoGroup = ecomGroup.children.find(g => g.label === tempo);
-      if (!tempoGroup) {
-        tempoGroup = {
-          key: `${dateKey}-${ecommerce}-tempo-${tempo}`,
-          label: tempo,
-          level: 2,
-          totalQty: 0,
-          totalHarga: 0,
-          isExpanded: true,
-          children: [],
-          items: []
-        };
-        ecomGroup.children.push(tempoGroup);
-      }
+      const tempoParent = useKodeTokoGroup
+        ? ensureChildGroup(
+            ecomGroup,
+            kodeToko,
+            `${dateKey}-${ecommerce}-toko-${kodeToko}`,
+            2
+          )
+        : ecomGroup;
 
-      // Customer level
-      let customerGroup = tempoGroup.children.find(g => g.label === customer);
-      if (!customerGroup) {
-        customerGroup = {
-          key: `${dateKey}-${ecommerce}-${tempo}-cust-${customer}`,
-          label: customer,
-          level: 3,
-          totalQty: 0,
-          totalHarga: 0,
-          isExpanded: true,
-          children: [],
-          items: []
-        };
-        tempoGroup.children.push(customerGroup);
-      }
+      const tempoLevel = useKodeTokoGroup ? 3 : 2;
+      const customerLevelWithTempo = useKodeTokoGroup ? 4 : 3;
+      const customerLevelWithoutTempo = useKodeTokoGroup ? 3 : 2;
+
+      const tempoGroup = shouldHideTempoTabForEcommerce
+        ? null
+        : ensureChildGroup(
+            tempoParent,
+            tempo,
+            `${tempoParent.key}-tempo-${tempo}`,
+            tempoLevel
+          );
+
+      const customerParent = tempoGroup || tempoParent;
+      const customerGroup = ensureChildGroup(
+        customerParent,
+        customer,
+        `${customerParent.key}-cust-${customer}`,
+        shouldHideTempoTabForEcommerce ? customerLevelWithoutTempo : customerLevelWithTempo
+      );
 
       // Add item
       customerGroup.items.push(item);
-      customerGroup.totalQty += item.qty_keluar || 0;
-      customerGroup.totalHarga += item.harga_total || 0;
+      customerGroup.totalQty += qty;
+      customerGroup.totalHarga += harga;
 
       // Update parent totals
-      tempoGroup.totalQty += item.qty_keluar || 0;
-      tempoGroup.totalHarga += item.harga_total || 0;
+      if (tempoGroup) {
+        tempoGroup.totalQty += qty;
+        tempoGroup.totalHarga += harga;
+      }
 
-      ecomGroup.totalQty += item.qty_keluar || 0;
-      ecomGroup.totalHarga += item.harga_total || 0;
+      if (useKodeTokoGroup) {
+        tempoParent.totalQty += qty;
+        tempoParent.totalHarga += harga;
+      }
 
-      dateGroup.totalQty += item.qty_keluar || 0;
-      dateGroup.totalHarga += item.harga_total || 0;
+      ecomGroup.totalQty += qty;
+      ecomGroup.totalHarga += harga;
+
+      dateGroup.totalQty += qty;
+      dateGroup.totalHarga += harga;
     });
 
     return Array.from(dateGroups.values()).sort((a, b) => a.label.localeCompare(b.label));
@@ -635,32 +705,22 @@ export const ClosingView: React.FC = () => {
     };
   }, [filteredBarangKeluar]);
 
+  const collectExpandableKeys = (groups: PivotGroup[], target: Set<string>) => {
+    groups.forEach(group => {
+      target.add(group.key);
+      if (group.children.length > 0) {
+        collectExpandableKeys(group.children, target);
+      }
+    });
+  };
+
   // Expand all groups
   const expandAll = () => {
     const allKeys = new Set<string>();
     if (viewMode === 'masuk') {
-      pivotDataMasuk.forEach(dateGroup => {
-        allKeys.add(dateGroup.key);
-        dateGroup.children.forEach(tempoGroup => {
-          allKeys.add(tempoGroup.key);
-          tempoGroup.children.forEach(supplierGroup => {
-            allKeys.add(supplierGroup.key);
-          });
-        });
-      });
+      collectExpandableKeys(pivotDataMasuk, allKeys);
     } else {
-      pivotDataKeluar.forEach(dateGroup => {
-        allKeys.add(dateGroup.key);
-        dateGroup.children.forEach(ecomGroup => {
-          allKeys.add(ecomGroup.key);
-          ecomGroup.children.forEach(tempoGroup => {
-            allKeys.add(tempoGroup.key);
-            tempoGroup.children.forEach(customerGroup => {
-              allKeys.add(customerGroup.key);
-            });
-          });
-        });
-      });
+      collectExpandableKeys(pivotDataKeluar, allKeys);
     }
     setExpandedKeys(allKeys);
   };
@@ -948,27 +1008,27 @@ export const ClosingView: React.FC = () => {
           <title>${title} - ${period}</title>
           <style>
             @page {
-              size: A4 landscape;
-              margin: 8mm;
+              size: Letter landscape;
+              margin: 6mm;
             }
             * { margin: 0; padding: 0; box-sizing: border-box; }
             body { 
-              font-family: Arial, Helvetica, sans-serif;
+              font-family: "Arial Narrow", Arial, Helvetica, sans-serif;
               background: white;
               color: #1f2937;
-              font-size: 9px;
+              font-size: 9.5px;
               line-height: 1.2;
             }
             .header {
               display: flex;
               justify-content: space-between;
               align-items: center;
-              margin-bottom: 8px;
-              padding-bottom: 6px;
+              margin-bottom: 6px;
+              padding-bottom: 5px;
               border-bottom: 2px solid #3b82f6;
             }
             .header-left h1 { 
-              font-size: 16px; 
+              font-size: 17px; 
               color: #1e40af; 
               margin-bottom: 2px; 
               font-weight: bold; 
@@ -977,37 +1037,40 @@ export const ClosingView: React.FC = () => {
             .header-right {
               text-align: right;
               background: ${viewMode === 'masuk' ? '#ecfdf5' : '#fef2f2'};
-              padding: 6px 12px;
+              padding: 5px 10px;
               border-radius: 6px;
               border: 1px solid ${viewMode === 'masuk' ? '#10b981' : '#ef4444'};
             }
             .header-right .label { font-size: 8px; color: #6b7280; }
             .header-right .value { 
-              font-size: 14px; 
+              font-size: 15px; 
               font-weight: bold; 
               color: ${viewMode === 'masuk' ? '#059669' : '#dc2626'}; 
             }
             table { 
               width: 100%; 
               border-collapse: collapse; 
-              font-size: 8px;
+              font-size: 8.5px;
               background: white;
+              table-layout: fixed;
             }
             th { 
               background: #1e40af; 
               color: white;
-              padding: 5px 4px;
+              padding: 4px 4px;
               text-align: left;
               font-weight: 600;
               text-transform: uppercase;
-              font-size: 7px;
+              font-size: 7.5px;
               letter-spacing: 0.03em;
-              position: sticky;
-              top: 0;
+              position: static;
             }
+            th:nth-child(1) { width: 70%; }
+            th:nth-child(2) { width: 10%; text-align: right; }
+            th:nth-child(3) { width: 20%; text-align: right; }
             th:nth-child(2), th:nth-child(3) { text-align: right; }
             td { 
-              padding: 3px 4px; 
+              padding: 2px 4px; 
               border-bottom: 1px solid #e5e7eb;
               color: #1f2937;
               vertical-align: middle;
@@ -1065,16 +1128,16 @@ export const ClosingView: React.FC = () => {
             svg { display: none !important; }
             
             /* Make group headers more visible */
-            .text-lg { font-size: 10px !important; font-weight: bold; }
-            .text-base { font-size: 9px !important; }
+            .text-lg { font-size: 10.5px !important; font-weight: bold; }
+            .text-base { font-size: 9.5px !important; }
             
             .footer {
-              margin-top: 8px;
-              padding-top: 6px;
+              margin-top: 6px;
+              padding-top: 4px;
               border-top: 1px solid #d1d5db;
               display: flex;
               justify-content: space-between;
-              font-size: 8px;
+              font-size: 8.5px;
               color: #374151;
             }
             
@@ -1120,7 +1183,14 @@ export const ClosingView: React.FC = () => {
     const isExpanded = expandedKeys.has(group.key);
     const hasChildren = group.children.length > 0;
     const hasItems = group.items.length > 0;
+    const shouldRenderItemRows = viewMode !== 'masuk';
+    const hasVisibleItems = hasItems && shouldRenderItemRows;
+    const isExpandable = hasChildren || hasVisibleItems;
     const paddingLeft = depth * 24;
+    const itemCount = (node: PivotGroup): number => {
+      if (node.items.length > 0) return node.items.length;
+      return node.children.reduce((sum, child) => sum + itemCount(child), 0);
+    };
 
     // Get background color based on level
     const getBgColor = (level: number) => {
@@ -1137,12 +1207,14 @@ export const ClosingView: React.FC = () => {
       <React.Fragment key={group.key}>
         {/* Group Header Row */}
         <tr 
-          className={`${getBgColor(group.level)} hover:bg-gray-700/50 cursor-pointer transition-colors border-b border-gray-700/50`}
-          onClick={() => toggleExpand(group.key)}
+          className={`${getBgColor(group.level)} ${isExpandable ? 'hover:bg-gray-700/50 cursor-pointer' : ''} transition-colors border-b border-gray-700/50`}
+          onClick={() => {
+            if (isExpandable) toggleExpand(group.key);
+          }}
         >
           <td className="px-4 py-3 text-base" style={{ paddingLeft: `${paddingLeft + 16}px` }}>
             <div className="flex items-center gap-2">
-              {(hasChildren || hasItems) ? (
+              {isExpandable ? (
                 isExpanded ? (
                   <ChevronDown size={18} className="text-gray-400 flex-shrink-0" />
                 ) : (
@@ -1156,7 +1228,7 @@ export const ClosingView: React.FC = () => {
               </span>
               {group.level > 0 && (
                 <span className="text-sm text-gray-500 ml-2">
-                  ({hasItems ? group.items.length : group.children.reduce((sum, c) => sum + c.items.length + c.children.reduce((s, cc) => s + cc.items.length, 0), 0)} item)
+                  ({itemCount(group)} item)
                 </span>
               )}
             </div>
@@ -1176,7 +1248,7 @@ export const ClosingView: React.FC = () => {
             {group.children.map(child => renderPivotGroup(child, depth + 1))}
             
             {/* Render items */}
-            {hasItems && group.items.map((item, idx) => (
+            {hasVisibleItems && group.items.map((item, idx) => (
               <tr key={`${group.key}-item-${idx}`} className="bg-gray-800 hover:bg-gray-750 border-b border-gray-800/50">
                 <td className="px-4 py-2 text-sm" style={{ paddingLeft: `${paddingLeft + 48}px` }}>
                   <div className="text-gray-300">
@@ -1194,7 +1266,7 @@ export const ClosingView: React.FC = () => {
             ))}
 
             {/* Subtotal row for groups with items */}
-            {hasItems && (
+            {hasVisibleItems && (
               <tr className="bg-gray-700/20 border-b border-gray-700">
                 <td className="px-4 py-2 text-sm font-semibold text-gray-400" style={{ paddingLeft: `${paddingLeft + 48}px` }}>
                   {group.label} Total
@@ -1459,7 +1531,7 @@ export const ClosingView: React.FC = () => {
                 <thead className="bg-gray-700">
                   <tr>
                     <th className="px-4 py-4 text-left text-sm font-semibold text-gray-300 uppercase tracking-wider">
-                      {viewMode === 'masuk' ? 'Tanggal / Tempo / Supplier / Part Number' : 'Tanggal / Ecommerce / Tempo / Customer / Part Number'}
+                      {viewMode === 'masuk' ? 'Tanggal / Tempo / Supplier' : 'Tanggal / Ecommerce / Kode Toko / Tempo / Customer / Part Number'}
                     </th>
                     <th className="px-4 py-4 text-right text-sm font-semibold text-gray-300 uppercase tracking-wider w-28">
                       Qty

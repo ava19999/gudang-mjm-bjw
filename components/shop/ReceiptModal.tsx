@@ -13,10 +13,11 @@ interface ReceiptModalProps {
     customerName: string;
     tempo: string;
     note: string;
+    transactionDate?: string;
 }
 
 export const ReceiptModal: React.FC<ReceiptModalProps> = ({ 
-    isOpen, onClose, cart, customerName, tempo, note 
+    isOpen, onClose, cart, customerName, tempo, note, transactionDate
 }) => {
     const receiptRef = useRef<HTMLDivElement>(null);
     const { selectedStore } = useStore();
@@ -25,7 +26,9 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
     if (!isOpen) return null;
 
     const cartTotal = cart.reduce((sum, item) => sum + ((item.customPrice ?? item.price) * item.cartQuantity), 0);
-    const currentDate = new Date().toLocaleDateString('id-ID', { 
+    const dateSource = transactionDate ? new Date(transactionDate) : new Date();
+    const safeDate = Number.isNaN(dateSource.getTime()) ? new Date() : dateSource;
+    const currentDate = safeDate.toLocaleDateString('id-ID', { 
         timeZone: 'Asia/Jakarta',
         day: '2-digit', 
         month: 'long', 

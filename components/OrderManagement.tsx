@@ -8,11 +8,12 @@ import {
   processOfflineOrderItem, updateOfflineOrder, fetchInventory, createReturFromSold, updateReturStatus,
   fetchDistinctEcommerce, deleteBarangLog, updateSoldItemPrice
 } from '../services/supabaseService';
-import { OfflineOrderRow, SoldItemRow, ReturRow } from '../types';
+import { OfflineOrderRow, SoldItemRow, ReturRow, CartItem } from '../types';
+import { ReceiptModal } from './shop/ReceiptModal';
 import { 
   ClipboardList, CheckCircle, RotateCcw, Search, RefreshCw, Box, Check, X, 
   ChevronDown, ChevronUp, Layers, User, Pencil, Save, XCircle, Trash2, ChevronLeft, ChevronRight,
-  PackageX, RotateCw, ArrowLeftRight, Package, Hash, ShoppingBag, Copy
+  PackageX, RotateCw, ArrowLeftRight, Package, Hash, ShoppingBag, Copy, Printer
 } from 'lucide-react';
 
 // Toast Component Sederhana
@@ -347,6 +348,10 @@ export const OrderManagement: React.FC = () => {
   const [editingSoldItemId, setEditingSoldItemId] = useState<string | null>(null);
   const [editSoldPrice, setEditSoldPrice] = useState<number>(0);
   const [savingSoldPrice, setSavingSoldPrice] = useState(false);
+
+  // Receipt Modal for Offline Sold Orders
+  const [isReceiptModalOpen, setIsReceiptModalOpen] = useState(false);
+  const [receiptData, setReceiptData] = useState<{ customerName: string; tempo: string; note: string; cart: CartItem[]; transactionDate?: string } | null>(null);
 
   // Create inventory lookup map by part number for quick stock access
   const inventoryStockMap = useMemo(() => {
@@ -739,6 +744,41 @@ export const OrderManagement: React.FC = () => {
     } else {
       showToast(result.msg, 'error');
     }
+  };
+
+  const openReceiptForGroup = (group: { customer: string; tempo: string; ecommerce: string; date: string; items: SoldItemRow[] }) => {
+    const cart: CartItem[] = group.items.map((item) => {
+      const unitPrice = item.qty_keluar > 0 ? item.harga_total / item.qty_keluar : 0;
+      return {
+        id: item.id,
+        partNumber: item.part_number || '',
+        name: item.name || '',
+        quantity: item.qty_keluar || 0,
+        price: unitPrice,
+        cartQuantity: item.qty_keluar || 0,
+        customPrice: unitPrice,
+        brand: item.brand || '',
+        application: item.application || '',
+        shelf: '',
+        ecommerce: item.ecommerce || group.ecommerce || 'OFFLINE',
+        imageUrl: '',
+        lastUpdated: Date.now(),
+        initialStock: 0,
+        qtyIn: 0,
+        qtyOut: 0,
+        costPrice: 0,
+        kingFanoPrice: 0,
+      };
+    });
+
+    setReceiptData({
+      customerName: group.customer || 'Customer',
+      tempo: group.tempo || 'CASH',
+      note: '',
+      cart,
+      transactionDate: group.date || group.items[0]?.created_at,
+    });
+    setIsReceiptModalOpen(true);
   };
 
   // Show Item Detail Modal with Stock Comparison
@@ -1423,6 +1463,7 @@ export const OrderManagement: React.FC = () => {
               // Default to expanded (true) if not explicitly set to false
               const isExpanded = expandedGroups[groupKey] !== false;
               const ecommerceColors = getEcommerceColor(group.ecommerce);
+              const isOfflineGroup = (group.ecommerce || '').toUpperCase() === 'OFFLINE';
 
               // Get marketplace icon based on ecommerce
               const getMarketplaceIcon = (ecom: string) => {
@@ -1557,6 +1598,15 @@ export const OrderManagement: React.FC = () => {
                       
                       {/* Bulk Action Buttons */}
                       <div className="flex items-center gap-2">
+                        {isOfflineGroup && (
+                          <button 
+                            onClick={(e) => { e.stopPropagation(); openReceiptForGroup(group); }} 
+                            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-gradient-to-r from-emerald-900/40 to-emerald-800/30 text-emerald-300 hover:from-emerald-800/60 hover:to-emerald-700/40 transition-all duration-200 border border-emerald-700/50 text-xs font-bold shadow-lg shadow-emerald-900/10"
+                            title="Buat Nota Offline"
+                          >
+                            <Printer size={14}/> Nota
+                          </button>
+                        )}
                         <button 
                           onClick={(e) => { e.stopPropagation(); handleReturAllGroupItems(group.items); }} 
                           className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-gradient-to-r from-orange-900/40 to-orange-800/30 text-orange-400 hover:from-orange-800/60 hover:to-orange-700/40 transition-all duration-200 border border-orange-700/50 text-xs font-bold shadow-lg shadow-orange-900/10"
@@ -2124,6 +2174,16 @@ export const OrderManagement: React.FC = () => {
           </div>
         </div>
       )}
+
+      <ReceiptModal
+        isOpen={isReceiptModalOpen}
+        onClose={() => setIsReceiptModalOpen(false)}
+        cart={receiptData?.cart || []}
+        customerName={receiptData?.customerName || ''}
+        tempo={receiptData?.tempo || ''}
+        note={receiptData?.note || ''}
+        transactionDate={receiptData?.transactionDate}
+      />
     </div>
   );
 };
