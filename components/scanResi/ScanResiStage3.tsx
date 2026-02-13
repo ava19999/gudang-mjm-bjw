@@ -3658,8 +3658,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
 
   return (
     <div ref={containerRef} className="bg-gray-900 text-white h-screen p-2 pb-20 md:pb-2 text-sm font-sans flex flex-col overflow-hidden relative">
-      {/* Remote User Cursors */}
-      <UserCursors />
+      {/* Remote User Cursors disabled */}
       
       {/* Active Users Indicator */}
       <ActiveUsersIndicator />
