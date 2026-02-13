@@ -1382,6 +1382,11 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
           setRows(prevRows => 
             prevRows.map(row => {
               if (row.id !== rowId && row.id !== legacyRowId) return row;
+              // Jangan timpa baris yang sedang difokuskan user ini (hindari kehilangan input)
+              const focusedRowId = focusedCell && rowsRef.current[focusedCell.rowIndex]?.id;
+              if (focusedRowId && (focusedRowId === rowId || focusedRowId === legacyRowId)) {
+                return row;
+              }
               return { 
                 ...row, 
                 part_number: newData.part_number ?? row.part_number,
