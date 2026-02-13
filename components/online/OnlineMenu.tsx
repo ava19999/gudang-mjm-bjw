@@ -66,6 +66,19 @@ export const OnlineMenu: React.FC<OnlineMenuProps> = ({
             </button>
             <button
               onClick={() => {
+                setActiveView('stock_online');
+              }}
+              className={`w-full px-3 py-2.5 text-left hover:bg-gray-700/80 transition-all duration-150 flex items-center gap-2.5 active:scale-[0.98] ${
+                activeView === 'stock_online' ? 'bg-gradient-to-r from-cyan-900/30 to-transparent text-cyan-400 shadow-inner' : 'text-gray-300'
+              }`}
+            >
+              <div className={`p-1 rounded-lg ${activeView === 'stock_online' ? 'bg-cyan-900/40' : 'bg-gray-700/50'}`}>
+                <Globe size={16} />
+              </div>
+              <span className="text-sm font-medium">Stock Online</span>
+            </button>
+            <button
+              onClick={() => {
                 setActiveView('foto_produk');
               }}
               className={`w-full px-3 py-2.5 text-left hover:bg-gray-700/80 transition-all duration-150 flex items-center gap-2.5 active:scale-[0.98] ${
@@ -127,6 +140,18 @@ export const OnlineMenu: React.FC<OnlineMenuProps> = ({
           >
             <Globe size={16} />
             <span className="text-sm font-medium">Data Agung</span>
+          </button>
+          <button
+            onClick={() => {
+              setActiveView('stock_online');
+              setInternalIsOpen(false);
+            }}
+            className={`w-full px-4 py-3 text-left hover:bg-gray-700 transition-colors flex items-center gap-2 ${
+              activeView === 'stock_online' ? 'bg-gray-700 text-cyan-400' : 'text-gray-300'
+            }`}
+          >
+            <Globe size={16} />
+            <span className="text-sm font-medium">Stock Online</span>
           </button>
           <button
             onClick={() => {

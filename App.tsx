@@ -17,6 +17,7 @@ import { PiutangCustomerView } from './components/finance/PiutangCustomerView';
 import { TagihanTokoView } from './components/finance/TagihanTokoView';
 import { RekapBulananView } from './components/finance/RekapBulananView';
 import { DataAgungView } from './components/online/DataAgungView';
+import StockOnlineView from './components/online/StockOnlineView';
 import { FotoProdukView } from './components/online/FotoProdukView';
 import { ScanResiStage1 } from './components/scanResi/ScanResiStage1';
 import { ScanResiStage2 } from './components/scanResi/ScanResiStage2';
@@ -313,6 +314,7 @@ const AppContent: React.FC = () => {
         {activeView === 'tagihan_toko' && isAdmin && <TagihanTokoView />}
         {activeView === 'rekap_bulanan' && isAdmin && <RekapBulananView />}
         {activeView === 'data_agung' && isAdmin && <DataAgungView items={items} onRefresh={refreshData} showToast={showToast} />}
+          {activeView === 'stock_online' && isAdmin && <StockOnlineView />}
         {activeView === 'foto_produk' && isAdmin && <FotoProdukView />}
         {activeView === 'scan_resi_stage1' && isAdmin && <ScanResiStage1 onRefresh={refreshData} />}
         {activeView === 'scan_resi_stage2' && isAdmin && <ScanResiStage2 onRefresh={refreshData} />}
