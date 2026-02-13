@@ -1132,7 +1132,7 @@ const SkippedItemsModal = ({
 };
 
 export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
-  const { selectedStore } = useStore();
+  const { selectedStore, userName: loginUserName } = useStore();
   const [rows, setRows] = useState<Stage3Row[]>([]);
   const rowsRef = useRef<Stage3Row[]>([]);
   const [loading, setLoading] = useState(false);
@@ -1225,9 +1225,26 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
     return userColors[hash % userColors.length];
   }, []);
   
-  // Generate unique user ID (persistent per session)
+  // Generate unique user ID (persistent per session) & use login name if available
   const userIdRef = useRef<string>(Math.random().toString(36).substring(2, 15));
-  const userNameRef = useRef<string>(`User-${Math.random().toString(36).substring(2, 6).toUpperCase()}`);
+  const userNameRef = useRef<string>(loginUserName?.trim() || `User-${Math.random().toString(36).substring(2, 6).toUpperCase()}`);
+  useEffect(() => {
+    if (loginUserName && loginUserName.trim()) {
+      userNameRef.current = loginUserName.trim();
+      // refresh presence with updated name
+      if (presenceChannelRef.current) {
+        presenceChannelRef.current.track({
+          online_at: new Date().toISOString(),
+          userId: userIdRef.current,
+          userName: userNameRef.current,
+          color: getUserColor(userIdRef.current),
+          editingCell: null,
+          cursorX: 0,
+          cursorY: 0
+        });
+      }
+    }
+  }, [loginUserName, getUserColor]);
   
   // Throttle untuk cursor update (hanya kirim setiap 50ms)
   const lastCursorUpdate = useRef<number>(0);
@@ -1587,9 +1604,9 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
         const users: {userId: string, userName: string, color: string}[] = [];
         const cells: Record<string, {userId: string, userName: string, color: string}> = {};
         
-        Object.entries(state).forEach(([oderId, presences]) => {
+        Object.entries(state).forEach(([_, presences]) => {
           const presence = (presences as any[])[0];
-          if (presence && presence.oderId !== oderId) {
+          if (presence && presence.userId !== userId) {
             users.push({
               userId: presence.userId,
               userName: presence.userName,
@@ -1610,7 +1627,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
         
         // Update cursor positions
         const cursors: Record<string, {x: number, y: number, userName: string, color: string}> = {};
-        Object.entries(state).forEach(([oderId, presences]) => {
+        Object.entries(state).forEach(([_, presences]) => {
           const presence = (presences as any[])[0];
           if (presence && presence.userId !== userId && presence.cursorX !== undefined && presence.cursorY !== undefined) {
             cursors[presence.userId] = {
@@ -2019,7 +2036,11 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
             ecommerce: row.ecommerce,
             toko: row.sub_toko
          };
-         await updateResiItem(selectedStore, dbId, payload);
+         const res = await updateResiItem(selectedStore, dbId, payload);
+         if (!res.success) {
+           alert(res.message || 'Gagal update data (Toko/E-Comm).');
+           throw new Error(res.message || 'Gagal update resi item');
+         }
       } 
       else {
          const payload = {
