@@ -12,6 +12,7 @@ export type ActiveView =
   | 'tagihan_toko'
   | 'rekap_bulanan'
   | 'data_agung'
+  | 'stock_online'
   | 'foto_produk'
   | 'scan_resi_stage1'
   | 'scan_resi_stage2'
