@@ -675,6 +675,31 @@ export const fetchKilatPenjualan = async (
 };
 
 /**
+ * Update penjualan KILAT (misal mengubah tanggal_jual)
+ */
+export const updateKilatPenjualan = async (
+  store: string | null,
+  id: string,
+  updates: Partial<Pick<KilatPenjualan, 'tanggal_jual' | 'no_pesanan' | 'resi_penjualan' | 'customer' | 'ecommerce'>>
+): Promise<{ success: boolean; message: string }> => {
+  try {
+    const table = getKilatPenjualanTable(store);
+    const { error } = await supabase
+      .from(table)
+      .update(updates)
+      .eq('id', id);
+
+    if (error) {
+      return { success: false, message: error.message };
+    }
+    return { success: true, message: 'Penjualan berhasil diupdate' };
+  } catch (err: any) {
+    console.error('updateKilatPenjualan exception:', err);
+    return { success: false, message: err.message || 'Terjadi kesalahan' };
+  }
+};
+
+/**
  * Tambah penjualan KILAT manual (bukan dari CSV)
  */
 export const addKilatPenjualanManual = async (

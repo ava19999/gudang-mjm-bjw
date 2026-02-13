@@ -1,5 +1,5 @@
 // FILE: src/components/finance/TagihanTokoView.tsx
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { 
   Store, Search, Filter, Calendar, RefreshCw, 
   ChevronDown, ChevronUp, Clock, DollarSign, User,
@@ -157,6 +157,8 @@ export const TagihanTokoView: React.FC = () => {
   const [printToko, setPrintToko] = useState<TokoPiutang | null>(null);
   const [printStore, setPrintStore] = useState<'mjm' | 'bjw'>('mjm');
   const [printDate, setPrintDate] = useState(''); // kept for compatibility, not used for printing all dates
+  const [printedInfo, setPrintedInfo] = useState<Map<string, { invoice_no: string; printed_at: string; store: string; total: number }>>(new Map());
+  const [flagModal, setFlagModal] = useState<{ customer: string; info: { invoice_no: string; printed_at: string; store: string }; toko: TokoPiutang | null } | null>(null);
   
   // Payment form states
   const [paymentAmount, setPaymentAmount] = useState('');
@@ -219,6 +221,79 @@ export const TagihanTokoView: React.FC = () => {
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 3000);
+  };
+
+  // Load printed customers marker from localStorage
+  // Load printed markers from DB
+  const loadPrintedFlags = useCallback(async (customers: string[]) => {
+    if (!filterMonth || customers.length === 0) {
+      setPrintedInfo(new Map());
+      return;
+    }
+    try {
+      const storeKey = filterStore === 'all' ? ['all', 'mjm', 'bjw'] : [filterStore];
+      const { data, error } = await supabase
+        .from('inv_tagihan')
+        // only label receipts that were printed (avoid IMG/export rows)
+        .select('customer, inv, created_at, toko, total, status')
+        .eq('jatuh_tempo_bulan', filterMonth)
+        .eq('status', 'PRINTED')
+        .ilike('inv', 'INV-%')
+        .in('toko', storeKey);
+
+      if (error) {
+        console.error('Load inv_tagihan error:', error);
+        setPrintedInfo(new Map());
+        return;
+      }
+
+      const map = new Map<string, { invoice_no: string; printed_at: string; store: string; total: number }>();
+      (data || []).forEach(row => {
+        const cust = (row.customer || row.toko || '').toUpperCase();
+        if (!cust || !customers.includes(cust)) return;
+        map.set(cust, {
+          invoice_no: row.inv || '-',
+          printed_at: row.created_at,
+          store: row.toko || 'all',
+          total: row.total || 0,
+        });
+      });
+      setPrintedInfo(map);
+    } catch (err) {
+      console.error('Exception load inv_tagihan:', err);
+      setPrintedInfo(new Map());
+    }
+  }, [filterMonth, filterStore]);
+
+  const markPrinted = async (customers: string[], invoiceNo: string, totalAmount: number) => {
+    if (!invoiceNo) return;
+    const storeVal = filterStore === 'all' ? 'all' : filterStore;
+    const dueMonth = filterMonth || new Date().toISOString().slice(0,7);
+    const rows = customers.map(c => ({
+      customer: c.toUpperCase(),
+      tempo: '',
+      jatuh_tempo_bulan: dueMonth,
+      toko: storeVal,
+      inv: invoiceNo,
+      total: totalAmount,
+      status: 'PRINTED'
+    }));
+
+    const { error } = await supabase
+      .from('inv_tagihan')
+      .upsert(rows);
+
+    if (error) {
+      console.error('Gagal menyimpan inv_tagihan:', error);
+      showToast('Gagal menyimpan status cetak', 'error');
+      return;
+    }
+
+    const next = new Map(printedInfo);
+    rows.forEach(r => {
+      next.set(r.customer.toUpperCase(), { invoice_no: r.inv, printed_at: new Date().toISOString(), store: r.toko, total: r.total });
+    });
+    setPrintedInfo(next);
   };
 
   // Get tempo types (excluding CASH and NADIR)
@@ -414,6 +489,9 @@ export const TagihanTokoView: React.FC = () => {
 
       setTokoList(tokoArray);
       setTokoLunas(lunasArray);
+      // Load printed flags for displayed customers
+      const allCustomersUpper = [...tokoArray, ...lunasArray].map(t => t.customer.toUpperCase());
+      loadPrintedFlags(allCustomersUpper);
     } catch (err) {
       console.error('Failed to load tagihan data:', err);
       showToast('Gagal memuat data tagihan', 'error');
@@ -495,8 +573,13 @@ export const TagihanTokoView: React.FC = () => {
       if (searchTerm && !t.customer.toLowerCase().includes(searchTerm.toLowerCase())) {
         return false;
       }
-      if (filterTempo !== 'all' && !t.tempos.includes(filterTempo)) {
-        return false;
+      if (filterTempo !== 'all') {
+        if (filterTempo === 'others') {
+          const has123 = t.tempos.some(tp => tp.includes('1') || tp.includes('2') || tp.includes('3'));
+          if (has123) return false;
+        } else if (!t.tempos.includes(filterTempo)) {
+          return false;
+        }
       }
       return true;
     });
@@ -508,9 +591,8 @@ export const TagihanTokoView: React.FC = () => {
     const tempo3Bln = filteredToko.filter(t => t.tempos.some(tp => tp.includes('3'))).reduce((sum, t) => sum + t.sisaTagihan, 0);
     const tempo2Bln = filteredToko.filter(t => t.tempos.some(tp => tp.includes('2'))).reduce((sum, t) => sum + t.sisaTagihan, 0);
     const tempo1Bln = filteredToko.filter(t => t.tempos.some(tp => tp.includes('1'))).reduce((sum, t) => sum + t.sisaTagihan, 0);
-    const tempoLainnya = totalTagihan - tempo3Bln - tempo2Bln - tempo1Bln;
     
-    return { totalTagihan, tempo3Bln, tempo2Bln, tempo1Bln, tempoLainnya };
+    return { totalTagihan, tempo3Bln, tempo2Bln, tempo1Bln, tempoLainnya: 0 };
   }, [filteredToko]);
 
   // Handle payment submission
@@ -1073,20 +1155,20 @@ export const TagihanTokoView: React.FC = () => {
     .foot { margin-top: 16px; font-size: 12px; }
     .signature { margin-top: 36px; font-size: 12px; }
     .logo { height: 170px; max-height: 180px; }
+    .table-wrapper { position: relative; }
     .watermark {
-      position: fixed;
-      top: 55%;
+      position: absolute;
+      top: 50%;
       left: 50%;
       transform: translate(-50%, -50%) rotate(-10deg);
       width: 65%;
       opacity: 0.18;
-      z-index: -1;
+      z-index: 0;
       pointer-events: none;
     }
   </style>
 </head>
 <body>
-  <img class="watermark" src="${logoSrc}" alt="watermark" />
   <div class="header">
     <div class="header-left">
       <div class="title">TANDA TERIMA</div>
@@ -1098,7 +1180,9 @@ export const TagihanTokoView: React.FC = () => {
     </div>
     <img src="${logoSrc}" alt="logo" class="logo" />
   </div>
-  <table class="table">
+  <div class="table-wrapper">
+    <img class="watermark" src="${logoSrc}" alt="watermark" />
+    <table class="table">
     <thead>
       <tr>
         <th style="width:40px;">NO</th>
@@ -1119,6 +1203,7 @@ export const TagihanTokoView: React.FC = () => {
       </tr>
     </tbody>
   </table>
+  </div>
   <div class="foot">
     PEMBAYARAN DILAKUKAN MELALUI<br/>
     REK BCA<br/>
@@ -1138,6 +1223,8 @@ export const TagihanTokoView: React.FC = () => {
       win.document.close();
       win.focus();
       win.print();
+      // Tandai hanya customer yang dicetak
+      markPrinted([printToko.customer], invoiceNo, totalAmount).catch(err => console.error('markPrinted error', err));
     }
     setShowPrintModal(false);
   };
@@ -1168,30 +1255,38 @@ export const TagihanTokoView: React.FC = () => {
 
       {/* Statistics Cards */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
-        <div className="bg-gradient-to-br from-orange-900/40 to-orange-800/20 border border-orange-800/30 rounded-xl p-4">
+        <button
+          onClick={() => setFilterTempo('all')}
+          className="bg-gradient-to-br from-orange-900/40 to-orange-800/20 border border-orange-800/30 rounded-xl p-4 text-left hover:border-orange-500 transition"
+        >
           <div className="text-orange-400 text-xs font-medium mb-1">Total Tagihan</div>
           <div className="text-xl md:text-2xl font-bold text-white">{formatCompactNumber(stats.totalTagihan)}</div>
           <div className="text-gray-400 text-xs mt-1">{filteredToko.length} customer</div>
-        </div>
-        <div className="bg-gradient-to-br from-purple-900/40 to-purple-800/20 border border-purple-800/30 rounded-xl p-4">
+        </button>
+        <button
+          onClick={() => setFilterTempo('3 BLN')}
+          className="bg-gradient-to-br from-purple-900/40 to-purple-800/20 border border-purple-800/30 rounded-xl p-4 text-left hover:border-purple-500 transition"
+        >
           <div className="text-purple-400 text-xs font-medium mb-1">Tempo 3 BLN</div>
           <div className="text-xl md:text-2xl font-bold text-white">{formatCompactNumber(stats.tempo3Bln)}</div>
           <div className="text-gray-400 text-xs mt-1">{filteredToko.filter(t => t.tempos.some(tp => tp.includes('3'))).length} customer</div>
-        </div>
-        <div className="bg-gradient-to-br from-blue-900/40 to-blue-800/20 border border-blue-800/30 rounded-xl p-4">
+        </button>
+        <button
+          onClick={() => setFilterTempo('2 BLN')}
+          className="bg-gradient-to-br from-blue-900/40 to-blue-800/20 border border-blue-800/30 rounded-xl p-4 text-left hover:border-blue-500 transition"
+        >
           <div className="text-blue-400 text-xs font-medium mb-1">Tempo 2 BLN</div>
           <div className="text-xl md:text-2xl font-bold text-white">{formatCompactNumber(stats.tempo2Bln)}</div>
           <div className="text-gray-400 text-xs mt-1">{filteredToko.filter(t => t.tempos.some(tp => tp.includes('2'))).length} customer</div>
-        </div>
-        <div className="bg-gradient-to-br from-green-900/40 to-green-800/20 border border-green-800/30 rounded-xl p-4">
+        </button>
+        <button
+          onClick={() => setFilterTempo('1 BLN')}
+          className="bg-gradient-to-br from-green-900/40 to-green-800/20 border border-green-800/30 rounded-xl p-4 text-left hover:border-green-500 transition"
+        >
           <div className="text-green-400 text-xs font-medium mb-1">Tempo 1 BLN</div>
           <div className="text-xl md:text-2xl font-bold text-white">{formatCompactNumber(stats.tempo1Bln)}</div>
           <div className="text-gray-400 text-xs mt-1">{filteredToko.filter(t => t.tempos.some(tp => tp.includes('1'))).length} customer</div>
-        </div>
-        <div className="bg-gradient-to-br from-yellow-900/40 to-yellow-800/20 border border-yellow-800/30 rounded-xl p-4">
-          <div className="text-yellow-400 text-xs font-medium mb-1">Tempo Lainnya</div>
-          <div className="text-xl md:text-2xl font-bold text-white">{formatCompactNumber(stats.tempoLainnya)}</div>
-        </div>
+        </button>
       </div>
 
       {/* Tabs */}
@@ -1352,13 +1447,27 @@ export const TagihanTokoView: React.FC = () => {
                 {filteredToko.map((toko) => (
                   <tr key={`${toko.customer}_${toko.tempos.join('-')}`} className="hover:bg-gray-700/30 transition-colors">
                     <td className="px-4 py-3">
-                <div className="flex items-center gap-2">
-                  <div className="p-1.5 bg-gray-700 rounded-lg">
-                    <Store className="w-4 h-4 text-orange-400" />
+                  <div className="flex items-center gap-2">
+                    <div className="p-1.5 bg-gray-700 rounded-lg">
+                      <Store className="w-4 h-4 text-orange-400" />
+                    </div>
+                    <span className="font-medium text-white">{toko.customer}</span>
+                    {printedInfo.has(toko.customer.toUpperCase()) && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const info = printedInfo.get(toko.customer.toUpperCase())!;
+                          setFlagModal({ customer: toko.customer, info, toko });
+                        }}
+                        className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-semibold rounded-full bg-green-900/40 text-green-200 border border-green-700/50 hover:bg-green-800/60"
+                        title="Klik untuk melihat detail invoice cetak"
+                      >
+                        <Check className="w-3 h-3" />
+                        Sudah Cetak
+                      </button>
+                    )}
                   </div>
-                  <span className="font-medium text-white">{toko.customer}</span>
-                </div>
-              </td>
+                </td>
               <td className="px-4 py-3">
                 <div className="flex flex-wrap gap-1">
                   {toko.tempos.map(tp => (
@@ -2083,6 +2192,43 @@ export const TagihanTokoView: React.FC = () => {
               >
                 <Check className="w-4 h-4" />
                 Cetak
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Flag Detail Modal */}
+      {flagModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-gray-800 rounded-2xl w-full max-w-md shadow-2xl border border-gray-700">
+            <div className="flex items-center justify-between p-4 border-b border-gray-700">
+              <div className="flex items-center gap-2 text-white font-semibold">Invoice Cetak</div>
+              <button
+                onClick={() => setFlagModal(null)}
+                className="p-2 hover:bg-gray-700 rounded-lg transition-colors"
+              >
+                <X className="w-5 h-5 text-gray-400" />
+              </button>
+            </div>
+            <div className="p-4 space-y-3 text-sm text-gray-200">
+              <div><span className="text-gray-400">Customer:</span> <span className="font-semibold">{flagModal.customer}</span></div>
+              <div><span className="text-gray-400">Invoice No:</span> <span className="font-semibold">{flagModal.info.invoice_no}</span></div>
+              <div><span className="text-gray-400">Printed At:</span> {formatDate(flagModal.info.printed_at)}</div>
+              {flagModal.toko && (
+                <>
+                  <div><span className="text-gray-400">Tempo:</span> {flagModal.toko.tempos.join(', ')}</div>
+                  <div><span className="text-gray-400">Total Tagihan:</span> {formatCurrency(flagModal.toko.totalTagihan + flagModal.toko.totalTagihanManual)}</div>
+                  <div><span className="text-gray-400">Sisa:</span> {formatCurrency(flagModal.toko.sisaTagihan)}</div>
+                </>
+              )}
+            </div>
+            <div className="p-4 border-t border-gray-700 text-right">
+              <button
+                onClick={() => setFlagModal(null)}
+                className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-xl font-medium transition-colors"
+              >
+                Tutup
               </button>
             </div>
           </div>

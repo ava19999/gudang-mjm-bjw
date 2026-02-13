@@ -6,7 +6,7 @@ import { useStore } from '../context/StoreContext';
 import { 
   fetchOfflineOrders, fetchSoldItems, fetchReturItems,
   processOfflineOrderItem, updateOfflineOrder, fetchInventory, createReturFromSold, updateReturStatus,
-  fetchDistinctEcommerce, deleteBarangLog, updateSoldItemPrice
+  fetchDistinctEcommerce, deleteBarangLog, updateSoldItemPrice, updateSoldItemDate
 } from '../services/supabaseService';
 import { OfflineOrderRow, SoldItemRow, ReturRow, CartItem } from '../types';
 import { ReceiptModal } from './shop/ReceiptModal';
@@ -348,6 +348,8 @@ export const OrderManagement: React.FC = () => {
   const [editingSoldItemId, setEditingSoldItemId] = useState<string | null>(null);
   const [editSoldPrice, setEditSoldPrice] = useState<number>(0);
   const [savingSoldPrice, setSavingSoldPrice] = useState(false);
+  const [editingSoldDateId, setEditingSoldDateId] = useState<string | null>(null);
+  const [editSoldDate, setEditSoldDate] = useState<string>('');
 
   // Receipt Modal for Offline Sold Orders
   const [isReceiptModalOpen, setIsReceiptModalOpen] = useState(false);
@@ -824,6 +826,39 @@ export const OrderManagement: React.FC = () => {
     setEditSoldPrice(0);
   };
 
+  // Edit tanggal sold item
+  const startEditSoldDate = (item: SoldItemRow, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditingSoldDateId(item.id);
+    const d = new Date(item.created_at);
+    const isoLocal = new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+    setEditSoldDate(isoLocal);
+  };
+
+  const cancelEditSoldDate = (e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setEditingSoldDateId(null);
+    setEditSoldDate('');
+  };
+
+  const saveEditSoldDate = async (item: SoldItemRow, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!editSoldDate) {
+      showToast('Pilih tanggal terlebih dahulu', 'error');
+      return;
+    }
+    const isoUtc = new Date(editSoldDate).toISOString();
+    const result = await updateSoldItemDate(item.id, isoUtc, selectedStore);
+    if (result.success) {
+      showToast('Tanggal berhasil diupdate!');
+      setEditingSoldDateId(null);
+      setEditSoldDate('');
+      loadData();
+    } else {
+      showToast(result.msg, 'error');
+    }
+  };
+
   const saveEditSoldPrice = async (item: SoldItemRow, e: React.MouseEvent) => {
     e.stopPropagation();
     if (editSoldPrice < 0) {
@@ -1278,6 +1313,23 @@ export const OrderManagement: React.FC = () => {
                           </span>
                           <span className="text-sm font-mono bg-gray-700 px-2 py-0.5 rounded text-gray-300">
                             {new Date(group.date).toLocaleString('id-ID', {timeZone: 'Asia/Jakarta'})}
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const newDate = prompt('Ubah tanggal pesanan (YYYY-MM-DD HH:mm):', new Date(group.date).toISOString().slice(0,16).replace('T',' '));
+                                if (!newDate) return;
+                                const iso = new Date(newDate.replace(' ', 'T')).toISOString();
+                                const updates = group.items.map(it => updateSoldItemDate(it.id, iso, selectedStore));
+                                Promise.all(updates).then(() => {
+                                  showToast('Tanggal pesanan diupdate', 'success');
+                                  loadData();
+                                }).catch(() => showToast('Gagal update tanggal', 'error'));
+                              }}
+                              className="ml-2 text-gray-400 hover:text-white"
+                              title="Edit tanggal pesanan"
+                            >
+                              <Pencil size={12}/>
+                            </button>
                           </span>
                           <span className="text-sm bg-blue-900/30 text-blue-300 px-2 py-0.5 rounded border border-blue-800 flex items-center gap-1">
                             <Layers size={14} /> {group.items.length} Item
@@ -1780,6 +1832,50 @@ export const OrderManagement: React.FC = () => {
                                         {item.application}
                                       </span>
                                     )}
+                                  </div>
+
+                                  {/* Tanggal / Stok / Qty */}
+                                  <div className="flex flex-wrap items-center gap-2 text-xs text-gray-400 mt-2" onClick={(e) => e.stopPropagation()}>
+                                    {editingSoldDateId === item.id ? (
+                                      <div className="flex items-center gap-1">
+                                        <input
+                                          type="datetime-local"
+                                          value={editSoldDate}
+                                          onChange={(e) => setEditSoldDate(e.target.value)}
+                                          className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-white text-xs"
+                                        />
+                                        <button
+                                          onClick={(e) => saveEditSoldDate(item, e)}
+                                          className="p-1 bg-green-800/60 hover:bg-green-700/70 rounded text-green-200"
+                                          title="Simpan tanggal"
+                                        >
+                                          <Save size={14} />
+                                        </button>
+                                        <button
+                                          onClick={(e) => cancelEditSoldDate(e)}
+                                          className="p-1 bg-gray-700 hover:bg-gray-600 rounded text-gray-300"
+                                          title="Batal"
+                                        >
+                                          <X size={14} />
+                                        </button>
+                                      </div>
+                                    ) : (
+                                      <button
+                                        onClick={(e) => startEditSoldDate(item, e)}
+                                        className="px-2 py-1 bg-gray-800 border border-gray-700 rounded hover:bg-gray-700 text-left flex items-center gap-2"
+                                        title="Edit tanggal"
+                                      >
+                                        <Pencil size={12} className="text-gray-400" />
+                                        {new Date(item.created_at).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                                      </button>
+                                    )}
+                                    <span className="px-2 py-1 bg-gray-800 border border-gray-700 rounded">Stok: {hasStock ? currentStock : 'N/A'}</span>
+                                    <span className="px-2 py-1 bg-gray-800 border border-gray-700 rounded">
+                                      Qty: <span className="text-white font-semibold">{item.qty_keluar}</span>
+                                      <span className={`ml-2 text-[10px] px-1.5 py-0.5 rounded ${isOutOfStock ? 'bg-red-900/50 text-red-200' : isLowStock ? 'bg-orange-900/50 text-orange-200' : 'bg-green-900/40 text-green-200'}`}>
+                                        {isOutOfStock ? 'Stok Habis' : isLowStock ? 'Stok Rendah' : 'Stok Ok'}
+                                      </span>
+                                    </span>
                                   </div>
                                 </div>
                               </div>
