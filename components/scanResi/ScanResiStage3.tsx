@@ -2087,60 +2087,16 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
     }
   }, [selectedStore]);
 
-  const flushPendingUpdates = useCallback(async (reason: string = 'manual') => {
-    if (isFlushingPendingRef.current) return;
-    if (pendingUpdates.current.size === 0) return;
+  const flushPendingUpdates = useCallback(async (_reason: string = 'manual') => {
+    // Autosave dimatikan; tidak ada yang perlu diflush.
+    pendingUpdates.current.clear();
+    autoSaveTimers.current.forEach(timer => clearTimeout(timer));
+    autoSaveTimers.current.clear();
+  }, []);
 
-    isFlushingPendingRef.current = true;
-    try {
-      // Stop all debounce timers, then flush latest pending snapshots.
-      autoSaveTimers.current.forEach(timer => clearTimeout(timer));
-      autoSaveTimers.current.clear();
-
-      const pendingRows = Array.from(pendingUpdates.current.values());
-      const uniqueRows = Array.from(
-        new Map(pendingRows.map(row => [row.id, row])).values()
-      );
-
-      for (const row of uniqueRows) {
-        await handleSaveRow(row);
-      }
-
-      pendingUpdates.current.clear();
-      console.log(`[AutoSave] Flushed ${uniqueRows.length} pending row(s) (${reason})`);
-    } catch (error) {
-      console.error(`[AutoSave] Failed to flush pending updates (${reason}):`, error);
-    } finally {
-      isFlushingPendingRef.current = false;
-    }
-  }, [handleSaveRow]);
-
-  // Flush pending edits when page/tab state changes or component unmounts.
+  // Autosave dimatikan: tidak perlu flush saat tab berubah/keluar
   useEffect(() => {
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'hidden') {
-        void flushPendingUpdates('visibilitychange');
-      }
-    };
-
-    const handlePageHide = () => {
-      void flushPendingUpdates('pagehide');
-    };
-
-    const handleBeforeUnload = () => {
-      if (pendingUpdates.current.size > 0) {
-        void flushPendingUpdates('beforeunload');
-      }
-    };
-
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    window.addEventListener('pagehide', handlePageHide);
-    window.addEventListener('beforeunload', handleBeforeUnload);
-
     return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('pagehide', handlePageHide);
-      window.removeEventListener('beforeunload', handleBeforeUnload);
       void flushPendingUpdates('unmount');
     };
   }, [flushPendingUpdates]);
@@ -2782,30 +2738,6 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
     return '';
   };
 
-  // Auto-save function with debounce
-  const autoSaveRow = (updatedRow: Stage3Row) => {
-    // Cancel previous timer for this row
-    const existingTimer = autoSaveTimers.current.get(updatedRow.id);
-    if (existingTimer) {
-      clearTimeout(existingTimer);
-    }
-    
-    // Store the updated row in pending updates
-    pendingUpdates.current.set(updatedRow.id, updatedRow);
-    
-    // Set new timer for faster autosave.
-    const timer = setTimeout(async () => {
-      const rowToSave = pendingUpdates.current.get(updatedRow.id);
-      if (rowToSave) {
-        await handleSaveRow(rowToSave);
-        pendingUpdates.current.delete(updatedRow.id);
-        autoSaveTimers.current.delete(updatedRow.id);
-      }
-    }, 600);
-    
-    autoSaveTimers.current.set(updatedRow.id, timer);
-  };
-
   const updateRow = (id: string, field: keyof Stage3Row, value: any) => {
     const editableFields: Array<keyof Stage3Row> = [
       'part_number',
@@ -2872,13 +2804,8 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
       // INSTANT: Broadcast perubahan ke user lain (tanpa menunggu database)
       broadcastDataChange(id, field, value);
       
-      // Broadcast editing status
+      // Broadcast editing status (hanya indikasi, tidak auto-save)
       broadcastEditingCell(`${id}-${field}`);
-
-      // Schedule debounced autosave immediately from the updated snapshot.
-      autoSaveRow(updatedRow);
-
-      // Clear editing status after save
       setTimeout(() => broadcastEditingCell(null), 500);
     }
   };
@@ -3035,10 +2962,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
         return newRows;
       });
       
-      if (rowToSave) {
-        // Pakai jalur autosave debounce supaya tidak double insert
-        autoSaveRow(rowToSave);
-      }
+      // Tidak auto-simpan; simpan manual lewat tombol
       return;
     }
     
@@ -3083,10 +3007,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
         return newRows;
     });
 
-    if (rowToSave) {
-      // Hindari double insert: cukup jadwalkan autosave (akan merge dengan pending timer sebelumnya)
-      autoSaveRow(rowToSave);
-    }
+    // Tidak auto-simpan; simpan manual lewat tombol
   };
 
   const handleProcess = async () => {
@@ -4405,7 +4326,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                       <EcommerceCellDropdown
                         value={row.ecommerce}
                         onChange={(v) => updateRow(row.id, 'ecommerce', v)}
-                        onSave={() => handleSaveRow(row)}
+                        onSave={() => {}}
                       />
                       {/* Badge INSTANT: untuk SHOPEE (jika resi === no_pesanan) ATAU TikTok (jika label INSTAN) */}
                       {((row.resi && row.no_pesanan && row.resi === row.no_pesanan && row.ecommerce?.toUpperCase().includes('SHOPEE')) ||
@@ -4420,7 +4341,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                     <TokoCellDropdown
                       value={row.sub_toko}
                       onChange={(v) => updateRow(row.id, 'sub_toko', v)}
-                      onSave={() => handleSaveRow(row)}
+                      onSave={() => {}}
                     />
                   </td>
 
@@ -4431,7 +4352,6 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                         type="text"
                         value={row.customer} 
                         onChange={(e) => updateRow(row.id, 'customer', e.target.value)} 
-                        onBlur={() => handleSaveRow(row)} 
                         onFocus={() => setFocusedCell({ rowIndex: idx, colKey: 'customer' })}
                         onKeyDown={(e) => handleKeyDown(e, idx, 'customer', row.id)}
                         className="w-full h-full bg-transparent px-1.5 outline-none text-gray-200 truncate focus:text-clip"
@@ -4553,7 +4473,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                         type="number" 
                         value={row.qty_keluar || ''} 
                         onChange={(e) => updateRow(row.id, 'qty_keluar', parseInt(e.target.value) || 0)} 
-                        onBlur={() => handleSaveRow(row)} 
+                        // simpan manual via tombol
                         onFocus={() => setFocusedCell({ rowIndex: idx, colKey: 'qty_keluar' })}
                         onKeyDown={(e) => handleKeyDown(e, idx, 'qty_keluar', row.id)} 
                         className="w-full h-full bg-transparent text-center outline-none font-bold"
@@ -4574,7 +4494,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                         type="number" 
                         value={row.harga_total || ''} 
                         onChange={(e) => updateRow(row.id, 'harga_total', parseInt(e.target.value) || 0)} 
-                        onBlur={() => handleSaveRow(row)} 
+                        // simpan manual via tombol
                         onFocus={() => setFocusedCell({ rowIndex: idx, colKey: 'harga_total' })}
                         onKeyDown={(e) => handleKeyDown(e, idx, 'harga_total', row.id)} 
                         className="absolute inset-0 w-full h-full bg-transparent text-right px-1 outline-none font-mono text-yellow-400 font-bold opacity-0 focus:opacity-100"
@@ -4595,7 +4515,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                         type="number" 
                         value={row.harga_satuan || ''} 
                         onChange={(e) => updateRow(row.id, 'harga_satuan', parseInt(e.target.value) || 0)} 
-                        onBlur={() => handleSaveRow(row)} 
+                        // simpan manual via tombol
                         onFocus={() => setFocusedCell({ rowIndex: idx, colKey: 'harga_satuan' })}
                         onKeyDown={(e) => handleKeyDown(e, idx, 'harga_satuan', row.id)} 
                         className="absolute inset-0 w-full h-full bg-transparent text-right px-1 outline-none font-mono text-yellow-300 text-[11px] opacity-0 focus:opacity-100"
