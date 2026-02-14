@@ -191,6 +191,19 @@ export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh, refre
     setSubToko(defaultToko as SubToko);
     setBulkSubToko(defaultToko as SubToko);
   }, [selectedStore]);
+
+  // Jika e-commerce berubah dari RESELLER ke lainnya, jangan bawa nama reseller sebagai sub_toko
+  useEffect(() => {
+    const defaultToko = selectedStore === 'bjw' ? 'BJW' : 'MJM';
+    const allowedSubToko = ['MJM', 'BJW', 'LARIS', 'PRAKTIS PART'];
+    if (ecommerce !== 'RESELLER') {
+      setSubToko(prev => {
+        const upper = (prev || '').toUpperCase();
+        return allowedSubToko.includes(upper) ? upper as SubToko : defaultToko as SubToko;
+      });
+      setSelectedReseller('');
+    }
+  }, [ecommerce, selectedStore]);
   
   // Auto focus on resi input
   useEffect(() => {
@@ -262,11 +275,16 @@ export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh, refre
     setLoading(true);
     
     const now = new Date().toISOString(); // atau gunakan format sesuai kebutuhan
+    const defaultToko = selectedStore === 'bjw' ? 'BJW' : 'MJM';
+    const allowedSubToko = ['MJM', 'BJW', 'LARIS', 'PRAKTIS PART'];
+    const subTokoForSave = ecommerce === 'RESELLER'
+      ? subToko
+      : (allowedSubToko.includes((subToko || '').toUpperCase()) ? (subToko as SubToko) : defaultToko as SubToko);
 
     const payload = {
       resi: resiInput.trim(),
       ecommerce,
-      sub_toko: subToko,
+      sub_toko: subTokoForSave,
       negara_ekspor: ecommerce === 'EKSPOR' ? negaraEkspor : undefined,
       scanned_by: userName || 'Admin',
       tanggal: now,
