@@ -499,6 +499,23 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
       .map(([name, total]) => ({ name, total }));
   }, [rows, mode]);
 
+  // Aggregate total per customer (mode out)
+  const customerTotals = React.useMemo(() => {
+    if (mode !== 'out') return [];
+    const map = new Map<string, number>();
+    rows.forEach(r => {
+      const name = (r.customer || '').trim();
+      if (!name) return;
+      const total = r.totalHarga || 0;
+      if (total > 0) {
+        map.set(name, (map.get(name) || 0) + total);
+      }
+    });
+    return Array.from(map.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map(([name, total]) => ({ name, total }));
+  }, [rows, mode]);
+
   return (
     <div className="bg-gray-800 flex flex-col overflow-hidden text-gray-100">
       
@@ -538,6 +555,7 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
           validCount={validRowsCount}
           mode={mode}
           supplierTotals={supplierTotals}
+          customerTotals={customerTotals}
           customTitle={mode === 'out' ? `Simpan (${validRowsCount})` : undefined} 
         />
 

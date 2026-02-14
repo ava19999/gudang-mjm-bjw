@@ -11,10 +11,11 @@ interface QuickInputHeaderProps {
     mode?: 'in' | 'out';
     customTitle?: string;
     supplierTotals?: Array<{ name: string; total: number }>;
+    customerTotals?: Array<{ name: string; total: number }>;
 }
 
 export const QuickInputHeader: React.FC<QuickInputHeaderProps> = ({ 
-    onAddRow, onSaveAll, isSaving, validCount, mode = 'in', customTitle, supplierTotals = []
+    onAddRow, onSaveAll, isSaving, validCount, mode = 'in', customTitle, supplierTotals = [], customerTotals = []
 }) => {
     const isOutMode = mode === 'out';
     
@@ -38,10 +39,10 @@ export const QuickInputHeader: React.FC<QuickInputHeaderProps> = ({
                 </div>
             </div>
 
-            {/* Ringkas total per supplier (mode IN saja) */}
-            {!isOutMode && supplierTotals.length > 0 && (
+            {/* Ringkas total per supplier (mode IN) atau per customer (mode OUT) */}
+            {(!isOutMode ? supplierTotals.length : customerTotals.length) > 0 && (
                 <div className="flex flex-wrap gap-2 text-[11px] text-gray-100 md:ml-auto">
-                    {supplierTotals.map(({ name, total }) => (
+                    {(isOutMode ? customerTotals : supplierTotals).map(({ name, total }) => (
                         <div
                             key={name}
                             className="px-2.5 py-1 bg-gray-700/70 border border-gray-600 rounded-lg shadow-sm whitespace-nowrap"
