@@ -1,6 +1,7 @@
 // FILE: src/components/quickInput/QuickInputHeader.tsx
 import React from 'react';
 import { PackagePlus, PackageMinus, Plus, Save, Loader2 } from 'lucide-react';
+import { formatRupiah } from '../../utils';
 
 interface QuickInputHeaderProps {
     onAddRow: () => void;
@@ -9,15 +10,16 @@ interface QuickInputHeaderProps {
     validCount: number;
     mode?: 'in' | 'out';
     customTitle?: string;
+    supplierTotals?: Array<{ name: string; total: number }>;
 }
 
 export const QuickInputHeader: React.FC<QuickInputHeaderProps> = ({ 
-    onAddRow, onSaveAll, isSaving, validCount, mode = 'in', customTitle
+    onAddRow, onSaveAll, isSaving, validCount, mode = 'in', customTitle, supplierTotals = []
 }) => {
     const isOutMode = mode === 'out';
     
     return (
-        <div className="px-4 py-3 bg-gray-800 flex flex-col md:flex-row justify-between items-center gap-4 border-b border-gray-700">
+        <div className="px-4 py-3 bg-gray-800 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-gray-700">
             <div className="flex items-center gap-2">
                 <div className={`p-2 rounded-lg ${isOutMode ? 'bg-red-900/30' : 'bg-green-900/30'}`}>
                     {isOutMode ? (
@@ -35,6 +37,23 @@ export const QuickInputHeader: React.FC<QuickInputHeaderProps> = ({
                     </p>
                 </div>
             </div>
+
+            {/* Ringkas total per supplier (mode IN saja) */}
+            {!isOutMode && supplierTotals.length > 0 && (
+                <div className="flex flex-wrap gap-2 text-[11px] text-gray-100 md:ml-auto">
+                    {supplierTotals.map(({ name, total }) => (
+                        <div
+                            key={name}
+                            className="px-2.5 py-1 bg-gray-700/70 border border-gray-600 rounded-lg shadow-sm whitespace-nowrap"
+                            title={`Total harga untuk ${name}`}
+                        >
+                            <span className="font-semibold text-green-300">{name}</span>
+                            <span className="text-gray-400 mx-1">•</span>
+                            <span className="font-bold text-orange-300">{formatRupiah(total)}</span>
+                        </div>
+                    ))}
+                </div>
+            )}
 
             <div className="flex items-center gap-2 w-full md:w-auto justify-end">
                 <button
