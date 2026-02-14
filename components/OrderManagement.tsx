@@ -508,7 +508,8 @@ export const OrderManagement: React.FC = () => {
       groups[key].items.push(item);
       groups[key].totalAmount += (Number(item.harga_total) || 0);
     });
-    return Object.values(groups).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    // Urutkan dari yang paling lama (oldest) ke terbaru
+    return Object.values(groups).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
   }, [offlineData]);
 
   // GROUPING SOLD DATA by Customer/Resi
@@ -1087,6 +1088,10 @@ export const OrderManagement: React.FC = () => {
     });
   }, [groupedOfflineOrders, searchTerm, customerFilter, partNumberFilter, ecommerceFilter]);
 
+  const totalOfflineAmount = useMemo(() => {
+    return filteredGroupedOffline.reduce((sum, g) => sum + (g.totalAmount || 0), 0);
+  }, [filteredGroupedOffline]);
+
   return (
     <div className="bg-gray-800 m-4 rounded-2xl border border-gray-700 shadow-xl flex flex-col text-gray-100" style={{ height: 'calc(100vh - 120px)' }}>
       {toast && <Toast msg={toast.msg} type={toast.type} onClose={() => setToast(null)} />}
@@ -1268,6 +1273,9 @@ export const OrderManagement: React.FC = () => {
                     ({selectedGroups.size} pesanan dipilih)
                   </span>
                 )}
+              </div>
+              <div className="flex items-center gap-4 text-sm font-semibold text-orange-300">
+                <span>Total Offline: {new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(totalOfflineAmount)}</span>
               </div>
               {selectedGroups.size > 0 && (
                 <button 
