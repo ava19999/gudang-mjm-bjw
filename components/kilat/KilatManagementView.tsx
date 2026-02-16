@@ -17,8 +17,7 @@ import {
   addKilatPenjualanManual,
   getKilatStats,
   KilatPrestock,
-  KilatPenjualan,
-  updateKilatPenjualan
+  KilatPenjualan
 } from '../../services/kilatService';
 import { supabase } from '../../services/supabaseClient';
 import {
@@ -44,9 +43,7 @@ import {
   Calendar,
   DollarSign,
   ArrowRightLeft,
-  Info,
-  Save,
-  X
+  Info
 } from 'lucide-react';
 
 type TabType = 'prestock' | 'penjualan' | 'input';
@@ -70,8 +67,6 @@ export const KilatManagementView: React.FC = () => {
   // Data states
   const [prestockData, setPrestockData] = useState<KilatPrestock[]>([]);
   const [penjualanData, setPenjualanData] = useState<KilatPenjualan[]>([]);
-  const [editingSaleId, setEditingSaleId] = useState<string | null>(null);
-  const [editSaleDate, setEditSaleDate] = useState('');
   const [stats, setStats] = useState<{
     totalPending: number;
     totalTerjual: number;
@@ -106,25 +101,6 @@ export const KilatManagementView: React.FC = () => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 3000);
   }, []);
-
-  const handleSaveSaleDate = useCallback(async (id: string) => {
-    if (!editSaleDate) {
-      showToast('Pilih tanggal penjualan dulu', 'error');
-      return;
-    }
-    setLoading(true);
-    const iso = `${editSaleDate}T00:00:00Z`;
-    const res = await updateKilatPenjualan(currentStore, id, { tanggal_jual: iso });
-    if (res.success) {
-      showToast('Tanggal penjualan diupdate', 'success');
-      setEditingSaleId(null);
-      setEditSaleDate('');
-      await loadData();
-    } else {
-      showToast(res.message, 'error');
-    }
-    setLoading(false);
-  }, [currentStore, editSaleDate, loadData, showToast]);
   
   // Load data
   const loadData = useCallback(async () => {
@@ -486,7 +462,6 @@ export const KilatManagementView: React.FC = () => {
                       <th className="px-4 py-3 text-center">Qty</th>
                       <th className="px-4 py-3 text-right">Harga</th>
                       <th className="px-4 py-3">Sumber</th>
-                      <th className="px-4 py-3 text-center">Aksi</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-700/50">
@@ -500,16 +475,7 @@ export const KilatManagementView: React.FC = () => {
                       penjualanData.map((item) => (
                         <tr key={item.id} className="hover:bg-gray-700/30">
                           <td className="px-4 py-3 text-gray-300 text-sm">
-                            {editingSaleId === item.id ? (
-                              <input
-                                type="date"
-                                value={editSaleDate}
-                                onChange={(e) => setEditSaleDate(e.target.value)}
-                                className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-white"
-                              />
-                            ) : (
-                              new Date(item.tanggal_jual).toLocaleDateString('id-ID')
-                            )}
+                            {new Date(item.tanggal_jual).toLocaleDateString('id-ID')}
                           </td>
                           <td className="px-4 py-3 text-white font-mono text-sm">{item.no_pesanan || '-'}</td>
                           <td className="px-4 py-3 text-gray-300 font-mono text-sm">{item.resi_penjualan || '-'}</td>
@@ -523,34 +489,6 @@ export const KilatManagementView: React.FC = () => {
                             }`}>
                               {item.source}
                             </span>
-                          </td>
-                          <td className="px-4 py-3 text-center">
-                            {editingSaleId === item.id ? (
-                              <div className="flex items-center justify-center gap-2">
-                                <button
-                                  onClick={() => handleSaveSaleDate(item.id)}
-                                  className="p-1 bg-green-900/50 hover:bg-green-800/50 rounded text-green-400"
-                                  title="Simpan tanggal"
-                                >
-                                  <Save size={16} />
-                                </button>
-                                <button
-                                  onClick={() => { setEditingSaleId(null); setEditSaleDate(''); }}
-                                  className="p-1 bg-gray-700 hover:bg-gray-600 rounded text-gray-300"
-                                  title="Batal"
-                                >
-                                  <X size={16} />
-                                </button>
-                              </div>
-                            ) : (
-                              <button
-                                onClick={() => { setEditingSaleId(item.id); setEditSaleDate(item.tanggal_jual.split('T')[0]); }}
-                                className="p-1 bg-gray-700 hover:bg-gray-600 rounded text-gray-300"
-                                title="Edit tanggal"
-                              >
-                                <Edit2 size={16} />
-                              </button>
-                            )}
                           </td>
                         </tr>
                       ))

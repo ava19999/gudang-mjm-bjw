@@ -79,7 +79,7 @@ CREATE TABLE IF NOT EXISTS kilat_prestock_bjw (
 -- Table untuk MJM store
 CREATE TABLE IF NOT EXISTS kilat_penjualan_mjm (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  
+   
   -- Reference ke kilat_prestock
   kilat_id UUID REFERENCES kilat_prestock_mjm(id) ON DELETE SET NULL,
   

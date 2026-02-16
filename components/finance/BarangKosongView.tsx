@@ -40,6 +40,7 @@ interface CartItem {
   qty: number;
   price: number;
   tempo: string;
+  store?: string;
   brand?: string;
   application?: string;
 }
@@ -103,6 +104,169 @@ const formatDate = (dateStr: string) => {
 const isUnknownSupplierLabel = (supplier: string) => {
   const normalized = (supplier || '').toUpperCase();
   return normalized.includes('TANPA SUPPLIER') || normalized.includes('UNKNOWN');
+};
+
+const getFirstString = (row: Record<string, any>, keys: string[], fallback = ''): string => {
+  for (const key of keys) {
+    const value = row?.[key];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+    if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  }
+  return fallback;
+};
+
+const getFirstNumber = (row: Record<string, any>, keys: string[], fallback = 0): number => {
+  for (const key of keys) {
+    const value = row?.[key];
+    const asNumber = typeof value === 'number' ? value : Number(value);
+    if (Number.isFinite(asNumber)) return asNumber;
+  }
+  return fallback;
+};
+
+const isOpenCartStatus = (status: string): boolean => {
+  if (!status) return true;
+  const normalized = status.toLowerCase();
+  return ![
+    'ok',
+    'received',
+    'selesai',
+    'done',
+    'processed',
+    'ordered',
+    'sent',
+    'diproses',
+    'cancelled',
+    'canceled'
+  ].includes(normalized);
+};
+
+const parseOrderSupplierItems = (rawItems: unknown): Record<string, any>[] => {
+  if (Array.isArray(rawItems)) {
+    return rawItems.filter((item) => typeof item === 'object' && item !== null) as Record<string, any>[];
+  }
+
+  if (typeof rawItems === 'string') {
+    try {
+      const parsed = JSON.parse(rawItems);
+      if (Array.isArray(parsed)) {
+        return parsed.filter((item) => typeof item === 'object' && item !== null) as Record<string, any>[];
+      }
+    } catch {
+      // Ignore invalid JSON payload
+    }
+  }
+
+  return [];
+};
+
+const mapOrderSupplierRowsToCart = (rows: Record<string, any>[], store: string): CartItem[] => {
+  const selectedStore = (store || 'mjm').toLowerCase();
+  const mergedCart = new Map<string, CartItem>();
+
+  const toCartItem = (
+    row: Record<string, any>,
+    fallback: { supplier?: string; tempo?: string } = {}
+  ): CartItem | null => {
+    const partNumber = getFirstString(row, ['part_number', 'partNumber', 'pn', 'sku']);
+    if (!partNumber) return null;
+
+    const namaBarang = getFirstString(
+      row,
+      ['nama_barang', 'namaBarang', 'name', 'item_name'],
+      partNumber
+    );
+
+    const supplier = getFirstString(
+      row,
+      ['supplier', 'customer', 'importir'],
+      fallback.supplier || 'Supplier Tidak Diketahui'
+    );
+
+    const qty = Math.max(
+      1,
+      Math.floor(getFirstNumber(row, ['qty', 'quantity', 'qty_order', 'qty_requested', 'jumlah'], 1))
+    );
+
+    const price = Math.max(
+      0,
+      getFirstNumber(row, ['price', 'harga_satuan', 'harga', 'unit_price', 'last_price'], 0)
+    );
+
+    const tempo = getFirstString(
+      row,
+      ['tempo', 'payment_term', 'payment_type'],
+      fallback.tempo || 'CASH'
+    );
+
+    const brand = getFirstString(row, ['brand']);
+    const application = getFirstString(row, ['application', 'aplikasi']);
+    const itemStore = getFirstString(row, ['store', 'toko', 'store_code'], selectedStore).toLowerCase();
+
+    return {
+      part_number: partNumber,
+      nama_barang: namaBarang,
+      supplier,
+      qty,
+      price,
+      tempo,
+      store: itemStore,
+      brand: brand || undefined,
+      application: application || undefined
+    };
+  };
+
+  const mergeCartItem = (item: CartItem) => {
+    const key = `${item.store || selectedStore}::${item.part_number}::${item.supplier}`;
+    const existing = mergedCart.get(key);
+
+    if (!existing) {
+      mergedCart.set(key, item);
+      return;
+    }
+
+    mergedCart.set(key, {
+      ...existing,
+      qty: existing.qty + item.qty,
+      price: item.price > 0 ? item.price : existing.price,
+      tempo: item.tempo || existing.tempo,
+      nama_barang: existing.nama_barang || item.nama_barang,
+      brand: existing.brand || item.brand,
+      application: existing.application || item.application
+    });
+  };
+
+  rows.forEach((row) => {
+    const rowStatus = getFirstString(row, ['status']);
+    if (!isOpenCartStatus(rowStatus)) return;
+
+    const fallbackSupplier = getFirstString(
+      row,
+      ['supplier', 'customer', 'importir'],
+      'Supplier Tidak Diketahui'
+    );
+    const fallbackTempo = getFirstString(row, ['tempo', 'payment_term', 'payment_type'], 'CASH');
+
+    const nestedItems = parseOrderSupplierItems(row.items);
+    if (nestedItems.length > 0) {
+      nestedItems.forEach((nestedRow) => {
+        const mapped = toCartItem(nestedRow, {
+          supplier: fallbackSupplier,
+          tempo: fallbackTempo
+        });
+        if (mapped) mergeCartItem(mapped);
+      });
+      return;
+    }
+
+    const mapped = toCartItem(row, {
+      supplier: fallbackSupplier,
+      tempo: fallbackTempo
+    });
+    if (mapped) mergeCartItem(mapped);
+  });
+
+  return Array.from(mergedCart.values());
 };
 
 // Purchase History Modal Component
@@ -960,13 +1124,17 @@ const SupplierCard: React.FC<{
   onToggle: () => void;
   cart: CartItem[];
   onAddToCart: (item: SupplierItem, supplier: string) => void;
-  onRemoveFromCart: (partNumber: string) => void;
-  onUpdateQty: (partNumber: string, qty: number) => void;
+  onRemoveFromCart: (partNumber: string, supplier: string, store?: string) => void;
+  onUpdateQty: (partNumber: string, supplier: string, qty: number, store?: string) => void;
   onViewHistory: (item: SupplierItem) => void;
   supplierOptions: string[];
+  currentStore: string | null;
   isBJW?: boolean;
-}> = ({ group, isExpanded, onToggle, cart, onAddToCart, onRemoveFromCart, onUpdateQty, onViewHistory, supplierOptions, isBJW = false }) => {
-  const cartItemsFromSupplier = cart.filter(c => c.supplier === group.supplier);
+}> = ({ group, isExpanded, onToggle, cart, onAddToCart, onRemoveFromCart, onUpdateQty, onViewHistory, supplierOptions, currentStore, isBJW = false }) => {
+  const activeStore = (currentStore || 'mjm').toLowerCase();
+  const cartItemsFromSupplier = cart.filter(
+    c => c.supplier === group.supplier && (c.store || activeStore).toLowerCase() === activeStore
+  );
   const totalInCart = cartItemsFromSupplier.reduce((sum, c) => sum + c.qty, 0);
   const isUnknownGroup = isUnknownSupplierLabel(group.supplier);
   const [selectedSupplierByItem, setSelectedSupplierByItem] = useState<Record<string, string>>({});
@@ -1037,7 +1205,18 @@ const SupplierCard: React.FC<{
               </thead>
               <tbody className="divide-y divide-gray-700">
                 {group.items.map((item) => {
-                  const inCart = cart.find(c => c.part_number === item.part_number);
+                  const inCart =
+                    cart.find(
+                      c =>
+                        c.part_number === item.part_number &&
+                        c.supplier === group.supplier &&
+                        (c.store || activeStore).toLowerCase() === activeStore
+                    ) ||
+                    cart.find(
+                      c =>
+                        c.part_number === item.part_number &&
+                        (c.store || activeStore).toLowerCase() === activeStore
+                    );
                   
                   // Stock colors for BJW view
                   const stockMJM = item.current_stock_mjm || 0;
@@ -1144,20 +1323,20 @@ const SupplierCard: React.FC<{
                         {inCart ? (
                           <div className="flex items-center justify-center gap-1">
                             <button
-                              onClick={() => onUpdateQty(item.part_number, inCart.qty - 1)}
+                              onClick={() => onUpdateQty(item.part_number, inCart.supplier, inCart.qty - 1, inCart.store)}
                               className="p-1 bg-gray-600 hover:bg-gray-500 rounded transition-colors"
                             >
                               <Minus size={14} />
                             </button>
                             <span className="w-8 text-center font-bold text-white">{inCart.qty}</span>
                             <button
-                              onClick={() => onUpdateQty(item.part_number, inCart.qty + 1)}
+                              onClick={() => onUpdateQty(item.part_number, inCart.supplier, inCart.qty + 1, inCart.store)}
                               className="p-1 bg-gray-600 hover:bg-gray-500 rounded transition-colors"
                             >
                               <Plus size={14} />
                             </button>
                             <button
-                              onClick={() => onRemoveFromCart(item.part_number)}
+                              onClick={() => onRemoveFromCart(item.part_number, inCart.supplier, inCart.store)}
                               className="p-1 bg-red-600/30 hover:bg-red-600 text-red-400 hover:text-white rounded transition-colors ml-1"
                             >
                               <X size={14} />
@@ -1212,8 +1391,8 @@ const SupplierCard: React.FC<{
 // Cart Sidebar Component
 const CartSidebar: React.FC<{
   cart: CartItem[];
-  onUpdateQty: (partNumber: string, qty: number) => void;
-  onRemove: (partNumber: string) => void;
+  onUpdateQty: (partNumber: string, supplier: string, qty: number, store?: string) => void;
+  onRemove: (partNumber: string, supplier: string, store?: string) => void;
   onClear: () => void;
   onCheckoutSupplier: (supplier: string) => void;
 }> = ({ cart, onUpdateQty, onRemove, onClear, onCheckoutSupplier }) => {
@@ -1266,7 +1445,7 @@ const CartSidebar: React.FC<{
               </h4>
               <div className="space-y-2">
                 {items.map(item => (
-                  <div key={item.part_number} className="flex items-center justify-between text-xs bg-gray-800/50 rounded-lg p-2">
+                  <div key={`${item.part_number}_${item.supplier}_${item.store || 'mjm'}`} className="flex items-center justify-between text-xs bg-gray-800/50 rounded-lg p-2">
                     <div className="flex-1 min-w-0">
                       <p className="text-gray-300 truncate font-medium">{item.nama_barang}</p>
                       <p className="text-gray-500 font-mono text-[10px]">{item.part_number}</p>
@@ -1281,21 +1460,21 @@ const CartSidebar: React.FC<{
                     <div className="flex items-center gap-2 ml-2">
                       <div className="flex items-center gap-1">
                         <button
-                          onClick={() => onUpdateQty(item.part_number, item.qty - 1)}
+                          onClick={() => onUpdateQty(item.part_number, item.supplier, item.qty - 1, item.store)}
                           className="p-0.5 bg-gray-700 hover:bg-gray-600 rounded"
                         >
                           <Minus size={10} />
                         </button>
                         <span className="w-6 text-center font-bold">{item.qty}</span>
                         <button
-                          onClick={() => onUpdateQty(item.part_number, item.qty + 1)}
+                          onClick={() => onUpdateQty(item.part_number, item.supplier, item.qty + 1, item.store)}
                           className="p-0.5 bg-gray-700 hover:bg-gray-600 rounded"
                         >
                           <Plus size={10} />
                         </button>
                       </div>
                       <button
-                        onClick={() => onRemove(item.part_number)}
+                        onClick={() => onRemove(item.part_number, item.supplier, item.store)}
                         className="p-1 text-red-400 hover:text-red-300"
                       >
                         <X size={12} />
@@ -1705,37 +1884,161 @@ export const BarangKosongView: React.FC = () => {
     fetchData();
   }, [selectedStore, activeTab]);
   
-  // Load cart from localStorage on mount and listen for updates
+  const loadCartFromOrderSupplier = async (): Promise<CartItem[]> => {
+    try {
+      const { data, error } = await supabase
+        .from('order_supplier')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(500);
+
+      if (error) throw error;
+
+      return mapOrderSupplierRowsToCart((data || []) as Record<string, any>[], selectedStore || 'mjm');
+    } catch (error: any) {
+      const message = String(error?.message || '');
+      const missingTable =
+        error?.code === '42P01' ||
+        (message.toLowerCase().includes('order_supplier') &&
+          (message.toLowerCase().includes('does not exist') || message.toLowerCase().includes('not found')));
+
+      if (!missingTable) {
+        console.error('Error loading cart from order_supplier:', error);
+      } else {
+        console.info('order_supplier table tidak ditemukan, fallback ke localStorage.');
+      }
+
+      return [];
+    }
+  };
+
+  // Load cart from Supabase order_supplier on mount (fallback to localStorage) and listen for updates
   useEffect(() => {
-    const loadCartFromStorage = () => {
-      const storageKey = `barangKosongCart_${selectedStore || 'mjm'}`;
-      const savedCart = localStorage.getItem(storageKey);
-      if (savedCart) {
-        try {
-          const cartItems = JSON.parse(savedCart) as CartItem[];
-          if (cartItems.length > 0) {
-            setCart(cartItems);
-            setShowCart(true);
-            setToast({ msg: `${cartItems.length} item dimuat ke keranjang`, type: 'success' });
+    let isMounted = true;
+    const localOpenStatuses = ['PENDING', 'pending', 'CART', 'cart', 'DRAFT', 'draft'];
+
+    const syncLocalCartToOrderSupplier = async (items: CartItem[]) => {
+      for (const item of items) {
+        const targetStore = (item.store || selectedStore || 'mjm').toLowerCase();
+        const payload = {
+          store: targetStore,
+          supplier: item.supplier,
+          part_number: item.part_number,
+          name: item.nama_barang,
+          qty: item.qty,
+          price: item.price || 0,
+          status: 'PENDING',
+          notes: `Keranjang Barang Kosong ${targetStore.toUpperCase()}`
+        };
+
+        const { data: existingRows, error: fetchError } = await supabase
+          .from('order_supplier')
+          .select('id')
+          .eq('store', targetStore)
+          .eq('part_number', item.part_number)
+          .eq('supplier', item.supplier)
+          .in('status', localOpenStatuses)
+          .order('created_at', { ascending: false });
+
+        if (fetchError) {
+          console.error('Error checking local cart sync to order_supplier:', fetchError);
+          continue;
+        }
+
+        if (existingRows && existingRows.length > 0) {
+          const primaryId = existingRows[0].id;
+          const duplicateIds = existingRows.slice(1).map(r => r.id).filter(Boolean);
+
+          const { error: updateError } = await supabase
+            .from('order_supplier')
+            .update(payload)
+            .eq('id', primaryId);
+
+          if (updateError) {
+            console.error('Error updating local cart sync row:', updateError);
+            continue;
           }
-        } catch (e) {
-          console.error('Error loading cart from storage:', e);
+
+          if (duplicateIds.length > 0) {
+            const { error: deleteDuplicateError } = await supabase
+              .from('order_supplier')
+              .delete()
+              .in('id', duplicateIds);
+
+            if (deleteDuplicateError) {
+              console.error('Error deleting duplicate local cart sync rows:', deleteDuplicateError);
+            }
+          }
+          continue;
+        }
+
+        const { error: insertError } = await supabase
+          .from('order_supplier')
+          .insert(payload);
+
+        if (insertError) {
+          console.error('Error inserting local cart sync row:', insertError);
         }
       }
     };
+
+    const loadCart = async (showToastOnLoad = true) => {
+      const storageKey = `barangKosongCart_${selectedStore || 'mjm'}`;
+
+      const supabaseCart = await loadCartFromOrderSupplier();
+      if (!isMounted) return;
+
+      if (supabaseCart.length > 0) {
+        setCart(supabaseCart);
+        setShowCart(true);
+        if (showToastOnLoad) {
+          setToast({ msg: `${supabaseCart.length} item dimuat dari order_supplier`, type: 'success' });
+        }
+        return;
+      }
+
+      const savedCart = localStorage.getItem(storageKey);
+      if (!savedCart) {
+        setCart([]);
+        setShowCart(false);
+        return;
+      }
+
+      try {
+        const cartItems = JSON.parse(savedCart) as CartItem[];
+        const normalized = cartItems.map((item) => ({
+          ...item,
+          store: (item.store || selectedStore || 'mjm').toLowerCase()
+        }));
+        setCart(normalized);
+        setShowCart(normalized.length > 0);
+        if (normalized.length > 0) {
+          await syncLocalCartToOrderSupplier(normalized);
+        }
+        if (showToastOnLoad && normalized.length > 0) {
+          setToast({ msg: `${normalized.length} item dimuat ke keranjang`, type: 'success' });
+        }
+      } catch (e) {
+        console.error('Error loading cart from storage:', e);
+        setCart([]);
+        setShowCart(false);
+      }
+    };
     
-    loadCartFromStorage();
+    loadCart();
     
     // Listen for cart updates from floating widget
-    const handleCartUpdate = (event: CustomEvent) => {
-      if (event.detail.store === (selectedStore || 'mjm')) {
-        loadCartFromStorage();
+    const handleCartUpdate = (event: Event) => {
+      const customEvent = event as CustomEvent<{ store?: string }>;
+      if ((customEvent.detail?.store || 'mjm') === (selectedStore || 'mjm')) {
+        loadCart(false);
       }
     };
     
     window.addEventListener('barangKosongCartUpdated', handleCartUpdate as EventListener);
     
     return () => {
+      isMounted = false;
       window.removeEventListener('barangKosongCartUpdated', handleCartUpdate as EventListener);
     };
   }, [selectedStore]);
@@ -1743,8 +2046,13 @@ export const BarangKosongView: React.FC = () => {
   // Save cart to localStorage when it changes
   useEffect(() => {
     const storageKey = `barangKosongCart_${selectedStore || 'mjm'}`;
-    if (cart.length > 0) {
-      localStorage.setItem(storageKey, JSON.stringify(cart));
+    const activeStore = (selectedStore || 'mjm').toLowerCase();
+    const cartForActiveStore = cart.filter(
+      item => (item.store || activeStore).toLowerCase() === activeStore
+    );
+
+    if (cartForActiveStore.length > 0) {
+      localStorage.setItem(storageKey, JSON.stringify(cartForActiveStore));
     } else {
       localStorage.removeItem(storageKey);
     }
@@ -1824,47 +2132,195 @@ export const BarangKosongView: React.FC = () => {
     });
   };
   
+  const OPEN_ORDER_SUPPLIER_STATUSES = ['PENDING', 'pending', 'CART', 'cart', 'DRAFT', 'draft'];
+
+  const upsertOrderSupplierCartItem = async (cartItem: CartItem) => {
+    const targetStore = (cartItem.store || selectedStore || 'mjm').toLowerCase();
+
+    const { data: existingRows, error: fetchError } = await supabase
+      .from('order_supplier')
+      .select('id')
+      .eq('store', targetStore)
+      .eq('part_number', cartItem.part_number)
+      .eq('supplier', cartItem.supplier)
+      .in('status', OPEN_ORDER_SUPPLIER_STATUSES)
+      .order('created_at', { ascending: false });
+
+    if (fetchError) throw fetchError;
+
+    const payload = {
+      store: targetStore,
+      supplier: cartItem.supplier,
+      part_number: cartItem.part_number,
+      name: cartItem.nama_barang,
+      qty: cartItem.qty,
+      price: cartItem.price || 0,
+      status: 'PENDING',
+      notes: `Keranjang Barang Kosong ${targetStore.toUpperCase()}`
+    };
+
+    if (existingRows && existingRows.length > 0) {
+      const primaryId = existingRows[0].id;
+      const duplicateIds = existingRows.slice(1).map(r => r.id).filter(Boolean);
+
+      const { error: updateError } = await supabase
+        .from('order_supplier')
+        .update(payload)
+        .eq('id', primaryId);
+
+      if (updateError) throw updateError;
+
+      if (duplicateIds.length > 0) {
+        const { error: deleteDuplicateError } = await supabase
+          .from('order_supplier')
+          .delete()
+          .in('id', duplicateIds);
+
+        if (deleteDuplicateError) throw deleteDuplicateError;
+      }
+
+      return;
+    }
+
+    const { error: insertError } = await supabase
+      .from('order_supplier')
+      .insert(payload);
+
+    if (insertError) throw insertError;
+  };
+
+  const deleteOrderSupplierCartItem = async (partNumber: string, supplier: string) => {
+    const { error } = await supabase
+      .from('order_supplier')
+      .delete()
+      .eq('part_number', partNumber)
+      .eq('supplier', supplier)
+      .in('status', OPEN_ORDER_SUPPLIER_STATUSES);
+
+    if (error) throw error;
+  };
+
+  const clearOrderSupplierCartByStore = async (store: string) => {
+    const targetStore = (store || selectedStore || 'mjm').toLowerCase();
+    const { error } = await supabase
+      .from('order_supplier')
+      .delete()
+      .eq('store', targetStore)
+      .in('status', OPEN_ORDER_SUPPLIER_STATUSES);
+
+    if (error) throw error;
+  };
+
   // Cart functions
-  const addToCart = (item: SupplierItem, supplier: string) => {
+  const addToCart = async (item: SupplierItem, supplier: string) => {
+    const targetStore = (selectedStore || 'mjm').toLowerCase();
+    const existing = cart.find(c =>
+      c.part_number === item.part_number &&
+      c.supplier === supplier &&
+      (c.store || targetStore).toLowerCase() === targetStore
+    );
+
+    const nextQty = (existing?.qty || 0) + 1;
+    const nextCartItem: CartItem = {
+      part_number: item.part_number,
+      nama_barang: item.nama_barang,
+      supplier,
+      qty: nextQty,
+      price: existing?.price ?? item.last_price ?? 0,
+      tempo: existing?.tempo || item.tempo || 'CASH',
+      store: targetStore,
+      brand: item.brand,
+      application: item.application
+    };
+
     setCart(prev => {
-      const existing = prev.find(c => c.part_number === item.part_number);
-      if (existing) {
+      const found = prev.find(c =>
+        c.part_number === item.part_number &&
+        c.supplier === supplier &&
+        (c.store || targetStore).toLowerCase() === targetStore
+      );
+
+      if (found) {
         return prev.map(c => 
-          c.part_number === item.part_number 
+          c.part_number === item.part_number &&
+          c.supplier === supplier &&
+          (c.store || targetStore).toLowerCase() === targetStore
             ? { ...c, qty: c.qty + 1 } 
             : c
         );
       }
-      return [...prev, {
-        part_number: item.part_number,
-        nama_barang: item.nama_barang,
-        supplier,
-        qty: 1,
-        price: item.last_price,
-        tempo: item.tempo,
-        brand: item.brand,
-        application: item.application
-      }];
+      return [...prev, nextCartItem];
     });
-    setToast({ msg: `${item.nama_barang} ditambahkan ke keranjang`, type: 'success' });
+
+    try {
+      await upsertOrderSupplierCartItem(nextCartItem);
+      setToast({ msg: `${item.nama_barang} ditambahkan ke keranjang`, type: 'success' });
+    } catch (error: any) {
+      console.error('Error syncing addToCart to order_supplier:', error);
+      setToast({ msg: `Gagal simpan ke order_supplier: ${error.message}`, type: 'error' });
+    }
   };
   
-  const removeFromCart = (partNumber: string) => {
-    setCart(prev => prev.filter(c => c.part_number !== partNumber));
+  const removeFromCart = async (partNumber: string, supplier: string, store?: string) => {
+    setCart(prev => prev.filter(c => !(c.part_number === partNumber && c.supplier === supplier)));
+
+    try {
+      await deleteOrderSupplierCartItem(partNumber, supplier);
+    } catch (error: any) {
+      console.error('Error syncing removeFromCart to order_supplier:', error);
+      setToast({ msg: `Gagal hapus dari order_supplier: ${error.message}`, type: 'error' });
+    }
   };
   
-  const updateCartQty = (partNumber: string, qty: number) => {
+  const updateCartQty = async (partNumber: string, supplier: string, qty: number, store?: string) => {
+    const targetItem = cart.find(
+      c =>
+        c.part_number === partNumber &&
+        c.supplier === supplier &&
+        (!store || (c.store || '').toLowerCase() === store.toLowerCase())
+    );
+    const targetStore = (store || targetItem?.store || selectedStore || 'mjm').toLowerCase();
+
     if (qty <= 0) {
-      removeFromCart(partNumber);
+      await removeFromCart(partNumber, supplier, targetStore);
       return;
     }
+
     setCart(prev => prev.map(c => 
-      c.part_number === partNumber ? { ...c, qty } : c
+      c.part_number === partNumber &&
+      c.supplier === supplier &&
+      (c.store || targetStore).toLowerCase() === targetStore
+        ? { ...c, qty }
+        : c
     ));
+
+    if (!targetItem) return;
+
+    try {
+      await upsertOrderSupplierCartItem({
+        ...targetItem,
+        qty,
+        store: targetStore
+      });
+    } catch (error: any) {
+      console.error('Error syncing updateCartQty to order_supplier:', error);
+      setToast({ msg: `Gagal update qty di order_supplier: ${error.message}`, type: 'error' });
+    }
   };
   
-  const clearCart = () => {
-    setCart([]);
+  const clearCart = async () => {
+    const targetStore = (selectedStore || 'mjm').toLowerCase();
+
+    setCart(prev => prev.filter(c => (c.store || targetStore).toLowerCase() !== targetStore));
+
+    try {
+      await clearOrderSupplierCartByStore(targetStore);
+    } catch (error: any) {
+      console.error('Error syncing clearCart to order_supplier:', error);
+      setToast({ msg: `Gagal kosongkan order_supplier: ${error.message}`, type: 'error' });
+      return;
+    }
+
     // Also clear from localStorage
     const storageKey = `barangKosongCart_${selectedStore || 'mjm'}`;
     localStorage.removeItem(storageKey);
@@ -1924,14 +2380,34 @@ export const BarangKosongView: React.FC = () => {
       if (orderError) throw orderError;
       
       // Insert order items
-      const orderItems = supplierItems.map(item => ({
-        order_id: orderData.id,
-        part_number: item.part_number,
-        nama_barang: item.nama_barang,
-        qty: item.qty,
-        harga_satuan: item.price,
-        harga_total: item.qty * item.price
-      }));
+      const orderItemMap = new Map<string, {
+        order_id: number;
+        part_number: string;
+        nama_barang: string;
+        qty: number;
+        harga_satuan: number;
+        harga_total: number;
+      }>();
+
+      supplierItems.forEach((item) => {
+        const key = `${item.part_number}::${item.price}`;
+        const existing = orderItemMap.get(key);
+        if (existing) {
+          existing.qty += item.qty;
+          existing.harga_total = existing.qty * existing.harga_satuan;
+          return;
+        }
+        orderItemMap.set(key, {
+          order_id: orderData.id,
+          part_number: item.part_number,
+          nama_barang: item.nama_barang,
+          qty: item.qty,
+          harga_satuan: item.price,
+          harga_total: item.qty * item.price
+        });
+      });
+
+      const orderItems = Array.from(orderItemMap.values());
       
       const { error: itemsError } = await supabase
         .from('supplier_order_items')
@@ -1939,6 +2415,33 @@ export const BarangKosongView: React.FC = () => {
       
       if (itemsError) throw itemsError;
       
+      const uniqueOrderKeys = new Set<string>();
+      supplierItems.forEach((item) => {
+        uniqueOrderKeys.add(`${item.part_number}::${item.store || ''}`);
+      });
+
+      for (const key of uniqueOrderKeys) {
+        const [partNumber, itemStore] = key.split('::');
+        let updateQuery = supabase
+          .from('order_supplier')
+          .update({ status: 'ORDERED' })
+          .eq('supplier', currentSupplier)
+          .eq('part_number', partNumber)
+          .in('status', OPEN_ORDER_SUPPLIER_STATUSES);
+
+        if (itemStore) {
+          updateQuery = updateQuery.eq('store', itemStore);
+        }
+
+        const { error: markOrderedError } = await updateQuery;
+        if (markOrderedError) {
+          console.error(
+            `Error marking order_supplier row as ORDERED (${currentSupplier} / ${partNumber} / ${itemStore || 'ALL'}):`,
+            markOrderedError
+          );
+        }
+      }
+
       setToast({ msg: `PO untuk ${currentSupplier} berhasil disimpan!`, type: 'success' });
       setShowPOPreview(false);
       
@@ -2193,6 +2696,7 @@ export const BarangKosongView: React.FC = () => {
                 onUpdateQty={updateCartQty}
                 onViewHistory={setHistoryItem}
                 supplierOptions={knownSuppliers}
+                currentStore={selectedStore}
                 isBJW={selectedStore === 'bjw'}
               />
             ))
