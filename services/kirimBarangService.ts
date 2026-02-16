@@ -104,7 +104,7 @@ export const fetchBothStoreStock = async (partNumber?: string): Promise<{
 // Get all transfer requests
 export const fetchKirimBarang = async (
   store: 'mjm' | 'bjw' | null,
-  filter?: 'all' | 'incoming' | 'outgoing' | 'pending' | 'completed'
+  filter?: 'all' | 'incoming' | 'outgoing' | 'rejected' | 'pending' | 'approved' | 'completed'
 ): Promise<KirimBarangItem[]> => {
   try {
     let query = supabase
@@ -116,10 +116,14 @@ export const fetchKirimBarang = async (
       query = query.eq('to_store', store);
     } else if (store && filter === 'outgoing') {
       query = query.eq('from_store', store);
+    } else if (filter === 'rejected') {
+      query = query.eq('status', 'rejected');
     } else if (filter === 'pending') {
-      query = query.in('status', ['pending', 'approved', 'sent']);
+      query = query.eq('status', 'pending');
+    } else if (filter === 'approved') {
+      query = query.eq('status', 'approved');
     } else if (filter === 'completed') {
-      query = query.in('status', ['received', 'rejected']);
+      query = query.eq('status', 'received');
     }
 
     const { data, error } = await query;

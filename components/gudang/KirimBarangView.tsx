@@ -3,7 +3,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   Search, Package, ArrowRightLeft, Plus, Send, Check, X,
   Truck, ChevronDown, ChevronUp, AlertCircle, RefreshCw,
-  Filter, Building2, Minus
+  Filter, Building2, Minus, Download
 } from 'lucide-react';
 import { useStore } from '../../context/StoreContext';
 import {
@@ -20,7 +20,7 @@ import {
 } from '../../services/kirimBarangService';
 
 type ViewMode = 'stock_comparison' | 'request_list';
-type FilterType = 'all' | 'incoming' | 'outgoing' | 'pending' | 'completed';
+type FilterType = 'all' | 'incoming' | 'outgoing' | 'rejected' | 'pending' | 'approved' | 'completed';
 
 // Extended stock item with request quantity
 interface StockItemWithRequest extends StockItem {
@@ -213,6 +213,104 @@ export const KirimBarangView: React.FC = () => {
       showToast(result.error || 'Gagal menghapus', 'error');
     }
     setLoading(false);
+  };
+
+  const handleDownloadApprovedPdf = () => {
+    const approvedRequests = requests.filter(item => item.status === 'approved');
+    if (approvedRequests.length === 0) {
+      showToast('Tidak ada request disetujui untuk di-download', 'error');
+      return;
+    }
+
+    const escapeHtml = (value: string | null | undefined) =>
+      String(value ?? '-')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      showToast('Popup diblokir. Izinkan popup untuk export PDF', 'error');
+      return;
+    }
+
+    const printContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Daftar Request Disetujui - ${currentStore.toUpperCase()}</title>
+        <style>
+          * { margin: 0; padding: 0; box-sizing: border-box; }
+          body { font-family: Arial, sans-serif; padding: 20px; color: #111827; font-size: 12px; }
+          h1 { font-size: 18px; margin-bottom: 4px; }
+          .subtitle { color: #4b5563; margin-bottom: 14px; }
+          .meta { margin-bottom: 14px; font-size: 11px; color: #374151; }
+          table { width: 100%; border-collapse: collapse; }
+          th, td { border: 1px solid #d1d5db; padding: 8px; font-size: 11px; text-align: left; vertical-align: top; }
+          th { background: #f3f4f6; font-weight: 700; }
+          .text-center { text-align: center; }
+          .text-right { text-align: right; }
+          .footer { margin-top: 16px; color: #6b7280; font-size: 10px; }
+          @media print {
+            body { padding: 12px; }
+          }
+        </style>
+      </head>
+      <body>
+        <h1>Daftar Request Disetujui</h1>
+        <div class="subtitle">Transfer barang antar toko</div>
+        <div class="meta">
+          Toko Aktif: <strong>${currentStore.toUpperCase()}</strong> |
+          Total Data: <strong>${approvedRequests.length}</strong> |
+          Tanggal Cetak: <strong>${new Date().toLocaleString('id-ID')}</strong>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th class="text-center">No</th>
+              <th>Part Number</th>
+              <th>Nama Barang</th>
+              <th class="text-center">Dari</th>
+              <th class="text-center">Ke</th>
+              <th class="text-center">Qty</th>
+              <th>Disetujui Oleh</th>
+              <th>Waktu Disetujui</th>
+              <th>Catatan</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${approvedRequests.map((req, index) => `
+              <tr>
+                <td class="text-center">${index + 1}</td>
+                <td>${escapeHtml(req.part_number)}</td>
+                <td>${escapeHtml(req.nama_barang)}</td>
+                <td class="text-center">${escapeHtml(req.from_store.toUpperCase())}</td>
+                <td class="text-center">${escapeHtml(req.to_store.toUpperCase())}</td>
+                <td class="text-right">${req.quantity}</td>
+                <td>${escapeHtml(req.approved_by)}</td>
+                <td>${req.approved_at ? new Date(req.approved_at).toLocaleString('id-ID') : '-'}</td>
+                <td>${escapeHtml(req.catatan)}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+        <div class="footer">
+          Dokumen ini dibuat otomatis dari sistem gudang MJM/BJW.
+        </div>
+      </body>
+      </html>
+    `;
+
+    printWindow.document.write(printContent);
+    printWindow.document.close();
+    printWindow.focus();
+    setTimeout(() => {
+      printWindow.print();
+    }, 250);
+
+    showToast('Dialog PDF dibuka. Pilih "Save as PDF" untuk mengunduh');
   };
 
   // Get status badge color
@@ -446,7 +544,7 @@ export const KirimBarangView: React.FC = () => {
           {/* Filter */}
           <div className="flex flex-wrap gap-2 items-center">
             <Filter size={18} className="text-gray-500" />
-            {(['all', 'incoming', 'outgoing', 'pending', 'completed'] as FilterType[]).map((f) => (
+            {(['all', 'incoming', 'outgoing', 'rejected', 'pending', 'approved', 'completed'] as FilterType[]).map((f) => (
               <button
                 key={f}
                 onClick={() => setFilter(f)}
@@ -459,16 +557,30 @@ export const KirimBarangView: React.FC = () => {
                 {f === 'all' && 'Semua'}
                 {f === 'incoming' && `Masuk ke ${currentStore.toUpperCase()}`}
                 {f === 'outgoing' && `Keluar dari ${currentStore.toUpperCase()}`}
+                {f === 'rejected' && 'Ditolak'}
                 {f === 'pending' && 'Pending'}
+                {f === 'approved' && 'Setujui'}
                 {f === 'completed' && 'Selesai'}
               </button>
             ))}
-            <button
-              onClick={loadRequests}
-              className="ml-auto p-2 bg-gray-800 hover:bg-gray-700 rounded-lg text-gray-400"
-            >
-              <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
-            </button>
+            <div className="ml-auto flex items-center gap-2">
+              {filter === 'approved' && (
+                <button
+                  onClick={handleDownloadApprovedPdf}
+                  className="px-3 py-1.5 bg-blue-700 hover:bg-blue-600 text-white rounded-lg text-xs font-medium flex items-center gap-1"
+                  title="Download daftar request disetujui"
+                >
+                  <Download size={14} />
+                  PDF
+                </button>
+              )}
+              <button
+                onClick={loadRequests}
+                className="p-2 bg-gray-800 hover:bg-gray-700 rounded-lg text-gray-400"
+              >
+                <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
+              </button>
+            </div>
           </div>
 
           {/* Request List */}
