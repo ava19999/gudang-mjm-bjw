@@ -463,6 +463,56 @@ export const getStockComparison = async (
   }
 };
 
+// Get stock comparison for multiple part numbers in one request
+export const getBulkStockComparison = async (
+  partNumbers: string[]
+): Promise<Record<string, { mjm: number; bjw: number }>> => {
+  const uniquePartNumbers = Array.from(new Set(partNumbers.filter(Boolean)));
+  if (uniquePartNumbers.length === 0) return {};
+
+  try {
+    const [mjmResult, bjwResult] = await Promise.all([
+      supabase
+        .from('base_mjm')
+        .select('part_number, quantity')
+        .in('part_number', uniquePartNumbers),
+      supabase
+        .from('base_bjw')
+        .select('part_number, quantity')
+        .in('part_number', uniquePartNumbers)
+    ]);
+
+    const stockMap: Record<string, { mjm: number; bjw: number }> = {};
+
+    uniquePartNumbers.forEach(partNumber => {
+      stockMap[partNumber] = { mjm: 0, bjw: 0 };
+    });
+
+    (mjmResult.data || []).forEach((item: any) => {
+      const partNumber = item.part_number || '';
+      if (!partNumber) return;
+      if (!stockMap[partNumber]) {
+        stockMap[partNumber] = { mjm: 0, bjw: 0 };
+      }
+      stockMap[partNumber].mjm = item.quantity || 0;
+    });
+
+    (bjwResult.data || []).forEach((item: any) => {
+      const partNumber = item.part_number || '';
+      if (!partNumber) return;
+      if (!stockMap[partNumber]) {
+        stockMap[partNumber] = { mjm: 0, bjw: 0 };
+      }
+      stockMap[partNumber].bjw = item.quantity || 0;
+    });
+
+    return stockMap;
+  } catch (error) {
+    console.error('getBulkStockComparison Error:', error);
+    return {};
+  }
+};
+
 // Search items from both stores
 export const searchItemsBothStores = async (
   query: string
