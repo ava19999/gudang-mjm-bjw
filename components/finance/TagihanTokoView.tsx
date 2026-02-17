@@ -188,6 +188,13 @@ export const TagihanTokoView: React.FC = () => {
   const [editTagihanAmount, setEditTagihanAmount] = useState('');
   const [editTagihanNote, setEditTagihanNote] = useState('');
   const [editTagihanDate, setEditTagihanDate] = useState('');
+  const [editingCustomerName, setEditingCustomerName] = useState<{ oldName: string; newName: string } | null>(null);
+  const [savingCustomerName, setSavingCustomerName] = useState(false);
+  const [showRenameModal, setShowRenameModal] = useState(false);
+  const [renameOld, setRenameOld] = useState('');
+  const [renameNew, setRenameNew] = useState('');
+  const [customerOptions, setCustomerOptions] = useState<string[]>([]);
+  const [loadingCustomers, setLoadingCustomers] = useState(false);
   
   // Search states for history modal
   const [historySearchTerm, setHistorySearchTerm] = useState('');
@@ -872,6 +879,159 @@ export const TagihanTokoView: React.FC = () => {
     }
   };
 
+  // Load distinct customer names from all related tables
+  const loadCustomerOptions = useCallback(async () => {
+    setLoadingCustomers(true);
+    try {
+      const tables = [
+        { name: 'barang_keluar_mjm', column: 'customer' },
+        { name: 'barang_keluar_bjw', column: 'customer' },
+        { name: 'toko_pembayaran', column: 'customer' },
+        { name: 'toko_tagihan', column: 'customer' },
+        { name: 'inv_tagihan', column: 'customer' }
+      ];
+      const results = await Promise.all(
+        tables.map(t => supabase.from(t.name).select(`${t.column}`).not(t.column, 'is', null))
+      );
+      const names = new Set<string>();
+      results.forEach(res => {
+        if (res.data) {
+          res.data.forEach((row: any) => {
+            const n = (row.customer || '').trim().toUpperCase();
+            if (n) names.add(n);
+          });
+        }
+      });
+      setCustomerOptions(Array.from(names).sort());
+    } catch (err) {
+      console.error('Gagal memuat daftar customer:', err);
+      showToast('Gagal memuat daftar customer', 'error');
+    } finally {
+      setLoadingCustomers(false);
+    }
+  }, [showToast]);
+
+  // Bulk rename customer everywhere
+  const handleBulkRename = async () => {
+    const oldName = renameOld.trim().toUpperCase();
+    const newName = renameNew.trim().toUpperCase();
+    if (!oldName || !newName) {
+      showToast('Nama lama dan baru wajib diisi', 'error');
+      return;
+    }
+    if (oldName === newName) {
+      showToast('Nama baru sama dengan nama lama', 'error');
+      return;
+    }
+    setSavingCustomerName(true);
+    try {
+      const updates = [
+        supabase.from('barang_keluar_mjm').update({ customer: newName }).eq('customer', oldName),
+        supabase.from('barang_keluar_bjw').update({ customer: newName }).eq('customer', oldName),
+        supabase.from('toko_pembayaran').update({ customer: newName }).eq('customer', oldName),
+        supabase.from('toko_tagihan').update({ customer: newName }).eq('customer', oldName),
+        supabase.from('inv_tagihan').update({ customer: newName }).eq('customer', oldName)
+      ];
+      const results = await Promise.all(updates);
+      const failed = results.find(r => (r as any).error);
+      if (failed && (failed as any).error) throw (failed as any).error;
+
+      // Update local state
+      const renamePiutang = (list: TokoPiutang[]) =>
+        list.map(t => t.customer === oldName ? { ...t, customer: newName } : t);
+      setTokoList(prev => renamePiutang(prev));
+      setTokoLunas(prev => renamePiutang(prev));
+      setPembayaranList(prev => prev.map(p => p.customer?.toUpperCase() === oldName ? { ...p, customer: newName } : p));
+      setTagihanList(prev => prev.map(t => t.customer?.toUpperCase() === oldName ? { ...t, customer: newName } : t));
+      setSelectedToko(prev => prev && prev.customer === oldName ? { ...prev, customer: newName } : prev);
+      setPrintToko(prev => prev && prev.customer === oldName ? { ...prev, customer: newName } : prev);
+      setEditingCustomerName(prev => prev && prev.oldName === oldName ? { ...prev, oldName: newName, newName } : prev);
+
+      setPrintedInfo(prev => {
+        const next = new Map(prev);
+        const existing = next.get(oldName);
+        if (existing) {
+          next.delete(oldName);
+          next.set(newName, existing);
+        }
+        return next;
+      });
+
+      showToast(`Nama "${oldName}" diganti jadi "${newName}"`, 'success');
+      setShowRenameModal(false);
+      setRenameOld('');
+      setRenameNew('');
+      loadData();
+    } catch (err) {
+      console.error('Bulk rename gagal:', err);
+      showToast('Gagal mengganti nama customer', 'error');
+    } finally {
+      setSavingCustomerName(false);
+    }
+  };
+
+  // Handle edit customer name (inline rename across tables)
+  const handleStartEditCustomer = (customer: string) => {
+    setEditingCustomerName({ oldName: customer, newName: customer });
+  };
+
+  const handleSaveCustomerName = async () => {
+    if (!editingCustomerName) return;
+    const oldName = editingCustomerName.oldName.trim().toUpperCase();
+    const newName = editingCustomerName.newName.trim().toUpperCase();
+    if (!newName) {
+      showToast('Nama customer tidak boleh kosong', 'error');
+      return;
+    }
+    if (newName === oldName) {
+      setEditingCustomerName(null);
+      return;
+    }
+    setSavingCustomerName(true);
+    try {
+      const updates = [
+        supabase.from('barang_keluar_mjm').update({ customer: newName }).eq('customer', oldName),
+        supabase.from('barang_keluar_bjw').update({ customer: newName }).eq('customer', oldName),
+        supabase.from('toko_pembayaran').update({ customer: newName }).eq('customer', oldName),
+        supabase.from('toko_tagihan').update({ customer: newName }).eq('customer', oldName),
+        supabase.from('inv_tagihan').update({ customer: newName }).eq('customer', oldName)
+      ];
+      const results = await Promise.all(updates);
+      const failed = results.find(r => (r as any).error);
+      if (failed && (failed as any).error) throw (failed as any).error;
+
+      // Update local state lists
+      const rename = (list: TokoPiutang[]) =>
+        list.map(t => t.customer === oldName ? { ...t, customer: newName } : t);
+      setTokoList(prev => rename(prev));
+      setTokoLunas(prev => rename(prev));
+      setPembayaranList(prev => prev.map(p => p.customer?.toUpperCase() === oldName ? { ...p, customer: newName } : p));
+      setTagihanList(prev => prev.map(t => t.customer?.toUpperCase() === oldName ? { ...t, customer: newName } : t));
+      setSelectedToko(prev => prev && prev.customer === oldName ? { ...prev, customer: newName } : prev);
+      setPrintToko(prev => prev && prev.customer === oldName ? { ...prev, customer: newName } : prev);
+
+      // Move printed flag
+      setPrintedInfo(prev => {
+        const next = new Map(prev);
+        const existing = next.get(oldName);
+        if (existing) {
+          next.delete(oldName);
+          next.set(newName, existing);
+        }
+        return next;
+      });
+
+      showToast('Nama customer berhasil diubah', 'success');
+      setEditingCustomerName(null);
+      loadData();
+    } catch (err) {
+      console.error('Gagal update nama customer:', err);
+      showToast('Gagal mengubah nama customer', 'error');
+    } finally {
+      setSavingCustomerName(false);
+    }
+  };
+
   // Export to PDF
   const exportToPDF = () => {
     const printContent = `
@@ -1414,6 +1574,13 @@ export const TagihanTokoView: React.FC = () => {
             <ImageIcon className="w-4 h-4" />
             <span className="hidden md:inline">Image</span>
           </button>
+          <button
+            onClick={() => { setShowRenameModal(true); loadCustomerOptions(); }}
+            className="flex items-center gap-2 px-4 py-2.5 bg-gray-700 hover:bg-gray-600 text-white rounded-xl font-medium transition-colors"
+          >
+            <Edit2 className="w-4 h-4" />
+            <span className="hidden md:inline">Ganti Nama</span>
+          </button>
         </div>
       </div>
 
@@ -1446,12 +1613,19 @@ export const TagihanTokoView: React.FC = () => {
               <tbody className="divide-y divide-gray-700">
                 {filteredToko.map((toko) => (
                   <tr key={`${toko.customer}_${toko.tempos.join('-')}`} className="hover:bg-gray-700/30 transition-colors">
-                    <td className="px-4 py-3">
+                  <td className="px-4 py-3">
                   <div className="flex items-center gap-2">
                     <div className="p-1.5 bg-gray-700 rounded-lg">
                       <Store className="w-4 h-4 text-orange-400" />
                     </div>
                     <span className="font-medium text-white">{toko.customer}</span>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleStartEditCustomer(toko.customer); }}
+                      className="p-1 hover:bg-gray-700 rounded transition-colors"
+                      title="Edit nama customer"
+                    >
+                      <Edit2 className="w-4 h-4 text-gray-400" />
+                    </button>
                     {printedInfo.has(toko.customer.toUpperCase()) && (
                       <button
                         onClick={(e) => {
@@ -2198,6 +2372,71 @@ export const TagihanTokoView: React.FC = () => {
         </div>
       )}
 
+      {/* Edit Customer Name Modal */}
+      {editingCustomerName && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-gray-800 rounded-2xl w-full max-w-md shadow-2xl border border-gray-700">
+            <div className="flex items-center justify-between p-4 border-b border-gray-700">
+              <div className="flex items-center gap-2 text-white font-semibold">
+                <Edit2 className="w-5 h-5 text-orange-400" />
+                <span>Edit Nama Customer</span>
+              </div>
+              <button
+                onClick={() => setEditingCustomerName(null)}
+                className="p-2 hover:bg-gray-700 rounded-lg transition-colors"
+              >
+                <X className="w-5 h-5 text-gray-400" />
+              </button>
+            </div>
+            <div className="p-4 space-y-4">
+              <div>
+                <div className="text-xs text-gray-400 mb-1">Nama Lama</div>
+                <div className="px-3 py-2 rounded-lg bg-gray-900 text-gray-200 border border-gray-700 font-semibold">
+                  {editingCustomerName.oldName}
+                </div>
+              </div>
+              <div>
+                <label className="text-xs text-gray-400 mb-1 block">Nama Baru</label>
+                <input
+                  type="text"
+                  value={editingCustomerName.newName}
+                  onChange={(e) => setEditingCustomerName(prev => prev ? { ...prev, newName: e.target.value.toUpperCase() } : null)}
+                  className="w-full px-3 py-2 rounded-lg bg-gray-900 border border-gray-700 text-white focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
+                  placeholder="Masukkan nama customer baru"
+                />
+              </div>
+            </div>
+            <div className="flex gap-2 p-4 border-t border-gray-700">
+              <button
+                onClick={() => setEditingCustomerName(null)}
+                className="flex-1 px-4 py-2.5 bg-gray-700 hover:bg-gray-600 text-white rounded-xl font-medium transition-colors"
+              >
+                Batal
+              </button>
+              <button
+                onClick={handleSaveCustomerName}
+                disabled={savingCustomerName}
+                className={`flex-1 px-4 py-2.5 text-white rounded-xl font-medium transition-colors flex items-center justify-center gap-2 ${
+                  savingCustomerName ? 'bg-orange-700 cursor-wait' : 'bg-orange-600 hover:bg-orange-700'
+                }`}
+              >
+                {savingCustomerName ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    Menyimpan...
+                  </>
+                ) : (
+                  <>
+                    <Check className="w-4 h-4" />
+                    Simpan
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Flag Detail Modal */}
       {flagModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -2229,6 +2468,81 @@ export const TagihanTokoView: React.FC = () => {
                 className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-xl font-medium transition-colors"
               >
                 Tutup
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Rename Customer Modal (global) */}
+      {showRenameModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-gray-800 rounded-2xl w-full max-w-md shadow-2xl border border-gray-700">
+            <div className="flex items-center justify-between p-4 border-b border-gray-700">
+              <div className="flex items-center gap-2 text-white font-semibold">
+                <Edit2 className="w-5 h-5 text-orange-400" />
+                <span>Ganti Nama Customer</span>
+              </div>
+              <button
+                onClick={() => setShowRenameModal(false)}
+                className="p-2 hover:bg-gray-700 rounded-lg transition-colors"
+              >
+                <X className="w-5 h-5 text-gray-400" />
+              </button>
+            </div>
+            <div className="p-4 space-y-4">
+              <div>
+                <label className="text-xs text-gray-400 mb-1 block">Nama Lama</label>
+                <input
+                  list="customer-options"
+                  value={renameOld}
+                  onChange={(e) => setRenameOld(e.target.value.toUpperCase())}
+                  className="w-full px-3 py-2 rounded-lg bg-gray-900 border border-gray-700 text-white focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
+                  placeholder="Contoh: BOS RONI"
+                />
+                <datalist id="customer-options">
+                  {customerOptions.map(c => <option key={c} value={c} />)}
+                </datalist>
+              </div>
+              <div>
+                <label className="text-xs text-gray-400 mb-1 block">Nama Baru</label>
+                <input
+                  type="text"
+                  value={renameNew}
+                  onChange={(e) => setRenameNew(e.target.value.toUpperCase())}
+                  className="w-full px-3 py-2 rounded-lg bg-gray-900 border border-gray-700 text-white focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
+                  placeholder="Contoh: BOS RONI MGK"
+                />
+              </div>
+              <div className="text-xs text-gray-500 bg-gray-800/60 px-3 py-2 rounded-lg border border-gray-700">
+                Sistem akan mengganti semua kemunculan nama lama di tabel barang_keluar (MJM/BJW), pembayaran, tagihan manual, dan inv_tagihan.
+              </div>
+            </div>
+            <div className="flex gap-2 p-4 border-t border-gray-700">
+              <button
+                onClick={() => setShowRenameModal(false)}
+                className="flex-1 px-4 py-2.5 bg-gray-700 hover:bg-gray-600 text-white rounded-xl font-medium transition-colors"
+              >
+                Batal
+              </button>
+              <button
+                onClick={handleBulkRename}
+                disabled={savingCustomerName}
+                className={`flex-1 px-4 py-2.5 text-white rounded-xl font-medium transition-colors flex items-center justify-center gap-2 ${
+                  savingCustomerName ? 'bg-orange-700 cursor-wait' : 'bg-orange-600 hover:bg-orange-700'
+                }`}
+              >
+                {savingCustomerName || loadingCustomers ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    Memproses...
+                  </>
+                ) : (
+                  <>
+                    <Check className="w-4 h-4" />
+                    Simpan
+                  </>
+                )}
               </button>
             </div>
           </div>
