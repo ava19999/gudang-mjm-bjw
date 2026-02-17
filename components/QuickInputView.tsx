@@ -415,10 +415,12 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
         return;
       }
       
-      // Group by customer + date (using JSON.stringify for safer key generation)
+      // Group by customer + date (BJW: include tempo to avoid mixing SALES/non-SALES in one order)
       const groupedOrders: Record<string, QuickInputRow[]> = {};
       rowsToSave.forEach(row => {
-        const key = JSON.stringify([row.customer.trim().toLowerCase(), row.tanggal]);
+        const key = selectedStore === 'bjw'
+          ? JSON.stringify([row.customer.trim().toLowerCase(), row.tanggal, (row.tempo || 'CASH').trim().toUpperCase()])
+          : JSON.stringify([row.customer.trim().toLowerCase(), row.tanggal]);
         if (!groupedOrders[key]) groupedOrders[key] = [];
         groupedOrders[key].push(row);
       });
@@ -561,7 +563,7 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
 
         <div className="bg-yellow-900/20 px-4 py-1 text-xs text-yellow-200 text-center border-b border-yellow-900/30">
             Mode: <strong>{mode === 'in' ? 'BARANG MASUK (Tambah Stok)' : 'BARANG KELUAR (Kurangi Stok)'}</strong>. 
-            Pastikan pilihan Tempo: <em>CASH, 3 BLN, 2 BLN, TEMPO, atau NADIR</em>.
+            Pastikan pilihan Tempo: <em>{mode === 'out' && selectedStore === 'bjw' ? 'CASH, 3 BLN, 2 BLN, 1 BLN, atau SALES' : 'CASH, 3 BLN, 2 BLN, 1 BLN, atau NADIR'}</em>.
         </div>
 
         <QuickInputTable
@@ -580,6 +582,7 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
           onSearchKeyDown={handleSearchKeyDown}
           onGridKeyDown={handleGridKeyDown}
           mode={mode}
+          selectedStore={selectedStore}
         />
 
         <QuickInputFooter 
@@ -596,12 +599,17 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
       ) : (
           <div className="bg-gray-900 border-t border-gray-700 p-6 text-center">
               <div className="bg-red-900/20 border border-red-800/50 rounded-lg p-4 max-w-2xl mx-auto">
-                  <h4 className="text-lg font-bold text-red-400 mb-2">📋 Alur Barang Keluar</h4>
+                  <h4 className="text-lg font-bold text-red-400 mb-2">Alur Barang Keluar</h4>
                   <p className="text-sm text-gray-300 mb-2">
                       Data akan masuk ke <strong>Proses Pesanan</strong> untuk di-ACC terlebih dahulu.
                   </p>
+                  {selectedStore === 'bjw' && (
+                    <p className="text-xs text-cyan-300 mb-2">
+                      Khusus BJW: tempo <strong>SALES</strong> akan langsung mengurangi stok base dan masuk ke tab <strong>Pesanan &gt; Sales</strong>.
+                    </p>
+                  )}
                   <p className="text-xs text-gray-400">
-                      💡 Tips: Customer & tanggal yang sama akan digabung jadi 1 nota.
+                      Tips: Customer dan tanggal yang sama akan digabung jadi 1 nota.
                   </p>
               </div>
           </div>

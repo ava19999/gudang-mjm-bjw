@@ -1406,6 +1406,24 @@ export const fetchOfflineOrders = async (store: string | null): Promise<OfflineO
   return data || [];
 };
 
+// 2.1 FETCH SALES (KHUSUS BJW)
+export const fetchSalesOrders = async (store: string | null): Promise<OfflineOrderRow[]> => {
+  if (store !== 'bjw') return [];
+
+  const { data, error } = await supabase
+    .from('orders_bjw')
+    .select('*')
+    .eq('status', 'Sales Pending')
+    .eq('tempo', 'SALES')
+    .order('tanggal', { ascending: false });
+
+  if (error) {
+    console.error('Fetch Sales Orders Error:', error);
+    return [];
+  }
+  return data || [];
+};
+
 // 3. FETCH ONLINE
 export const fetchOnlineOrders = async (store: string | null): Promise<OnlineOrderRow[]> => {
   const table = store === 'mjm' ? 'scan_resi_mjm' : (store === 'bjw' ? 'scan_resi_bjw' : null);
@@ -1432,6 +1450,24 @@ export const fetchSoldItems = async (store: string | null): Promise<SoldItemRow[
     .order('created_at', { ascending: false });
 
   if (error) { console.error('Fetch Sold Error:', error); return []; }
+  return data || [];
+};
+
+// 4.1 FETCH SALES PAID ITEMS (KHUSUS BJW)
+export const fetchSalesPaidItems = async (store: string | null): Promise<SoldItemRow[]> => {
+  if (store !== 'bjw') return [];
+
+  const { data, error } = await supabase
+    .from('barang_keluar_bjw')
+    .select('*')
+    .ilike('ecommerce', 'SALES')
+    .ilike('tempo', 'CASH')
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    console.error('Fetch Sales Paid Error:', error);
+    return [];
+  }
   return data || [];
 };
 
@@ -1586,6 +1622,244 @@ export const processOfflineOrderItem = async (
   }
 };
 
+// --- SALES FLOW (KHUSUS BJW) ---
+export const processSalesOrderItem = async (
+  item: OfflineOrderRow,
+  store: string | null,
+  action: 'TERJUAL' | 'KEMBALIKAN',
+  qtyToProcess?: number
+): Promise<{ success: boolean; msg: string }> => {
+  if (store !== 'bjw') {
+    return { success: false, msg: 'Fitur Sales hanya untuk toko BJW.' };
+  }
+
+  const orderTable = 'orders_bjw';
+  const stockTable = 'base_bjw';
+  const outTable = 'barang_keluar_bjw';
+
+  const originalQty = Number(item.quantity || 0);
+  const processQtyRaw = qtyToProcess == null ? originalQty : Number(qtyToProcess);
+  const processQty = Number.isFinite(processQtyRaw) ? Math.floor(processQtyRaw) : 0;
+  if (processQty <= 0 || processQty > originalQty) {
+    return { success: false, msg: `Qty tidak valid (max: ${originalQty}).` };
+  }
+
+  const remainingQty = originalQty - processQty;
+  const fallbackUnitPrice = originalQty > 0 ? Math.round(Number(item.harga_total || 0) / originalQty) : 0;
+  const unitPrice = Number(item.harga_satuan || 0) > 0 ? Number(item.harga_satuan || 0) : fallbackUnitPrice;
+  const processedTotal = unitPrice * processQty;
+  const remainingTotal = unitPrice * remainingQty;
+  const hasStableId = item.id !== undefined && item.id !== null && String(item.id).trim() !== '';
+
+  // Gunakan id jika ada, fallback ke kombinasi data order
+  const buildWhereQuery = (query: any) => {
+    if (hasStableId) {
+      return query.eq('id', item.id);
+    }
+    return query
+      .eq('tanggal', item.tanggal)
+      .eq('customer', item.customer)
+      .eq('part_number', item.part_number)
+      .eq('tempo', 'SALES')
+      .eq('status', 'Sales Pending');
+  };
+
+  try {
+    if (action === 'KEMBALIKAN') {
+      // Barang dikembalikan ke base (stok tambah lagi)
+      const { data: currentItem, error: fetchError } = await supabase
+        .from(stockTable)
+        .select('quantity')
+        .eq('part_number', item.part_number)
+        .maybeSingle();
+
+      if (fetchError) throw fetchError;
+      if (!currentItem) {
+        return { success: false, msg: `Part ${item.part_number} tidak ditemukan di base BJW.` };
+      }
+
+      const restoredQty = Number(currentItem.quantity || 0) + processQty;
+      const { error: updateStockError } = await supabase
+        .from(stockTable)
+        .update({ quantity: restoredQty })
+        .eq('part_number', item.part_number);
+
+      if (updateStockError) throw updateStockError;
+
+      let updateQuery = supabase
+        .from(orderTable)
+        .update(
+          remainingQty <= 0
+            ? { status: 'Tolak' }
+            : { quantity: remainingQty, harga_total: remainingTotal, tempo: 'SALES', status: 'Sales Pending' }
+        );
+      updateQuery = buildWhereQuery(updateQuery);
+      const { error: updateOrderError } = await updateQuery;
+      if (updateOrderError) throw updateOrderError;
+
+      return { success: true, msg: `Barang dikembalikan ke base (+${processQty}).` };
+    }
+
+    // TERJUAL: stok TIDAK dikurangi lagi (sudah berkurang saat dibawa sales)
+    const { data: stockItem } = await supabase
+      .from(stockTable)
+      .select('brand, application, shelf, quantity')
+      .eq('part_number', item.part_number)
+      .maybeSingle();
+
+    const currentQty = Number(stockItem?.quantity || 0);
+    const logPayload = {
+      tempo: 'CASH', // terjual & dibayar
+      ecommerce: 'SALES',
+      customer: item.customer,
+      part_number: item.part_number,
+      name: item.nama_barang,
+      brand: stockItem?.brand || '',
+      application: stockItem?.application || '',
+      rak: stockItem?.shelf || '',
+      stock_ahir: currentQty,
+      qty_keluar: processQty,
+      harga_satuan: unitPrice,
+      harga_total: processedTotal,
+      resi: '-',
+      created_at: getWIBDate().toISOString()
+    };
+
+    const { error: insertOutError } = await supabase.from(outTable).insert([logPayload]);
+    if (insertOutError) throw insertOutError;
+
+    let updateQuery = supabase
+      .from(orderTable)
+      .update(
+        remainingQty <= 0
+          ? { status: 'Proses' }
+          : { quantity: remainingQty, harga_total: remainingTotal, tempo: 'SALES', status: 'Sales Pending' }
+      );
+    updateQuery = buildWhereQuery(updateQuery);
+    const { error: updateOrderError } = await updateQuery;
+    if (updateOrderError) throw updateOrderError;
+
+    return { success: true, msg: `Barang Sales ditandai terjual (${processQty}).` };
+  } catch (error: any) {
+    console.error('processSalesOrderItem Error:', error);
+    return { success: false, msg: error?.message || 'Gagal memproses data Sales.' };
+  }
+};
+
+// --- SALES CORRECTION (KHUSUS BJW): EDIT QTY TANPA MENGUBAH STOK BASE ---
+export const updateSalesPendingQty = async (
+  item: OfflineOrderRow,
+  store: string | null,
+  newQtyRaw: number
+): Promise<{ success: boolean; msg: string }> => {
+  if (store !== 'bjw') {
+    return { success: false, msg: 'Fitur edit qty Sales hanya untuk toko BJW.' };
+  }
+
+  const newQty = Number.isFinite(Number(newQtyRaw)) ? Math.floor(Number(newQtyRaw)) : 0;
+  if (newQty <= 0) {
+    return { success: false, msg: 'Qty baru harus lebih dari 0.' };
+  }
+
+  const originalQty = Number(item.quantity || 0);
+  const fallbackUnitPrice = originalQty > 0 ? Number(item.harga_total || 0) / originalQty : 0;
+  const unitPrice = Number(item.harga_satuan || 0) > 0 ? Number(item.harga_satuan || 0) : fallbackUnitPrice;
+  const newTotal = Math.round(unitPrice * newQty);
+
+  const hasStableId = item.id !== undefined && item.id !== null && String(item.id).trim() !== '';
+
+  const updatePayload = {
+    quantity: newQty,
+    harga_total: newTotal,
+    harga_satuan: Math.round(unitPrice),
+    tempo: 'SALES',
+    status: 'Sales Pending'
+  };
+
+  // Gunakan id jika ada, fallback ke kombinasi data order
+  const buildWhereQuery = (query: any) => {
+    if (hasStableId) {
+      return query.eq('id', item.id);
+    }
+    return query
+      .eq('tanggal', item.tanggal)
+      .eq('customer', item.customer)
+      .eq('part_number', item.part_number)
+      .eq('tempo', 'SALES')
+      .eq('status', 'Sales Pending');
+  };
+
+  try {
+    let updateQuery = supabase.from('orders_bjw').update(updatePayload);
+    updateQuery = buildWhereQuery(updateQuery);
+
+    const { error } = await updateQuery;
+    if (error) throw error;
+
+    return {
+      success: true,
+      msg: `Qty sales diubah ke ${newQty} (stok base tidak berubah).`
+    };
+  } catch (error: any) {
+    console.error('updateSalesPendingQty Error:', error);
+    return {
+      success: false,
+      msg: error?.message || 'Gagal update qty sales.'
+    };
+  }
+};
+
+// --- SALES CORRECTION (KHUSUS BJW): HAPUS ITEM TANPA MENGUBAH STOK BASE ---
+export const deleteSalesPendingItem = async (
+  item: OfflineOrderRow,
+  store: string | null
+): Promise<{ success: boolean; msg: string }> => {
+  if (store !== 'bjw') {
+    return { success: false, msg: 'Fitur hapus Sales hanya untuk toko BJW.' };
+  }
+
+  const hasStableId = item.id !== undefined && item.id !== null && String(item.id).trim() !== '';
+
+  // Gunakan id jika ada, fallback ke kombinasi data order
+  const buildWhereQuery = (query: any) => {
+    if (hasStableId) {
+      return query.eq('id', item.id);
+    }
+
+    let q = query
+      .eq('tanggal', item.tanggal)
+      .eq('customer', item.customer)
+      .eq('part_number', item.part_number)
+      .eq('tempo', 'SALES')
+      .eq('status', 'Sales Pending');
+
+    // Tambahan filter agar lebih spesifik saat id tidak tersedia
+    if (item.quantity != null) q = q.eq('quantity', item.quantity);
+    if (item.harga_total != null) q = q.eq('harga_total', item.harga_total);
+
+    return q;
+  };
+
+  try {
+    let deleteQuery = supabase.from('orders_bjw').delete();
+    deleteQuery = buildWhereQuery(deleteQuery);
+
+    const { error } = await deleteQuery;
+    if (error) throw error;
+
+    return {
+      success: true,
+      msg: 'Item Sales dihapus (stok base tidak berubah).'
+    };
+  } catch (error: any) {
+    console.error('deleteSalesPendingItem Error:', error);
+    return {
+      success: false,
+      msg: error?.message || 'Gagal menghapus item Sales.'
+    };
+  }
+};
+
 export const processOnlineOrderItem = async (item: OnlineOrderRow, store: string | null): Promise<boolean> => {
   const scanTable = store === 'mjm' ? 'scan_resi_mjm' : (store === 'bjw' ? 'scan_resi_bjw' : null);
   const stockTable = store === 'mjm' ? 'base_mjm' : (store === 'bjw' ? 'base_bjw' : null);
@@ -1639,6 +1913,101 @@ export const saveOfflineOrder = async (
   const tableName = store === 'mjm' ? 'orders_mjm' : (store === 'bjw' ? 'orders_bjw' : null);
   if (!tableName) { alert("Error: Toko tidak teridentifikasi"); return false; }
   if (!cart || cart.length === 0) return false;
+
+  const normalizedTempo = (tempo || 'CASH').trim().toUpperCase();
+
+  // KHUSUS BJW + SALES:
+  // - Saat input, stok langsung dikurangi (barang dibawa sales)
+  // - Masuk ke orders dengan status "Sales Pending"
+  if (store === 'bjw' && normalizedTempo === 'SALES') {
+    const stockTable = 'base_bjw';
+    const requiredByPart = new Map<string, number>();
+
+    for (const item of cart) {
+      const partNumber = String(item.partNumber || '').trim();
+      const qty = Number(item.cartQuantity || 0);
+      if (!partNumber || qty <= 0) {
+        alert(`Data Sales tidak valid untuk part "${partNumber || '-'}".`);
+        return false;
+      }
+      requiredByPart.set(partNumber, (requiredByPart.get(partNumber) || 0) + qty);
+    }
+
+    const stockPlans: Array<{ partNumber: string; currentQty: number; newQty: number }> = [];
+
+    // Validasi stok dulu semua part
+    for (const [partNumber, requiredQty] of requiredByPart.entries()) {
+      const { data: currentStock, error: stockError } = await supabase
+        .from(stockTable)
+        .select('part_number, quantity')
+        .eq('part_number', partNumber)
+        .maybeSingle();
+
+      if (stockError || !currentStock) {
+        alert(`Part "${partNumber}" tidak ditemukan di base BJW.`);
+        return false;
+      }
+
+      const currentQty = Number(currentStock.quantity || 0);
+      if (currentQty < requiredQty) {
+        alert(`Stok "${partNumber}" tidak cukup. Sisa: ${currentQty}, dibutuhkan: ${requiredQty}.`);
+        return false;
+      }
+
+      stockPlans.push({
+        partNumber,
+        currentQty,
+        newQty: currentQty - requiredQty
+      });
+    }
+
+    const nowIso = getWIBDate().toISOString();
+    const salesRows = cart.map(item => {
+      const finalPrice = item.customPrice ? Number(item.customPrice) : Number(item.price);
+      return {
+        tanggal: nowIso,
+        customer: customerName,
+        part_number: item.partNumber,
+        nama_barang: item.name,
+        quantity: Number(item.cartQuantity),
+        harga_satuan: finalPrice,
+        harga_total: finalPrice * Number(item.cartQuantity),
+        status: 'Sales Pending',
+        tempo: 'SALES'
+      };
+    });
+
+    const appliedPlans: Array<{ partNumber: string; currentQty: number }> = [];
+
+    try {
+      // 1) Kurangi stok dulu
+      for (const plan of stockPlans) {
+        const { error: updateError } = await supabase
+          .from(stockTable)
+          .update({ quantity: plan.newQty })
+          .eq('part_number', plan.partNumber);
+
+        if (updateError) throw updateError;
+        appliedPlans.push({ partNumber: plan.partNumber, currentQty: plan.currentQty });
+      }
+
+      // 2) Simpan daftar barang yang dibawa sales
+      const { error: insertError } = await supabase.from(tableName).insert(salesRows);
+      if (insertError) throw insertError;
+
+      return true;
+    } catch (e: any) {
+      // Best-effort rollback stok jika insert/order gagal
+      for (const rollback of appliedPlans) {
+        await supabase
+          .from(stockTable)
+          .update({ quantity: rollback.currentQty })
+          .eq('part_number', rollback.partNumber);
+      }
+      alert(`Gagal menyimpan order SALES: ${e?.message || e}`);
+      return false;
+    }
+  }
 
   const orderRows = cart.map(item => {
     // [FIX] Gunakan customPrice jika ada, jika tidak gunakan harga asli

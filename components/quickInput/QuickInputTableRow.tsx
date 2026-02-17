@@ -23,11 +23,12 @@ interface QuickInputTableRowProps {
     onSearchKeyDown: (e: React.KeyboardEvent, id: number) => void;
     onGridKeyDown: (e: React.KeyboardEvent, globalRefIndex: number) => void;
     mode: 'in' | 'out'; // Add mode prop
+    selectedStore: 'mjm' | 'bjw' | null;
 }
 
 export const QuickInputTableRow: React.FC<QuickInputTableRowProps> = ({
     row, index, globalIndex, activeSearchIndex, suggestions, supplierList, customerList, inputRefs,
-    onPartNumberChange, onSelectItem, onUpdateRow, onRemoveRow, highlightedIndex, onSearchKeyDown, onGridKeyDown, mode
+    onPartNumberChange, onSelectItem, onUpdateRow, onRemoveRow, highlightedIndex, onSearchKeyDown, onGridKeyDown, mode, selectedStore
 }) => {
     const isComplete = checkIsRowComplete(row);
     const activeItemRef = useRef<HTMLDivElement>(null);
@@ -51,7 +52,12 @@ export const QuickInputTableRow: React.FC<QuickInputTableRowProps> = ({
     const baseRefIndex = globalIndex * COLS;
 
     // Payment terms options
-    const tempoOptions = ['CASH', '3 BLN', '2 BLN', '1 BLN', 'NADIR'];
+    const tempoOptions =
+        mode === 'out'
+            ? (selectedStore === 'bjw'
+                ? ['CASH', '3 BLN', '2 BLN', '1 BLN', 'SALES']
+                : ['CASH', '3 BLN', '2 BLN', '1 BLN', 'NADIR'])
+            : ['CASH', '3 BLN', '2 BLN', '1 BLN', 'NADIR'];
 
     // --- CALCULATION LOGIC ---
     

@@ -6,7 +6,8 @@ import { useStore } from '../context/StoreContext';
 import { 
   fetchOfflineOrders, fetchSoldItems, fetchReturItems,
   processOfflineOrderItem, updateOfflineOrder, fetchInventory, createReturFromSold, updateReturStatus,
-  fetchDistinctEcommerce, deleteBarangLog, updateSoldItemPrice, updateSoldItemDate
+  fetchDistinctEcommerce, deleteBarangLog, updateSoldItemPrice, updateSoldItemDate,
+  fetchSalesOrders, processSalesOrderItem, fetchSalesPaidItems
 } from '../services/supabaseService';
 import { OfflineOrderRow, SoldItemRow, ReturRow, CartItem } from '../types';
 import { ReceiptModal } from './shop/ReceiptModal';
@@ -289,7 +290,7 @@ const ReturModal: React.FC<ReturModalProps> = ({ isOpen, item, onClose, onConfir
 
 export const OrderManagement: React.FC = () => {
   const { selectedStore } = useStore();
-  const [activeTab, setActiveTab] = useState<'OFFLINE' | 'TERJUAL' | 'RETUR'>('OFFLINE');
+  const [activeTab, setActiveTab] = useState<'OFFLINE' | 'SALES' | 'TERJUAL' | 'RETUR'>('OFFLINE');
   const [loading, setLoading] = useState(false);
   const [loadingProgress, setLoadingProgress] = useState(0);
   const [searchTerm, setSearchTerm] = useState('');
@@ -302,9 +303,12 @@ export const OrderManagement: React.FC = () => {
   // State Grouping
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const [selectedGroups, setSelectedGroups] = useState<Set<string>>(new Set());
+  const [salesPartSearchByGroup, setSalesPartSearchByGroup] = useState<Record<string, string>>({});
 
   // State Data
   const [offlineData, setOfflineData] = useState<OfflineOrderRow[]>([]);
+  const [salesData, setSalesData] = useState<OfflineOrderRow[]>([]);
+  const [salesPaidData, setSalesPaidData] = useState<SoldItemRow[]>([]);
   const [soldData, setSoldData] = useState<SoldItemRow[]>([]);
   const [returData, setReturData] = useState<ReturRow[]>([]);
 
@@ -462,6 +466,14 @@ export const OrderManagement: React.FC = () => {
     
     try {
       if (activeTab === 'OFFLINE') setOfflineData(await fetchOfflineOrders(selectedStore));
+      if (activeTab === 'SALES') {
+        const [pendingSales, paidSales] = await Promise.all([
+          fetchSalesOrders(selectedStore),
+          fetchSalesPaidItems(selectedStore)
+        ]);
+        setSalesData(pendingSales);
+        setSalesPaidData(paidSales);
+      }
       if (activeTab === 'TERJUAL') setSoldData(await fetchSoldItems(selectedStore));
       if (activeTab === 'RETUR') setReturData(await fetchReturItems(selectedStore));
       
@@ -483,6 +495,13 @@ export const OrderManagement: React.FC = () => {
   };
 
   useEffect(() => { loadData(); }, [selectedStore, activeTab]);
+
+  // SAFEGUARD: SALES hanya untuk toko BJW
+  useEffect(() => {
+    if (selectedStore !== 'bjw' && activeTab === 'SALES') {
+      setActiveTab('OFFLINE');
+    }
+  }, [selectedStore, activeTab]);
 
   // Load ecommerce options from database
   useEffect(() => {
@@ -511,6 +530,36 @@ export const OrderManagement: React.FC = () => {
     // Urutkan dari yang paling lama (oldest) ke terbaru
     return Object.values(groups).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
   }, [offlineData]);
+
+  // GROUPING SALES DATA (KHUSUS BJW)
+  const groupedSalesOrders = useMemo(() => {
+    const groups: Record<string, { id: string, date: string, customer: string, items: OfflineOrderRow[], totalAmount: number, totalQty: number }> = {};
+    salesData.forEach(item => {
+      const safeDate = (item.tanggal || '').trim();
+      const dateOnlyKey = safeDate.slice(0, 10) || safeDate;
+      const safeCustomer = (item.customer || 'Tanpa Nama').trim() || 'Tanpa Nama';
+      const key = `${dateOnlyKey}__${safeCustomer.toUpperCase()}`;
+      if (!groups[key]) {
+        groups[key] = {
+          id: key,
+          date: dateOnlyKey,
+          customer: safeCustomer,
+          items: [],
+          totalAmount: 0,
+          totalQty: 0
+        };
+      }
+      groups[key].items.push(item);
+      groups[key].totalAmount += (Number(item.harga_total) || 0);
+      groups[key].totalQty += (Number(item.quantity) || 0);
+    });
+
+    return Object.values(groups).sort((a, b) => {
+      const dateDiff = new Date(b.date).getTime() - new Date(a.date).getTime();
+      if (dateDiff !== 0) return dateDiff;
+      return a.customer.localeCompare(b.customer, 'id');
+    });
+  }, [salesData]);
 
   // GROUPING SOLD DATA by Customer/Resi
   const groupedSoldData = useMemo(() => {
@@ -612,22 +661,36 @@ export const OrderManagement: React.FC = () => {
     const search = customerFilter.toLowerCase();
     const customers = activeTab === 'OFFLINE'
       ? [...new Set(groupedOfflineOrders.map(group => group.customer).filter(Boolean))]
+      : activeTab === 'SALES'
+        ? [
+            ...new Set([
+              ...salesData.map(item => item.customer).filter(Boolean),
+              ...salesPaidData.map(item => item.customer).filter(Boolean)
+            ])
+          ]
       : activeTab === 'RETUR'
         ? [...new Set(returData.map(item => item.customer).filter(Boolean))]
         : [...new Set(soldData.map(item => item.customer).filter(Boolean))];
     return customers.filter(c => c.toLowerCase().includes(search)).slice(0, 50);
-  }, [activeTab, groupedOfflineOrders, soldData, returData, customerFilter]);
+  }, [activeTab, groupedOfflineOrders, salesData, salesPaidData, soldData, returData, customerFilter]);
 
   const filteredPartNumberOptions = useMemo(() => {
     if (!partNumberFilter || partNumberFilter.length < 1) return [];
     const search = partNumberFilter.toLowerCase();
     const partNumbers = activeTab === 'OFFLINE'
       ? [...new Set(offlineData.map(item => item.part_number).filter(Boolean))]
+      : activeTab === 'SALES'
+        ? [
+            ...new Set([
+              ...salesData.map(item => item.part_number).filter(Boolean),
+              ...salesPaidData.map(item => item.part_number).filter(Boolean)
+            ])
+          ]
       : activeTab === 'RETUR'
         ? [...new Set(returData.map(item => item.part_number).filter(Boolean))]
         : [...new Set(soldData.map(item => item.part_number).filter(Boolean))];
     return partNumbers.filter(p => p.toLowerCase().includes(search)).slice(0, 50);
-  }, [activeTab, offlineData, soldData, returData, partNumberFilter]);
+  }, [activeTab, offlineData, salesData, salesPaidData, soldData, returData, partNumberFilter]);
 
   // Pagination for grouped sold data
   const paginatedSoldGroups = useMemo(() => {
@@ -976,6 +1039,60 @@ export const OrderManagement: React.FC = () => {
     loadData();
   };
 
+  // 2.1 SALES HANDLERS (KHUSUS BJW)
+  const handleProcessSalesItem = async (item: OfflineOrderRow, action: 'TERJUAL' | 'KEMBALIKAN') => {
+    const maxQty = Number(item.quantity || 0);
+    if (maxQty <= 0) {
+      showToast('Qty item tidak valid.', 'error');
+      return;
+    }
+
+    const qtyInput = window.prompt(
+      `Masukkan qty untuk ${action === 'TERJUAL' ? 'TERJUAL' : 'KEMBALIKAN'} (max ${maxQty}):`,
+      String(maxQty)
+    );
+    if (qtyInput === null) return;
+
+    const qty = Number(qtyInput);
+    if (!Number.isInteger(qty) || qty <= 0 || qty > maxQty) {
+      showToast(`Qty harus angka bulat 1 sampai ${maxQty}.`, 'error');
+      return;
+    }
+
+    const actionText = action === 'TERJUAL' ? 'Tandai TERJUAL' : 'Kembalikan ke BASE';
+    if (!window.confirm(`${actionText}: ${item.nama_barang} (${item.part_number}) qty ${qty}/${maxQty}?`)) return;
+
+    setLoading(true);
+    const res = await processSalesOrderItem(item, selectedStore, action, qty);
+    setLoading(false);
+
+    if (res.success) {
+      showToast(action === 'TERJUAL' ? `Terjual ${qty} pcs.` : `Dikembalikan ${qty} pcs ke base.`);
+      loadData();
+    } else {
+      showToast(res.msg, 'error');
+    }
+  };
+
+  const handleProcessSalesGroup = async (items: OfflineOrderRow[], action: 'TERJUAL' | 'KEMBALIKAN') => {
+    if (items.length === 0) return;
+
+    const actionText = action === 'TERJUAL' ? 'Tandai TERJUAL semua' : 'Kembalikan semua ke BASE';
+    if (!window.confirm(`${actionText} (${items.length} item)?`)) return;
+
+    setLoading(true);
+    let successCount = 0;
+
+    for (const item of items) {
+      const res = await processSalesOrderItem(item, selectedStore, action);
+      if (res.success) successCount++;
+    }
+
+    setLoading(false);
+    showToast(`${successCount} item Sales berhasil diproses.`);
+    loadData();
+  };
+
   const toggleExpand = (key: string) => {
     setExpandedGroups(prev => ({ ...prev, [key]: !prev[key] }));
   };
@@ -1092,6 +1209,98 @@ export const OrderManagement: React.FC = () => {
     return filteredGroupedOffline.reduce((sum, g) => sum + (g.totalAmount || 0), 0);
   }, [filteredGroupedOffline]);
 
+  const filteredGroupedSales = useMemo(() => {
+    const lowerSearch = searchTerm.trim().toLowerCase();
+    const lowerCustomerFilter = customerFilter.trim().toLowerCase();
+    const lowerPartNumberFilter = partNumberFilter.trim().toLowerCase();
+    const sourceFilter = ecommerceFilter.trim().toUpperCase();
+
+    return groupedSalesOrders.filter(group => {
+      // Ecommerce filter for SALES tab: only ALL / SALES
+      if (sourceFilter !== 'ALL' && sourceFilter !== 'SALES') return false;
+
+      if (
+        lowerCustomerFilter &&
+        !group.customer.toLowerCase().includes(lowerCustomerFilter)
+      ) {
+        return false;
+      }
+
+      if (
+        lowerPartNumberFilter &&
+        !group.items.some(item => (item.part_number || '').toLowerCase().includes(lowerPartNumberFilter))
+      ) {
+        return false;
+      }
+
+      if (lowerSearch) {
+        const matchGroup =
+          group.customer.toLowerCase().includes(lowerSearch) ||
+          new Date(group.date).toLocaleDateString('id-ID', { timeZone: 'Asia/Jakarta' }).toLowerCase().includes(lowerSearch) ||
+          group.date.toLowerCase().includes(lowerSearch);
+
+        const matchItems = group.items.some(item =>
+          (item.customer || '').toLowerCase().includes(lowerSearch) ||
+          (item.nama_barang || '').toLowerCase().includes(lowerSearch) ||
+          (item.part_number || '').toLowerCase().includes(lowerSearch)
+        );
+
+        if (!matchGroup && !matchItems) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }, [groupedSalesOrders, searchTerm, customerFilter, partNumberFilter, ecommerceFilter]);
+
+  const filteredSalesPaidData = useMemo(() => {
+    const lowerSearch = searchTerm.trim().toLowerCase();
+    const lowerCustomerFilter = customerFilter.trim().toLowerCase();
+    const lowerPartNumberFilter = partNumberFilter.trim().toLowerCase();
+    const sourceFilter = ecommerceFilter.trim().toUpperCase();
+
+    return salesPaidData.filter(item => {
+      if (sourceFilter !== 'ALL' && sourceFilter !== 'SALES') return false;
+
+      if (lowerCustomerFilter && !(item.customer || '').toLowerCase().includes(lowerCustomerFilter)) return false;
+      if (lowerPartNumberFilter && !(item.part_number || '').toLowerCase().includes(lowerPartNumberFilter)) return false;
+
+      if (lowerSearch) {
+        const dateText = new Date(item.created_at).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' }).toLowerCase();
+        const match =
+          (item.customer || '').toLowerCase().includes(lowerSearch) ||
+          (item.name || '').toLowerCase().includes(lowerSearch) ||
+          (item.part_number || '').toLowerCase().includes(lowerSearch) ||
+          (item.resi || '').toLowerCase().includes(lowerSearch) ||
+          dateText.includes(lowerSearch);
+        if (!match) return false;
+      }
+
+      return true;
+    });
+  }, [salesPaidData, searchTerm, customerFilter, partNumberFilter, ecommerceFilter]);
+
+  const salesPendingTotalAmount = useMemo(
+    () => groupedSalesOrders.reduce((sum, g) => sum + (g.totalAmount || 0), 0),
+    [groupedSalesOrders]
+  );
+
+  const salesPendingTotalQty = useMemo(
+    () => groupedSalesOrders.reduce((sum, g) => sum + (g.totalQty || 0), 0),
+    [groupedSalesOrders]
+  );
+
+  const salesPaidTotalAmount = useMemo(
+    () => salesPaidData.reduce((sum, item) => sum + (Number(item.harga_total) || 0), 0),
+    [salesPaidData]
+  );
+
+  const salesPaidTotalQty = useMemo(
+    () => salesPaidData.reduce((sum, item) => sum + (Number(item.qty_keluar) || 0), 0),
+    [salesPaidData]
+  );
+
   return (
     <div className="bg-gray-800 m-4 rounded-2xl border border-gray-700 shadow-xl flex flex-col text-gray-100" style={{ height: 'calc(100vh - 120px)' }}>
       {toast && <Toast msg={toast.msg} type={toast.type} onClose={() => setToast(null)} />}
@@ -1124,6 +1333,7 @@ export const OrderManagement: React.FC = () => {
       <div className="flex border-b border-gray-700 bg-gray-900/50 overflow-x-auto flex-shrink-0">
         {[
           { id: 'OFFLINE', label: 'OFFLINE (Kasir)', icon: ClipboardList, color: 'text-amber-400' },
+          ...(selectedStore === 'bjw' ? [{ id: 'SALES', label: 'SALES', icon: ShoppingBag, color: 'text-cyan-400' }] : []),
           { id: 'TERJUAL', label: 'SUDAH TERJUAL', icon: CheckCircle, color: 'text-green-400' },
           { id: 'RETUR', label: 'RETUR', icon: RotateCcw, color: 'text-red-400' },
         ].map((tab: any) => (
@@ -1141,6 +1351,7 @@ export const OrderManagement: React.FC = () => {
       {/* SCROLLABLE CONTENT AREA - hanya bagian ini yang scroll */}
       <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden bg-gray-900 rounded-b-2xl">
         {/* SEARCH FILTERS - Sticky saat scroll */}
+        {activeTab !== 'SALES' && (
         <div className="sticky top-0 z-30 p-4 bg-gray-900 border-b border-gray-700 shadow-lg backdrop-blur-sm">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
             {/* Customer Search with Keyboard-Navigable Dropdown */}
@@ -1288,6 +1499,7 @@ export const OrderManagement: React.FC = () => {
             </div>
           )}
         </div>
+        )}
 
         <div className="p-4">
           {/* --- 1. TAB OFFLINE (GROUPED VIEW) --- */}
@@ -1549,6 +1761,221 @@ export const OrderManagement: React.FC = () => {
                 </div>
               );
             })}
+          </div>
+        )}
+
+        {/* --- 2. TAB SALES (KHUSUS BJW) --- */}
+        {activeTab === 'SALES' && selectedStore === 'bjw' && (
+          <div className="space-y-4">
+            {/* Sales Summary */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div className="bg-gray-800 border border-cyan-800/50 rounded-xl p-4">
+                <div className="text-xs text-gray-400 mb-1">Belum Dibayar (Dibawa Sales)</div>
+                <div className="text-2xl font-bold text-cyan-300">{formatRupiah(salesPendingTotalAmount)}</div>
+                <div className="text-xs text-cyan-200 mt-1">{salesPendingTotalQty} pcs</div>
+              </div>
+              <div className="bg-gray-800 border border-emerald-800/50 rounded-xl p-4">
+                <div className="text-xs text-gray-400 mb-1">Sudah Dibayar (Sales)</div>
+                <div className="text-2xl font-bold text-emerald-300">{formatRupiah(salesPaidTotalAmount)}</div>
+                <div className="text-xs text-emerald-200 mt-1">{salesPaidTotalQty} pcs</div>
+              </div>
+              <div className="bg-gray-800 border border-blue-800/50 rounded-xl p-4">
+                <div className="text-xs text-gray-400 mb-1">Item Sudah Dibayar</div>
+                <div className="text-2xl font-bold text-blue-300">{salesPaidData.length}</div>
+                <div className="text-xs text-blue-200 mt-1">Baris transaksi</div>
+              </div>
+            </div>
+
+            {/* Pending Sales Items */}
+            <div className="space-y-3">
+              <div className="text-sm font-bold text-cyan-300">Barang Dibawa Sales / Belum Dibayar</div>
+              {filteredGroupedSales.length === 0 && (
+                <div className="bg-gray-800 border border-gray-700 rounded-xl p-6 text-center text-gray-400 text-sm">
+                  Tidak ada barang Sales pending.
+                </div>
+              )}
+
+              {filteredGroupedSales.map((group) => {
+                const groupKey = `SALES-${group.id}`;
+                const isExpanded = expandedGroups[groupKey] !== false;
+                const localPartSearch = (salesPartSearchByGroup[group.id] || '').trim().toLowerCase();
+                const visibleGroupItems = !localPartSearch
+                  ? group.items
+                  : group.items.filter(item => (item.part_number || '').toLowerCase().includes(localPartSearch));
+
+                return (
+                  <div key={groupKey} className="bg-gray-800 border border-cyan-800/50 rounded-xl overflow-hidden shadow-lg">
+                    <div className="p-3 flex flex-col md:flex-row justify-between gap-3 bg-gray-800">
+                      <div className="flex-1 cursor-pointer select-none" onClick={() => toggleExpand(groupKey)}>
+                        <div className="flex items-center gap-2 mb-1 flex-wrap">
+                          <span className="text-sm font-bold px-3 py-1 rounded border bg-cyan-900/30 border-cyan-700 text-cyan-300">
+                            SALES CUSTOMER
+                          </span>
+                          <span className="text-sm bg-indigo-900/20 text-indigo-300 px-2 py-0.5 rounded border border-indigo-800 flex items-center gap-1">
+                            <User size={14} /> {group.customer}
+                          </span>
+                          <span className="text-sm font-mono bg-gray-700 px-2 py-0.5 rounded text-gray-300">
+                            Tanggal: {new Date(group.date).toLocaleDateString('id-ID', { timeZone: 'Asia/Jakarta' })}
+                          </span>
+                          <span className="text-sm bg-blue-900/30 text-blue-300 px-2 py-0.5 rounded border border-blue-800 flex items-center gap-1">
+                            <Layers size={14} /> {group.items.length} Item
+                          </span>
+                          <span className="text-sm bg-cyan-900/20 text-cyan-300 px-2 py-0.5 rounded border border-cyan-800">
+                            Qty: {group.totalQty}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {isExpanded ? <ChevronUp size={20} className="text-cyan-400"/> : <ChevronDown size={20} className="text-gray-400"/>}
+                          <h3 className="font-extrabold text-xl text-white">
+                            {group.customer} - {new Date(group.date).toLocaleDateString('id-ID', { timeZone: 'Asia/Jakarta' })}
+                          </h3>
+                        </div>
+                        <p className="text-[11px] text-gray-400 ml-7 mt-0.5">
+                          Tanggal ambil/input keluar: {new Date(group.date).toLocaleDateString('id-ID', { timeZone: 'Asia/Jakarta' })}
+                        </p>
+                      </div>
+
+                      <div className="flex flex-col items-end gap-1 border-t md:border-t-0 border-gray-700 pt-2 md:pt-0">
+                        <div>
+                          <span className="text-gray-400 text-xs mr-2">Total Dibawa:</span>
+                          <span className="text-lg font-bold text-cyan-300">{formatRupiah(group.totalAmount)}</span>
+                        </div>
+                        <div className="flex gap-2 w-full md:w-auto">
+                          <button
+                            onClick={() => handleProcessSalesGroup(group.items, 'KEMBALIKAN')}
+                            className="flex-1 md:flex-none bg-orange-900/20 text-orange-300 px-4 py-2 rounded-lg hover:bg-orange-900/40 border border-orange-900/50 text-sm font-bold flex items-center justify-center gap-2 transition-colors"
+                          >
+                            <RotateCcw size={16}/> KEMBALIKAN SEMUA
+                          </button>
+                          <button
+                            onClick={() => handleProcessSalesGroup(group.items, 'TERJUAL')}
+                            className="flex-1 md:flex-none bg-emerald-600 text-white px-4 py-2 rounded-lg hover:bg-emerald-500 shadow-lg shadow-emerald-900/30 text-sm font-bold flex items-center justify-center gap-2 transition-colors"
+                          >
+                            <Check size={16}/> TERJUALKAN SEMUA
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {isExpanded && (
+                      <div className="bg-gray-900/80 border-t border-gray-700 animate-in slide-in-from-top-2 duration-200 overflow-x-auto">
+                        <div className="px-3 py-2 border-b border-gray-700/70 bg-gray-900/60 flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+                          <div className="relative w-full md:max-w-sm">
+                            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+                            <input
+                              type="text"
+                              value={salesPartSearchByGroup[group.id] || ''}
+                              onChange={(e) => setSalesPartSearchByGroup(prev => ({ ...prev, [group.id]: e.target.value }))}
+                              placeholder="Cari part number di tabel ini..."
+                              className="w-full pl-9 pr-3 py-1.5 bg-gray-800 border border-gray-700 rounded-lg text-xs text-white placeholder-gray-500 focus:ring-1 focus:ring-cyan-500 outline-none"
+                            />
+                          </div>
+                          <div className="text-[11px] text-gray-400">
+                            Tampil {visibleGroupItems.length} dari {group.items.length} item
+                          </div>
+                        </div>
+                        <table className="w-full text-sm min-w-[920px]">
+                          <thead className="bg-gray-900/70 text-gray-400">
+                            <tr>
+                              <th className="px-3 py-2 text-left">Part Number</th>
+                              <th className="px-3 py-2 text-left">Nama Barang</th>
+                              <th className="px-3 py-2 text-right">Qty</th>
+                              <th className="px-3 py-2 text-right">Harga Satuan</th>
+                              <th className="px-3 py-2 text-right">Total</th>
+                              <th className="px-3 py-2 text-right">Aksi</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {visibleGroupItems.map((item, idx) => (
+                              <tr key={`sales-${item.id}-${idx}-${item.part_number}`} className="border-t border-gray-700/60 hover:bg-gray-700/20">
+                                <td className="px-3 py-2 font-mono text-cyan-300">{item.part_number || '-'}</td>
+                                <td className="px-3 py-2 text-gray-200">
+                                  <div className="font-semibold text-gray-100">{item.nama_barang || '-'}</div>
+                                  <div className="text-[11px] text-cyan-300">Titip Sales ({item.tempo || 'SALES'})</div>
+                                </td>
+                                <td className="px-3 py-2 text-right text-white font-semibold">{item.quantity || 0}</td>
+                                <td className="px-3 py-2 text-right text-gray-300">{formatRupiah(item.harga_satuan || 0)}</td>
+                                <td className="px-3 py-2 text-right text-emerald-300 font-bold">{formatRupiah(item.harga_total || 0)}</td>
+                                <td className="px-3 py-2">
+                                  <div className="flex justify-end gap-2">
+                                    <button
+                                      onClick={() => handleProcessSalesItem(item, 'KEMBALIKAN')}
+                                      className="px-3 py-1.5 rounded bg-orange-900/20 text-orange-300 hover:bg-orange-900/50 border border-orange-900/40 transition-colors text-xs font-bold"
+                                    >
+                                      KEMBALIKAN
+                                    </button>
+                                    <button
+                                      onClick={() => handleProcessSalesItem(item, 'TERJUAL')}
+                                      className="px-3 py-1.5 rounded bg-emerald-900/20 text-emerald-300 hover:bg-emerald-900/50 border border-emerald-900/40 transition-colors text-xs font-bold"
+                                    >
+                                      TERJUAL
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                            {visibleGroupItems.length === 0 && (
+                              <tr>
+                                <td colSpan={6} className="px-3 py-6 text-center text-xs text-gray-400">
+                                  Tidak ada part number yang cocok di tabel ini.
+                                </td>
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Paid Sales Items */}
+            <div className="bg-gray-800 border border-emerald-800/40 rounded-xl overflow-hidden">
+              <div className="px-4 py-3 border-b border-gray-700 bg-gray-900/60 flex items-center justify-between">
+                <h3 className="font-bold text-emerald-300">Sudah Dibayar (Sales)</h3>
+                <span className="text-xs text-gray-400">{filteredSalesPaidData.length} item</span>
+              </div>
+              {filteredSalesPaidData.length === 0 ? (
+                <div className="p-6 text-center text-gray-400 text-sm">
+                  Belum ada item Sales yang sudah dibayar.
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm min-w-[900px]">
+                    <thead className="bg-gray-900/70 text-gray-400">
+                      <tr>
+                        <th className="px-3 py-2 text-left">Tanggal</th>
+                        <th className="px-3 py-2 text-left">Customer</th>
+                        <th className="px-3 py-2 text-left">Part Number</th>
+                        <th className="px-3 py-2 text-left">Nama Barang</th>
+                        <th className="px-3 py-2 text-right">Qty</th>
+                        <th className="px-3 py-2 text-right">Harga Satuan</th>
+                        <th className="px-3 py-2 text-right">Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredSalesPaidData.map((item, idx) => {
+                        const unitPrice = item.qty_keluar > 0 ? item.harga_total / item.qty_keluar : 0;
+                        return (
+                          <tr key={`sales-paid-${item.id}-${idx}`} className="border-t border-gray-700/60 hover:bg-gray-700/20">
+                            <td className="px-3 py-2 text-gray-300 whitespace-nowrap">
+                              {new Date(item.created_at).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })}
+                            </td>
+                            <td className="px-3 py-2 text-white">{item.customer || '-'}</td>
+                            <td className="px-3 py-2 font-mono text-cyan-300">{item.part_number || '-'}</td>
+                            <td className="px-3 py-2 text-gray-200">{item.name || '-'}</td>
+                            <td className="px-3 py-2 text-right text-gray-200">{item.qty_keluar || 0}</td>
+                            <td className="px-3 py-2 text-right text-gray-300">{formatRupiah(unitPrice)}</td>
+                            <td className="px-3 py-2 text-right text-emerald-300 font-bold">{formatRupiah(item.harga_total || 0)}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
           </div>
         )}
 

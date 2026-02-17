@@ -20,11 +20,12 @@ interface QuickInputTableProps {
     onSearchKeyDown: (e: React.KeyboardEvent, id: number) => void;
     onGridKeyDown: (e: React.KeyboardEvent, globalRefIndex: number) => void;
     mode: 'in' | 'out'; // Add mode prop
+    selectedStore: 'mjm' | 'bjw' | null;
 }
 
 export const QuickInputTable: React.FC<QuickInputTableProps> = ({
     currentRows, startIndex, activeSearchIndex, suggestions, supplierList, customerList, inputRefs,
-    onPartNumberChange, onSelectItem, onUpdateRow, onRemoveRow, highlightedIndex, onSearchKeyDown, onGridKeyDown, mode
+    onPartNumberChange, onSelectItem, onUpdateRow, onRemoveRow, highlightedIndex, onSearchKeyDown, onGridKeyDown, mode, selectedStore
 }) => {
     return (
         <div className="flex-1 overflow-auto p-2">
@@ -65,6 +66,7 @@ export const QuickInputTable: React.FC<QuickInputTableProps> = ({
                                 onSearchKeyDown={onSearchKeyDown}
                                 onGridKeyDown={onGridKeyDown}
                                 mode={mode}
+                                selectedStore={selectedStore}
                             />
                         ))}
                     </tbody>
