@@ -1199,6 +1199,10 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
   const [isProcessingUpload, setIsProcessingUpload] = useState(false);
   const [processLogs, setProcessLogs] = useState<ProcessLog[]>([]);
 
+  // Helper untuk status-stage dan validasi harga
+  const isStage1or2Pending = (row: Stage3Row) => row.status_message === 'Belum Scan S1' || row.status_message === 'Pending S2';
+  const isHargaKosong = (row: Stage3Row) => (row.qty_keluar || 0) > 0 && (row.harga_total || 0) <= 0;
+
   // REALTIME COLLABORATION STATE
   const [activeUsers, setActiveUsers] = useState<{userId: string, userName: string, color: string}[]>([]);
   const [editingCells, setEditingCells] = useState<Record<string, {userId: string, userName: string, color: string}>>({});
@@ -1408,15 +1412,49 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                 setRows(prevRows => 
                   prevRows.map(row => {
                     if (row.id !== rowId && row.id !== legacyRowId) return row;
+                    const keepPending = isStage1or2Pending(row);
+                    const qtyNow = newData.qty ?? row.qty_keluar;
+                    const hargaTotalNow = newData.harga_total ?? row.harga_total;
+                    const hargaKosong = (qtyNow || 0) > 0 && (hargaTotalNow || 0) <= 0;
+                    const stockValidNow = (partInfo.quantity || 0) >= qtyNow;
+                    let status_message = row.status_message;
+                    let is_db_verified = row.is_db_verified;
+                    let is_stock_valid = row.is_stock_valid;
+
+                    if (keepPending) {
+                      // Jangan ubah status Ready; tetap Pending S2/Belum Scan S1
+                      status_message = row.status_message;
+                      is_db_verified = false;
+                      is_stock_valid = stockValidNow;
+                    } else if (hargaKosong) {
+                      status_message = 'Harga Kosong';
+                      is_db_verified = false;
+                      is_stock_valid = false;
+                    } else if (!partInfo.name) {
+                      status_message = 'Base Kosong';
+                      is_db_verified = false;
+                      is_stock_valid = stockValidNow;
+                    } else if (!stockValidNow) {
+                      status_message = 'Stok Kurang';
+                      is_db_verified = false;
+                      is_stock_valid = false;
+                    } else {
+                      status_message = 'Ready';
+                      is_db_verified = true;
+                      is_stock_valid = true;
+                    }
                     return {
                       ...row,
+                      qty_keluar: qtyNow,
+                      harga_total: hargaTotalNow,
+                      harga_satuan: qtyNow > 0 ? (hargaTotalNow || 0) / qtyNow : row.harga_satuan,
                       nama_barang_base: partInfo.name || '',
                       brand: partInfo.brand || '',
                       application: partInfo.application || '',
                       stock_saat_ini: partInfo.quantity || 0,
-                      is_db_verified: true,
-                      is_stock_valid: (partInfo.quantity || 0) >= row.qty_keluar,
-                      status_message: (partInfo.quantity || 0) >= row.qty_keluar ? 'Ready' : 'Stok Kurang',
+                      is_db_verified,
+                      is_stock_valid,
+                      status_message,
                     };
                   })
                 );
@@ -1453,29 +1491,34 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
             }
             
             // Buat row baru dari data yang diterima
-            const newRow: Stage3Row = {
-              id: newRowId,
-              tanggal: newData.tanggal || new Date().toISOString().split('T')[0],
-              resi: newData.resi || '',
-              ecommerce: newData.ecommerce || '-',
-              sub_toko: newData.toko || (selectedStore === 'bjw' ? 'BJW' : 'MJM'),
-              part_number: newData.part_number || '',
-              nama_barang_csv: newData.nama_barang || '',
-              nama_barang_base: '',
-              brand: '',
-              application: '',
-              stock_saat_ini: 0,
-              qty_keluar: newData.qty || 0,
-              harga_total: newData.harga_total || 0,
-              harga_satuan: newData.harga_satuan || 0,
-              mata_uang: 'IDR',
-              no_pesanan: newData.order_id || '',
-              customer: newData.customer || '',
-              is_db_verified: false,
-              is_stock_valid: true,
-              status_message: 'Baru',
-              force_override_double: false
-            };
+        const newRow: Stage3Row = {
+          id: newRowId,
+          tanggal: newData.tanggal || new Date().toISOString().split('T')[0],
+          resi: newData.resi || '',
+          ecommerce: newData.ecommerce || '-',
+          sub_toko: newData.toko || (selectedStore === 'bjw' ? 'BJW' : 'MJM'),
+          part_number: newData.part_number || '',
+          nama_barang_csv: newData.nama_barang || '',
+          nama_barang_base: '',
+          brand: '',
+          application: '',
+          stock_saat_ini: 0,
+          qty_keluar: newData.qty || 0,
+          harga_total: newData.harga_total || 0,
+          harga_satuan: newData.harga_satuan || 0,
+          mata_uang: 'IDR',
+          no_pesanan: newData.order_id || '',
+          customer: newData.customer || '',
+          is_db_verified: false,
+          is_stock_valid: true,
+          status_message: 'Baru',
+          force_override_double: false
+        };
+        const hargaKosongNew = (newRow.qty_keluar || 0) > 0 && (newRow.harga_total || 0) <= 0;
+        if (hargaKosongNew) {
+          newRow.status_message = 'Harga Kosong';
+          newRow.is_stock_valid = false;
+        }
             
             // Cari row lokal yang ekuivalen (apapun prefix id-nya, bukan hanya s1-)
             const matchingIdx = prevRows.findIndex(row => {
@@ -1493,10 +1536,14 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
 
             if (matchingIdx >= 0) {
               const nextRows = [...prevRows];
+              const keepPending = isStage1or2Pending(nextRows[matchingIdx]);
               nextRows[matchingIdx] = {
                 ...nextRows[matchingIdx],
                 ...newRow,
-                id: newRowId
+                id: newRowId,
+                status_message: keepPending ? nextRows[matchingIdx].status_message : newRow.status_message,
+                is_db_verified: keepPending ? false : newRow.is_db_verified,
+                is_stock_valid: keepPending ? nextRows[matchingIdx].is_stock_valid : newRow.is_stock_valid
               };
               console.log('[Realtime] INSERT merged into existing local row:', newRowId);
               return nextRows;
@@ -1514,15 +1561,48 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                 setRows(prevRows => 
                   prevRows.map(row => {
                     if (row.id !== newRowId) return row;
+                    const keepPending = isStage1or2Pending(row);
+                    const qtyNow = newData.qty ?? row.qty_keluar;
+                    const hargaTotalNow = newData.harga_total ?? row.harga_total;
+                    const hargaKosong = (qtyNow || 0) > 0 && (hargaTotalNow || 0) <= 0;
+                    const stockValidNow = (partInfo.quantity || 0) >= qtyNow;
+                    let status_message = row.status_message;
+                    let is_db_verified = row.is_db_verified;
+                    let is_stock_valid = row.is_stock_valid;
+
+                    if (keepPending) {
+                      status_message = row.status_message;
+                      is_db_verified = false;
+                      is_stock_valid = stockValidNow;
+                    } else if (hargaKosong) {
+                      status_message = 'Harga Kosong';
+                      is_db_verified = false;
+                      is_stock_valid = false;
+                    } else if (!partInfo.name) {
+                      status_message = 'Base Kosong';
+                      is_db_verified = false;
+                      is_stock_valid = stockValidNow;
+                    } else if (!stockValidNow) {
+                      status_message = 'Stok Kurang';
+                      is_db_verified = false;
+                      is_stock_valid = false;
+                    } else {
+                      status_message = 'Ready';
+                      is_db_verified = true;
+                      is_stock_valid = true;
+                    }
                     return {
                       ...row,
+                      qty_keluar: qtyNow,
+                      harga_total: hargaTotalNow,
+                      harga_satuan: qtyNow > 0 ? (hargaTotalNow || 0) / qtyNow : row.harga_satuan,
                       nama_barang_base: partInfo.name || '',
                       brand: partInfo.brand || '',
                       application: partInfo.application || '',
                       stock_saat_ini: partInfo.quantity || 0,
-                      is_db_verified: true,
-                      is_stock_valid: (partInfo.quantity || 0) >= row.qty_keluar,
-                      status_message: (partInfo.quantity || 0) >= row.qty_keluar ? 'Ready' : 'Stok Kurang',
+                      is_db_verified,
+                      is_stock_valid,
+                      status_message,
                     };
                   })
                 );
@@ -1825,9 +1905,16 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
            // Tidak perlu set ke 0 meskipun part_number kosong
            const rawQty = Number(item.jumlah || item.quantity || 0);
            const qty = rawQty; // Gunakan qty asli dari CSV/database
-           const stockValid = (qty > 0 && item.part_number) ? stock >= qty : true; // Hanya cek stok jika ada part_number
+           let stockValid = (qty > 0 && item.part_number) ? stock >= qty : true; // Hanya cek stok jika ada part_number
+           const priceZero = qty > 0 && Number(item.total_harga_produk || 0) <= 0;
            
            // CHECK 3: Part number belum diisi - CEK INI DULU sebelum stok
+           if (verified && priceZero) {
+               statusMsg = 'Harga Kosong';
+               verified = false;
+               stockValid = false;
+           }
+           
            if (verified && !item.part_number) {
                statusMsg = 'Butuh Input';
                verified = false;
@@ -2775,18 +2862,28 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
     }
 
     // Update status_message secara real-time berdasarkan kondisi saat ini
-    if (field === 'part_number' || field === 'qty_keluar') {
-      // Recalculate status
-      if (!updatedRow.is_db_verified) {
-        // Masih belum verifikasi Stage 1/2
-        if (updatedRow.status_message === 'Belum Scan S1' || updatedRow.status_message === 'Pending S2') {
-          // Keep status as is
-        }
+    const shouldRecalcStatus = ['part_number', 'qty_keluar', 'harga_total', 'harga_satuan'].includes(field as string);
+    if (shouldRecalcStatus) {
+      const stagePending = isStage1or2Pending(updatedRow);
+      const hargaKosong = isHargaKosong(updatedRow);
+      
+      if (stagePending) {
+        // Biarkan tetap pending Stage 1/2
+      } else if (hargaKosong) {
+        updatedRow.status_message = 'Harga Kosong';
+        updatedRow.is_db_verified = false;
+        updatedRow.is_stock_valid = false;
       } else if (!updatedRow.part_number) {
         updatedRow.status_message = 'Butuh Input';
         updatedRow.is_db_verified = false;
+        updatedRow.is_stock_valid = false;
+      } else if (updatedRow.status_message === 'Double' && !updatedRow.force_override_double) {
+        // Tetap double sampai user override
+        updatedRow.is_db_verified = false;
       } else if (updatedRow.stock_saat_ini < updatedRow.qty_keluar && updatedRow.qty_keluar > 0) {
         updatedRow.status_message = 'Stok Kurang';
+        updatedRow.is_stock_valid = false;
+      } else if (updatedRow.status_message === 'Stok Total Kurang') {
         updatedRow.is_stock_valid = false;
       } else if (!updatedRow.nama_barang_base && updatedRow.part_number) {
         updatedRow.status_message = 'Base Kosong';
@@ -2979,6 +3076,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
             const stock = info?.quantity || 0;
             const qty = r.qty_keluar || 1;
             const stockValid = stock >= qty;
+            const hargaKosong = isHargaKosong(r);
             
             // Tentukan status berdasarkan kondisi
             // PERBAIKAN: Selalu update status jika bukan "Belum Scan S1" atau "Pending S2"
@@ -2987,7 +3085,9 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
             
             if (!isStage1or2Pending) {
               // Part number sudah diinput, update status berdasarkan validasi
-              if (!info?.name) {
+              if (hargaKosong) {
+                newStatus = 'Harga Kosong';
+              } else if (!info?.name) {
                 newStatus = 'Base Kosong'; // Part number tidak ditemukan di database
               } else if (!stockValid) {
                 newStatus = 'Stok Kurang';
@@ -3001,8 +3101,8 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                 brand: info?.brand || '-',
                 application: info?.application || '-',
                 stock_saat_ini: stock,
-                is_stock_valid: stockValid,
-                is_db_verified: !isStage1or2Pending && info?.name ? true : r.is_db_verified,
+                is_stock_valid: hargaKosong ? false : stockValid,
+                is_db_verified: !isStage1or2Pending && info?.name && !hargaKosong ? true : r.is_db_verified,
                 nama_barang_base: info?.name || '',
                 status_message: newStatus
             };
@@ -3017,6 +3117,12 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
 
   const handleProcess = async () => {
     // FITUR 1: Item Double dengan force_override_double = true tetap bisa diproses
+    const hargaKosongRows = rows.filter(r => isHargaKosong(r));
+    if (hargaKosongRows.length > 0) {
+      const sample = hargaKosongRows.slice(0, 3).map(r => r.resi || r.no_pesanan || r.part_number || '-').join(', ');
+      alert(`Tidak bisa input ke Barang Keluar karena masih ada harga 0 (${hargaKosongRows.length} item).\nIsi harga terlebih dulu. Contoh resi: ${sample}`);
+      return;
+    }
     const validRows = rows.filter(r => {
       // Kondisi normal: verified, stock valid, dan ada part_number
       const normalValid = r.is_db_verified && r.is_stock_valid && r.part_number;
@@ -3218,9 +3324,11 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
     const hasStokKurang = items.some(r => r.status_message === 'Stok Kurang' || r.status_message === 'Stok Total Kurang');
     const hasBelumScan = items.some(r => r.status_message === 'Belum Scan S1');
     const hasPendingS2 = items.some(r => r.status_message === 'Pending S2');
+    const hasHargaKosong = items.some(r => r.status_message === 'Harga Kosong');
     if (allReady) return { status: 'Ready', color: 'bg-green-600' };
     if (hasBelumScan) return { status: 'Belum Scan S1', color: 'bg-red-800' };
     if (hasPendingS2) return { status: 'Pending S2', color: 'bg-yellow-600' };
+    if (hasHargaKosong) return { status: 'Harga Kosong', color: 'bg-rose-700' };
     if (hasStokKurang) return { status: 'Stok Kurang', color: 'bg-red-600' };
     return { status: 'Butuh Input', color: 'bg-blue-600' };
   };
@@ -3252,6 +3360,12 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
   const handleProcessSelected = async () => {
     if (selectedResis.size === 0) {
       alert("Pilih minimal 1 resi untuk diproses!");
+      return;
+    }
+    const hargaKosongSelected = rows.filter(r => selectedResis.has(r.resi) && isHargaKosong(r));
+    if (hargaKosongSelected.length > 0) {
+      const sample = hargaKosongSelected.slice(0, 3).map(r => r.resi || r.no_pesanan || r.part_number || '-').join(', ');
+      alert(`Tidak bisa memproses resi terpilih karena ada harga 0 (${hargaKosongSelected.length} item). Lengkapi harga terlebih dahulu. Contoh resi: ${sample}`);
       return;
     }
     
@@ -4270,6 +4384,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                           row.status_message === 'Ready' ? 'bg-green-600 text-white' : 
                           row.status_message === 'Stok Kurang' ? 'bg-red-600 text-white' :
                           row.status_message === 'Stok Total Kurang' ? 'bg-pink-600 text-white' :
+                          row.status_message === 'Harga Kosong' ? 'bg-rose-600 text-white' :
                           row.status_message === 'Double' ? (row.force_override_double ? 'bg-green-600 text-white' : 'bg-orange-600 text-white') :
                           row.status_message === 'Base Kosong' ? 'bg-purple-600 text-white' :
                           row.status_message === 'Belum Scan S1' ? 'bg-red-800 text-red-200' :
