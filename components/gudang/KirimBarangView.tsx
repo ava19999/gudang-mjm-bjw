@@ -11,6 +11,7 @@ import {
   StockItem,
   fetchKirimBarang,
   getBulkStockComparison,
+  getBulkShelfComparison,
   createKirimBarangRequest,
   approveKirimBarang,
   sendKirimBarang,
@@ -60,6 +61,7 @@ export const KirimBarangView: React.FC = () => {
   const [searchResults, setSearchResults] = useState<{ mjm: StockItemWithRequest[]; bjw: StockItemWithRequest[] }>({ mjm: [], bjw: [] });
   const [requests, setRequests] = useState<KirimBarangItem[]>([]);
   const [stockComparisonMap, setStockComparisonMap] = useState<Record<string, { mjm: number; bjw: number }>>({});
+  const [senderShelfMap, setSenderShelfMap] = useState<Record<string, string>>({});
   const [filter, setFilter] = useState<FilterType>('all');
   const [pdfDate, setPdfDate] = useState<string>(ALL_DATES_VALUE);
   const [isStatusTableMinimized, setIsStatusTableMinimized] = useState(false);
@@ -105,14 +107,22 @@ export const KirimBarangView: React.FC = () => {
 
       const uniquePartNumbers = Array.from(new Set(data.map(item => item.part_number).filter(Boolean)));
       if (uniquePartNumbers.length > 0) {
-        const comparisonByPart = await getBulkStockComparison(uniquePartNumbers);
+        const [comparisonByPart, shelfByPart] = await Promise.all([
+          getBulkStockComparison(uniquePartNumbers),
+          getBulkShelfComparison(uniquePartNumbers)
+        ]);
         const comparisonByRequest: Record<string, { mjm: number; bjw: number }> = {};
+        const senderShelfByRequest: Record<string, string> = {};
         data.forEach(item => {
           comparisonByRequest[item.id] = comparisonByPart[item.part_number] || { mjm: 0, bjw: 0 };
+          const shelfPair = shelfByPart[item.part_number] || { mjm: '-', bjw: '-' };
+          senderShelfByRequest[item.id] = item.from_store === 'mjm' ? shelfPair.mjm : shelfPair.bjw;
         });
         setStockComparisonMap(comparisonByRequest);
+        setSenderShelfMap(senderShelfByRequest);
       } else {
         setStockComparisonMap({});
+        setSenderShelfMap({});
       }
     } finally {
       setLoading(false);
@@ -304,7 +314,7 @@ export const KirimBarangView: React.FC = () => {
       case 'pending': return 'Pending';
       case 'approved': return 'Disetujui';
       case 'rejected': return 'Ditolak';
-      case 'completed': return 'Selesai';
+      case 'completed': return 'Diterima';
       default: return activeFilter;
     }
   };
@@ -345,13 +355,13 @@ export const KirimBarangView: React.FC = () => {
     return store === 'mjm' ? stock.mjm : stock.bjw;
   };
 
+  const getSenderShelf = (requestId: string): string => (
+    senderShelfMap[requestId] || '-'
+  );
+
   const handleDownloadFilterPdf = () => {
     const isAllDatesSelected = pdfDate === ALL_DATES_VALUE;
-    const filteredRequests = isAllDatesSelected
-      ? requests
-      : requests.filter(item => (
-          getDateKeyFromIso(getFilterDateValue(item, filter)) === pdfDate
-        ));
+    const printableRows = statusTableRows;
 
     const filterLabel = getFilterDisplayLabel(filter);
     const filterDateLabel = getFilterDateLabel(filter);
@@ -359,7 +369,7 @@ export const KirimBarangView: React.FC = () => {
       ? 'Semua Tanggal'
       : new Date(`${pdfDate}T00:00:00`).toLocaleDateString('id-ID');
 
-    if (filteredRequests.length === 0) {
+    if (printableRows.length === 0) {
       showToast(
         isAllDatesSelected
           ? `Tidak ada data filter ${filterLabel.toLowerCase()}`
@@ -376,14 +386,16 @@ export const KirimBarangView: React.FC = () => {
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#39;');
+    const getPdfQtyValue = (item: KirimBarangItem): string => {
+      const qtyValue = isSendQtyEditable(item) ? getSendQtyValue(item) : String(item.quantity);
+      return qtyValue === '' ? String(item.quantity) : qtyValue;
+    };
 
     const printWindow = window.open('', '_blank');
     if (!printWindow) {
       showToast('Popup diblokir. Izinkan popup untuk export PDF', 'error');
       return;
     }
-
-    const showStockColumns = filter === 'all' || filter === 'completed';
 
     const printContent = `
       <!DOCTYPE html>
@@ -392,18 +404,31 @@ export const KirimBarangView: React.FC = () => {
         <title>Daftar Request ${filterLabel} - ${currentStore.toUpperCase()}</title>
         <style>
           * { margin: 0; padding: 0; box-sizing: border-box; }
-          body { font-family: Arial, sans-serif; padding: 20px; color: #111827; font-size: 12px; }
-          h1 { font-size: 18px; margin-bottom: 4px; }
-          .subtitle { color: #4b5563; margin-bottom: 14px; }
-          .meta { margin-bottom: 14px; font-size: 11px; color: #374151; }
-          table { width: 100%; border-collapse: collapse; }
-          th, td { border: 1px solid #d1d5db; padding: 8px; font-size: 11px; text-align: left; vertical-align: top; }
+          @page { size: A4 landscape; margin: 6mm; }
+          body { font-family: Arial, sans-serif; padding: 0; color: #111827; font-size: 9px; }
+          h1 { font-size: 13px; margin-bottom: 2px; }
+          .subtitle { color: #4b5563; margin-bottom: 6px; font-size: 9px; }
+          .meta { margin-bottom: 6px; font-size: 8px; color: #374151; }
+          table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+          th, td { border: 1px solid #d1d5db; padding: 3px 4px; font-size: 8.5px; text-align: left; vertical-align: top; line-height: 1.2; }
           th { background: #f3f4f6; font-weight: 700; }
           .text-center { text-align: center; }
-          .text-right { text-align: right; }
-          .footer { margin-top: 16px; color: #6b7280; font-size: 10px; }
+          .no-wrap { white-space: nowrap; }
+          .col-no { width: 3%; }
+          .col-part { width: 11%; }
+          .col-name { width: 14%; }
+          .col-stock-from { width: 12%; word-break: break-word; }
+          .col-stock-to { width: 7%; }
+          .col-qty { width: 6%; }
+          .col-status { width: 7%; }
+          .col-requester { width: 7%; }
+          .col-date { width: 10%; }
+          .col-note { width: 19%; word-break: break-word; }
+          tr, td, th { page-break-inside: avoid; }
+          thead { display: table-header-group; }
+          .footer { margin-top: 6px; color: #6b7280; font-size: 8px; }
           @media print {
-            body { padding: 12px; }
+            body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
           }
         </style>
       </head>
@@ -413,39 +438,37 @@ export const KirimBarangView: React.FC = () => {
         <div class="meta">
           Toko Aktif: <strong>${currentStore.toUpperCase()}</strong> |
           ${filterDateLabel}: <strong>${selectedDateLabel}</strong> |
-          Total Data: <strong>${filteredRequests.length}</strong> |
+          Total Data: <strong>${printableRows.length}</strong> |
           Tanggal Cetak: <strong>${new Date().toLocaleString('id-ID')}</strong>
         </div>
         <table>
           <thead>
             <tr>
-              <th class="text-center">No</th>
-              <th>Part Number</th>
-              <th>Nama Barang</th>
-              <th class="text-center">Dari</th>
-              <th class="text-center">Ke</th>
-              <th class="text-center">Qty</th>
-              <th>Status</th>
-              ${showStockColumns ? '<th class="text-center">Stok MJM</th><th class="text-center">Stok BJW</th>' : ''}
-              <th>Request Oleh</th>
-              <th>${filterDateLabel}</th>
-              <th>${filter === 'rejected' ? 'Alasan Ditolak' : 'Catatan'}</th>
+              <th class="text-center col-no no-wrap">No</th>
+              <th class="col-part">Part Number</th>
+              <th class="col-name">Nama Barang</th>
+              <th class="col-stock-from">Stok Dari + Rak</th>
+              <th class="col-stock-to no-wrap">Stok Ke</th>
+              <th class="text-center col-qty no-wrap">Qty</th>
+              <th class="col-status no-wrap">Status</th>
+              <th class="col-requester no-wrap">Request Oleh</th>
+              <th class="col-date">${filterDateLabel}</th>
+              <th class="col-note">${filter === 'rejected' ? 'Alasan Ditolak' : 'Catatan'}</th>
             </tr>
           </thead>
           <tbody>
-            ${filteredRequests.map((req, index) => `
+            ${printableRows.map((req, index) => `
               <tr>
-                <td class="text-center">${index + 1}</td>
-                <td>${escapeHtml(req.part_number)}</td>
-                <td>${escapeHtml(req.nama_barang)}</td>
-                <td class="text-center">${escapeHtml(req.from_store.toUpperCase())}</td>
-                <td class="text-center">${escapeHtml(req.to_store.toUpperCase())}</td>
-                <td class="text-right">${req.quantity}</td>
-                <td>${escapeHtml(getStatusLabel(req.status))}</td>
-                ${showStockColumns ? `<td class="text-right">${stockComparisonMap[req.id]?.mjm ?? '-'}</td><td class="text-right">${stockComparisonMap[req.id]?.bjw ?? '-'}</td>` : ''}
-                <td>${escapeHtml(req.requested_by)}</td>
-                <td>${getFilterDateValue(req, filter) ? new Date(getFilterDateValue(req, filter) as string).toLocaleString('id-ID') : '-'}</td>
-                <td>${filter === 'rejected' ? escapeHtml(req.catatan_reject) : escapeHtml(req.catatan)}</td>
+                <td class="text-center col-no">${index + 1}</td>
+                <td class="col-part">${escapeHtml(req.part_number)}</td>
+                <td class="col-name">${escapeHtml(req.nama_barang)}</td>
+                <td class="col-stock-from">${escapeHtml(`${req.from_store.toUpperCase()}: ${getStockByStore(req.id, req.from_store) ?? '-'} | Rak: ${getSenderShelf(req.id)}`)}</td>
+                <td class="col-stock-to no-wrap">${escapeHtml(`${req.to_store.toUpperCase()}: ${getStockByStore(req.id, req.to_store) ?? '-'}`)}</td>
+                <td class="text-center col-qty no-wrap">${escapeHtml(getPdfQtyValue(req))}</td>
+                <td class="col-status no-wrap">${escapeHtml(getStatusLabel(req.status))}</td>
+                <td class="col-requester no-wrap">${escapeHtml(req.requested_by)}</td>
+                <td class="col-date">${getFilterDateValue(req, filter) ? new Date(getFilterDateValue(req, filter) as string).toLocaleString('id-ID') : '-'}</td>
+                <td class="col-note">${filter === 'rejected' ? escapeHtml(req.catatan_reject || '-') : escapeHtml(req.catatan || req.catatan_reject || '-')}</td>
               </tr>
             `).join('')}
           </tbody>
@@ -748,7 +771,7 @@ export const KirimBarangView: React.FC = () => {
                 {f === 'rejected' && 'Ditolak'}
                 {f === 'pending' && 'Pending'}
                 {f === 'approved' && 'Setujui'}
-                {f === 'completed' && 'Selesai'}
+                {f === 'completed' && 'Diterima'}
               </button>
             ))}
             <div className="ml-auto flex items-center gap-2">
@@ -824,7 +847,7 @@ export const KirimBarangView: React.FC = () => {
 
                   {expandedRequest === req.id && (
                     <div className="px-4 py-3 border-t border-gray-700 bg-gray-800/30">
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm mb-4">
+                      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-sm mb-4">
                         <div>
                           <span className="text-gray-500 text-xs">Brand</span>
                           <p className="text-gray-300">{req.brand || '-'}</p>
@@ -840,6 +863,10 @@ export const KirimBarangView: React.FC = () => {
                         <div>
                           <span className="text-gray-500 text-xs">Tanggal</span>
                           <p className="text-gray-300">{new Date(req.created_at).toLocaleDateString('id-ID')}</p>
+                        </div>
+                        <div>
+                          <span className="text-gray-500 text-xs">Rak Pengirim</span>
+                          <p className="text-gray-300">{getSenderShelf(req.id)}</p>
                         </div>
                       </div>
 
@@ -1049,6 +1076,7 @@ export const KirimBarangView: React.FC = () => {
                             <th className="px-3 py-2 text-left text-gray-400">Nama Barang</th>
                             <th className="px-3 py-2 text-center text-gray-400">Stok Dari</th>
                             <th className="px-3 py-2 text-center text-gray-400">Stok Ke</th>
+                            <th className="px-3 py-2 text-left text-gray-400">Rak Pengirim</th>
                             <th className="px-3 py-2 text-right text-gray-400">Qty</th>
                             <th className="px-3 py-2 text-left text-gray-400">Status</th>
                             <th className="px-3 py-2 text-left text-gray-400">Request Oleh</th>
@@ -1073,6 +1101,7 @@ export const KirimBarangView: React.FC = () => {
                                   {req.to_store.toUpperCase()}: {getStockByStore(req.id, req.to_store) ?? '-'}
                                 </span>
                               </td>
+                              <td className="px-3 py-2 text-gray-300">{getSenderShelf(req.id)}</td>
                               <td className="px-3 py-2 text-right">
                                 {isSendQtyEditable(req) ? (
                                   <input

@@ -50,6 +50,32 @@ export interface StockItem {
   shelf: string;
 }
 
+const normalizePartNumber = (partNumber: string): string => (
+  String(partNumber || '').trim().toUpperCase()
+);
+
+const dedupePendingRequests = (items: KirimBarangItem[]): KirimBarangItem[] => {
+  const seenPendingKeys = new Set<string>();
+  const result: KirimBarangItem[] = [];
+
+  for (const item of items) {
+    if (item.status !== 'pending') {
+      result.push(item);
+      continue;
+    }
+
+    const dedupeKey = `${item.from_store}|${item.to_store}|${normalizePartNumber(item.part_number)}`;
+    if (seenPendingKeys.has(dedupeKey)) {
+      continue;
+    }
+
+    seenPendingKeys.add(dedupeKey);
+    result.push(item);
+  }
+
+  return result;
+};
+
 // ====================================
 // FETCH FUNCTIONS
 // ====================================
@@ -114,8 +140,10 @@ export const fetchKirimBarang = async (
 
     if (store && filter === 'incoming') {
       query = query.eq('to_store', store);
+      query = query.in('status', ['pending', 'approved', 'sent']);
     } else if (store && filter === 'outgoing') {
       query = query.eq('from_store', store);
+      query = query.in('status', ['pending', 'approved', 'sent']);
     } else if (filter === 'rejected') {
       query = query.eq('status', 'rejected');
     } else if (filter === 'pending') {
@@ -133,7 +161,7 @@ export const fetchKirimBarang = async (
       return [];
     }
 
-    return (data || []) as KirimBarangItem[];
+    return dedupePendingRequests((data || []) as KirimBarangItem[]);
   } catch (error) {
     console.error('fetchKirimBarang Exception:', error);
     return [];
@@ -147,22 +175,62 @@ export const createKirimBarangRequest = async (
   request: CreateKirimBarangRequest
 ): Promise<{ success: boolean; error?: string }> => {
   try {
-    const { error } = await supabase.from('kirim_barang').insert({
-      from_store: request.from_store,
-      to_store: request.to_store,
-      part_number: request.part_number,
-      nama_barang: request.nama_barang,
-      brand: request.brand || null,
-      application: request.application || null,
-      quantity: request.quantity,
-      catatan: request.catatan || null,
-      requested_by: request.requested_by,
-      status: 'pending'
-    });
+    const normalizedPartNumber = normalizePartNumber(request.part_number);
+    if (!normalizedPartNumber) {
+      return { success: false, error: 'Part number wajib diisi' };
+    }
 
-    if (error) {
-      console.error('createKirimBarangRequest Error:', error);
-      return { success: false, error: error.message };
+    const { data: existingPending, error: existingPendingError } = await supabase
+      .from('kirim_barang')
+      .select('id, quantity, catatan')
+      .eq('from_store', request.from_store)
+      .eq('to_store', request.to_store)
+      .eq('status', 'pending')
+      .ilike('part_number', normalizedPartNumber)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (existingPendingError) {
+      console.error('createKirimBarangRequest existingPending Error:', existingPendingError);
+      return { success: false, error: existingPendingError.message };
+    }
+
+    if (existingPending) {
+      const { error: updateError } = await supabase
+        .from('kirim_barang')
+        .update({
+          quantity: (existingPending.quantity || 0) + request.quantity,
+          nama_barang: request.nama_barang,
+          brand: request.brand || null,
+          application: request.application || null,
+          catatan: request.catatan?.trim() ? request.catatan : existingPending.catatan,
+          requested_by: request.requested_by
+        })
+        .eq('id', existingPending.id);
+
+      if (updateError) {
+        console.error('createKirimBarangRequest merge Error:', updateError);
+        return { success: false, error: updateError.message };
+      }
+    } else {
+      const { error } = await supabase.from('kirim_barang').insert({
+        from_store: request.from_store,
+        to_store: request.to_store,
+        part_number: normalizedPartNumber,
+        nama_barang: request.nama_barang,
+        brand: request.brand || null,
+        application: request.application || null,
+        quantity: request.quantity,
+        catatan: request.catatan || null,
+        requested_by: request.requested_by,
+        status: 'pending'
+      });
+
+      if (error) {
+        console.error('createKirimBarangRequest Error:', error);
+        return { success: false, error: error.message };
+      }
     }
 
     return { success: true };
@@ -534,6 +602,56 @@ export const getBulkStockComparison = async (
     return stockMap;
   } catch (error) {
     console.error('getBulkStockComparison Error:', error);
+    return {};
+  }
+};
+
+// Get shelf comparison for multiple part numbers in one request
+export const getBulkShelfComparison = async (
+  partNumbers: string[]
+): Promise<Record<string, { mjm: string; bjw: string }>> => {
+  const uniquePartNumbers = Array.from(new Set(partNumbers.filter(Boolean)));
+  if (uniquePartNumbers.length === 0) return {};
+
+  try {
+    const [mjmResult, bjwResult] = await Promise.all([
+      supabase
+        .from('base_mjm')
+        .select('part_number, shelf')
+        .in('part_number', uniquePartNumbers),
+      supabase
+        .from('base_bjw')
+        .select('part_number, shelf')
+        .in('part_number', uniquePartNumbers)
+    ]);
+
+    const shelfMap: Record<string, { mjm: string; bjw: string }> = {};
+
+    uniquePartNumbers.forEach(partNumber => {
+      shelfMap[partNumber] = { mjm: '-', bjw: '-' };
+    });
+
+    (mjmResult.data || []).forEach((item: any) => {
+      const partNumber = item.part_number || '';
+      if (!partNumber) return;
+      if (!shelfMap[partNumber]) {
+        shelfMap[partNumber] = { mjm: '-', bjw: '-' };
+      }
+      shelfMap[partNumber].mjm = item.shelf || '-';
+    });
+
+    (bjwResult.data || []).forEach((item: any) => {
+      const partNumber = item.part_number || '';
+      if (!partNumber) return;
+      if (!shelfMap[partNumber]) {
+        shelfMap[partNumber] = { mjm: '-', bjw: '-' };
+      }
+      shelfMap[partNumber].bjw = item.shelf || '-';
+    });
+
+    return shelfMap;
+  } catch (error) {
+    console.error('getBulkShelfComparison Error:', error);
     return {};
   }
 };
