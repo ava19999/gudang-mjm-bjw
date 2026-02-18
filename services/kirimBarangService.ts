@@ -606,6 +606,109 @@ export const getBulkStockComparison = async (
   }
 };
 
+// Update part number on pending request based on sender store master stock
+export const updateKirimBarangPartNumber = async (
+  id: string,
+  partNumber: string
+): Promise<{ success: boolean; error?: string }> => {
+  try {
+    const normalizedPartNumber = normalizePartNumber(partNumber);
+    if (!normalizedPartNumber) {
+      return { success: false, error: 'Part number wajib diisi' };
+    }
+
+    const { data: currentRequest, error: currentRequestError } = await supabase
+      .from('kirim_barang')
+      .select('id, from_store, to_store, status, quantity, part_number, nama_barang')
+      .eq('id', id)
+      .single();
+
+    if (currentRequestError || !currentRequest) {
+      return { success: false, error: 'Request tidak ditemukan' };
+    }
+
+    if (currentRequest.status !== 'pending') {
+      return { success: false, error: 'Part number hanya bisa diubah saat status pending' };
+    }
+
+    const sourceTable = currentRequest.from_store === 'mjm' ? 'base_mjm' : 'base_bjw';
+    const { data: sourceItem, error: sourceItemError } = await supabase
+      .from(sourceTable)
+      .select('part_number, name, brand, application')
+      .ilike('part_number', normalizedPartNumber)
+      .order('part_number')
+      .limit(1)
+      .maybeSingle();
+
+    if (sourceItemError || !sourceItem) {
+      return { success: false, error: 'Part number tidak ditemukan di master pengirim' };
+    }
+
+    const resolvedPartNumber = normalizePartNumber(sourceItem.part_number || normalizedPartNumber);
+
+    const { data: duplicatePending, error: duplicatePendingError } = await supabase
+      .from('kirim_barang')
+      .select('id, quantity')
+      .eq('from_store', currentRequest.from_store)
+      .eq('to_store', currentRequest.to_store)
+      .eq('status', 'pending')
+      .ilike('part_number', resolvedPartNumber)
+      .neq('id', id)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (duplicatePendingError) {
+      return { success: false, error: duplicatePendingError.message };
+    }
+
+    if (duplicatePending) {
+      const { error: mergeError } = await supabase
+        .from('kirim_barang')
+        .update({
+          quantity: (duplicatePending.quantity || 0) + (currentRequest.quantity || 0)
+        })
+        .eq('id', duplicatePending.id);
+
+      if (mergeError) {
+        return { success: false, error: mergeError.message };
+      }
+
+      const { error: deleteError } = await supabase
+        .from('kirim_barang')
+        .delete()
+        .eq('id', id)
+        .eq('status', 'pending');
+
+      if (deleteError) {
+        return { success: false, error: deleteError.message };
+      }
+
+      return { success: true };
+    }
+
+    const { error: updateError } = await supabase
+      .from('kirim_barang')
+      .update({
+        part_number: resolvedPartNumber,
+        nama_barang: sourceItem.name || currentRequest.nama_barang,
+        brand: sourceItem.brand || null,
+        application: sourceItem.application || null
+      })
+      .eq('id', id)
+      .eq('status', 'pending');
+
+    if (updateError) {
+      return { success: false, error: updateError.message };
+    }
+
+    return { success: true };
+  } catch (error: any) {
+    console.error('updateKirimBarangPartNumber Exception:', error);
+    return { success: false, error: error.message };
+  }
+};
+
 // Get shelf comparison for multiple part numbers in one request
 export const getBulkShelfComparison = async (
   partNumbers: string[]

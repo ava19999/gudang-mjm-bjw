@@ -9,6 +9,7 @@ import { useStore } from '../../context/StoreContext';
 import {
   KirimBarangItem,
   StockItem,
+  fetchBothStoreStock,
   fetchKirimBarang,
   getBulkStockComparison,
   getBulkShelfComparison,
@@ -18,12 +19,23 @@ import {
   receiveKirimBarang,
   rejectKirimBarang,
   deleteKirimBarang,
+  updateKirimBarangPartNumber,
   searchItemsBothStores
 } from '../../services/kirimBarangService';
 
 type ViewMode = 'stock_comparison' | 'request_list';
 type FilterType = 'all' | 'incoming' | 'outgoing' | 'rejected' | 'pending' | 'approved' | 'completed';
-const ALL_DATES_VALUE = 'all_dates';
+type PeriodFilterType = 'all_period' | 'today' | 'yesterday' | 'last_7_days' | 'last_30_days' | 'this_month' | 'last_month';
+const ALL_PERIOD_VALUE: PeriodFilterType = 'all_period';
+const PERIOD_FILTER_OPTIONS: Array<{ value: PeriodFilterType; label: string }> = [
+  { value: ALL_PERIOD_VALUE, label: 'Semua Periode' },
+  { value: 'today', label: 'Hari Ini' },
+  { value: 'yesterday', label: 'Kemarin' },
+  { value: 'last_7_days', label: '7 Hari Terakhir' },
+  { value: 'last_30_days', label: '30 Hari Terakhir' },
+  { value: 'this_month', label: 'Bulan Ini' },
+  { value: 'last_month', label: 'Bulan Lalu' }
+];
 
 // Extended stock item with request quantity
 interface StockItemWithRequest extends StockItem {
@@ -31,15 +43,53 @@ interface StockItemWithRequest extends StockItem {
   catatan: string;
 }
 
-const getDateKeyFromIso = (value: string | null | undefined): string => {
-  if (!value) return '';
-  const dt = new Date(value);
-  if (Number.isNaN(dt.getTime())) return '';
-  const year = dt.getFullYear();
-  const month = String(dt.getMonth() + 1).padStart(2, '0');
-  const day = String(dt.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+const getStartOfDay = (date: Date): Date => {
+  const clone = new Date(date);
+  clone.setHours(0, 0, 0, 0);
+  return clone;
 };
+
+const isDateInPeriod = (value: string | null | undefined, period: PeriodFilterType): boolean => {
+  if (period === ALL_PERIOD_VALUE) return true;
+  if (!value) return false;
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return false;
+
+  const target = getStartOfDay(date);
+  const today = getStartOfDay(new Date());
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+
+  switch (period) {
+    case 'today':
+      return target.getTime() === today.getTime();
+    case 'yesterday':
+      return target.getTime() === yesterday.getTime();
+    case 'last_7_days': {
+      const start = new Date(today);
+      start.setDate(start.getDate() - 6);
+      return target >= start && target <= today;
+    }
+    case 'last_30_days': {
+      const start = new Date(today);
+      start.setDate(start.getDate() - 29);
+      return target >= start && target <= today;
+    }
+    case 'this_month':
+      return target.getFullYear() === today.getFullYear() && target.getMonth() === today.getMonth();
+    case 'last_month': {
+      const lastMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+      return target.getFullYear() === lastMonth.getFullYear() && target.getMonth() === lastMonth.getMonth();
+    }
+    default:
+      return true;
+  }
+};
+
+const getPeriodDisplayLabel = (period: PeriodFilterType): string => (
+  PERIOD_FILTER_OPTIONS.find(option => option.value === period)?.label || 'Semua Periode'
+);
 
 const getDateValueByFilter = (item: KirimBarangItem, activeFilter: FilterType): string | null => {
   switch (activeFilter) {
@@ -63,7 +113,7 @@ export const KirimBarangView: React.FC = () => {
   const [stockComparisonMap, setStockComparisonMap] = useState<Record<string, { mjm: number; bjw: number }>>({});
   const [senderShelfMap, setSenderShelfMap] = useState<Record<string, string>>({});
   const [filter, setFilter] = useState<FilterType>('all');
-  const [pdfDate, setPdfDate] = useState<string>(ALL_DATES_VALUE);
+  const [selectedPeriod, setSelectedPeriod] = useState<PeriodFilterType>(ALL_PERIOD_VALUE);
   const [isStatusTableMinimized, setIsStatusTableMinimized] = useState(false);
   const [expandedRequest, setExpandedRequest] = useState<string | null>(null);
   const [rejectModal, setRejectModal] = useState<{ id: string; show: boolean; reason: string }>({
@@ -74,6 +124,10 @@ export const KirimBarangView: React.FC = () => {
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [sendingItem, setSendingItem] = useState<string | null>(null);
   const [sendQtyEdits, setSendQtyEdits] = useState<Record<string, string>>({});
+  const [requestPartSearch, setRequestPartSearch] = useState('');
+  const [partNumberOptionsByStore, setPartNumberOptionsByStore] = useState<{ mjm: StockItem[]; bjw: StockItem[] }>({ mjm: [], bjw: [] });
+  const [partNumberOptionsLoading, setPartNumberOptionsLoading] = useState(false);
+  const [partNumberEdits, setPartNumberEdits] = useState<Record<string, string>>({});
 
   // Toast helper
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
@@ -87,23 +141,6 @@ export const KirimBarangView: React.FC = () => {
     try {
       const data = await fetchKirimBarang(currentStore, filter);
       setRequests(data);
-
-      const availableDateKeys = Array.from(new Set(
-        data
-          .map(item => getDateKeyFromIso(getDateValueByFilter(item, filter)))
-          .filter(Boolean)
-      ));
-
-      if (availableDateKeys.length > 0) {
-        const latestDate = [...availableDateKeys].sort((a, b) => (a < b ? 1 : -1))[0];
-        setPdfDate(prevDate => (
-          prevDate === ALL_DATES_VALUE || availableDateKeys.includes(prevDate)
-            ? prevDate
-            : latestDate
-        ));
-      } else {
-        setPdfDate(ALL_DATES_VALUE);
-      }
 
       const uniquePartNumbers = Array.from(new Set(data.map(item => item.part_number).filter(Boolean)));
       if (uniquePartNumbers.length > 0) {
@@ -138,6 +175,22 @@ export const KirimBarangView: React.FC = () => {
   useEffect(() => {
     setIsStatusTableMinimized(false);
   }, [filter]);
+
+  const loadPartNumberOptions = useCallback(async () => {
+    setPartNumberOptionsLoading(true);
+    try {
+      const stockOptions = await fetchBothStoreStock();
+      setPartNumberOptionsByStore(stockOptions);
+    } finally {
+      setPartNumberOptionsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (viewMode !== 'request_list') return;
+    if (partNumberOptionsByStore.mjm.length > 0 || partNumberOptionsByStore.bjw.length > 0) return;
+    loadPartNumberOptions();
+  }, [viewMode, loadPartNumberOptions, partNumberOptionsByStore.mjm.length, partNumberOptionsByStore.bjw.length]);
 
   // Search items
   const handleSearch = async () => {
@@ -359,21 +412,56 @@ export const KirimBarangView: React.FC = () => {
     senderShelfMap[requestId] || '-'
   );
 
+  const isPartNumberEditable = (item: KirimBarangItem) =>
+    item.status === 'pending' && item.from_store === currentStore;
+  const getPartNumberEditValue = (item: KirimBarangItem): string =>
+    partNumberEdits[item.id] ?? item.part_number;
+  const updatePartNumberEditValue = (id: string, value: string) => {
+    setPartNumberEdits(prev => ({ ...prev, [id]: value }));
+  };
+
+  const handlePartNumberUpdate = async (item: KirimBarangItem, nextPartNumber: string) => {
+    if (!isPartNumberEditable(item)) return;
+
+    const normalizedNext = String(nextPartNumber || '').trim().toUpperCase();
+    const normalizedCurrent = String(item.part_number || '').trim().toUpperCase();
+    if (!normalizedNext || normalizedNext === normalizedCurrent) {
+      setPartNumberEdits(prev => {
+        const next = { ...prev };
+        delete next[item.id];
+        return next;
+      });
+      return;
+    }
+
+    setLoading(true);
+    const result = await updateKirimBarangPartNumber(item.id, normalizedNext);
+    if (result.success) {
+      showToast(`Part number diubah ke ${normalizedNext}`);
+      setPartNumberEdits(prev => {
+        const next = { ...prev };
+        delete next[item.id];
+        return next;
+      });
+      loadRequests();
+    } else {
+      showToast(result.error || 'Gagal mengubah part number', 'error');
+    }
+    setLoading(false);
+  };
+
   const handleDownloadFilterPdf = () => {
-    const isAllDatesSelected = pdfDate === ALL_DATES_VALUE;
+    const isAllPeriodSelected = selectedPeriod === ALL_PERIOD_VALUE;
     const printableRows = statusTableRows;
 
     const filterLabel = getFilterDisplayLabel(filter);
-    const filterDateLabel = getFilterDateLabel(filter);
-    const selectedDateLabel = isAllDatesSelected
-      ? 'Semua Tanggal'
-      : new Date(`${pdfDate}T00:00:00`).toLocaleDateString('id-ID');
+    const selectedDateLabel = getPeriodDisplayLabel(selectedPeriod);
 
     if (printableRows.length === 0) {
       showToast(
-        isAllDatesSelected
+        isAllPeriodSelected
           ? `Tidak ada data filter ${filterLabel.toLowerCase()}`
-          : `Tidak ada data filter ${filterLabel.toLowerCase()} pada tanggal tersebut`,
+          : `Tidak ada data filter ${filterLabel.toLowerCase()} pada periode tersebut`,
         'error'
       );
       return;
@@ -434,10 +522,10 @@ export const KirimBarangView: React.FC = () => {
       </head>
       <body>
         <h1>Daftar Request ${filterLabel}</h1>
-        <div class="subtitle">Transfer barang antar toko (per tanggal)</div>
+        <div class="subtitle">Transfer barang antar toko (per periode)</div>
         <div class="meta">
           Toko Aktif: <strong>${currentStore.toUpperCase()}</strong> |
-          ${filterDateLabel}: <strong>${selectedDateLabel}</strong> |
+          Periode: <strong>${selectedDateLabel}</strong> |
           Total Data: <strong>${printableRows.length}</strong> |
           Tanggal Cetak: <strong>${new Date().toLocaleString('id-ID')}</strong>
         </div>
@@ -513,39 +601,54 @@ export const KirimBarangView: React.FC = () => {
     }
   };
 
-  const statusTableDateLabel = pdfDate
-    ? (pdfDate === ALL_DATES_VALUE
-      ? 'Semua Tanggal'
-      : new Date(`${pdfDate}T00:00:00`).toLocaleDateString('id-ID'))
-    : 'Semua Tanggal';
+  const statusTableDateLabel = getPeriodDisplayLabel(selectedPeriod);
   const filterDisplayLabel = getFilterDisplayLabel(filter);
   const filterDateLabel = getFilterDateLabel(filter);
-  const availableDateOptions = useMemo(() => {
-    const dateCountMap = new Map<string, number>();
+  const availablePeriodOptions = useMemo(() => {
+    const periodCounts: Record<PeriodFilterType, number> = {
+      [ALL_PERIOD_VALUE]: requests.length,
+      today: 0,
+      yesterday: 0,
+      last_7_days: 0,
+      last_30_days: 0,
+      this_month: 0,
+      last_month: 0
+    };
+
     requests.forEach((item) => {
-      const dateKey = getDateKeyFromIso(getFilterDateValue(item, filter));
-      if (!dateKey) return;
-      dateCountMap.set(dateKey, (dateCountMap.get(dateKey) || 0) + 1);
+      const dateValue = getFilterDateValue(item, filter);
+      if (!dateValue) return;
+
+      (Object.keys(periodCounts) as PeriodFilterType[]).forEach((periodKey) => {
+        if (periodKey === ALL_PERIOD_VALUE) return;
+        if (isDateInPeriod(dateValue, periodKey)) {
+          periodCounts[periodKey] += 1;
+        }
+      });
     });
 
-    return Array.from(dateCountMap.entries())
-      .sort((a, b) => (a[0] < b[0] ? 1 : -1))
-      .map(([dateKey, count]) => ({
-        dateKey,
-        count,
-        label: new Date(`${dateKey}T00:00:00`).toLocaleDateString('id-ID')
-      }));
+    return PERIOD_FILTER_OPTIONS.map(option => ({
+      value: option.value,
+      label: option.label,
+      count: periodCounts[option.value] || 0
+    }));
   }, [requests, filter]);
-  const selectedDateValue = (
-    pdfDate === ALL_DATES_VALUE || availableDateOptions.some(option => option.dateKey === pdfDate)
+  const selectedPeriodValue = (
+    availablePeriodOptions.some(option => option.value === selectedPeriod)
   )
-    ? pdfDate
-    : ALL_DATES_VALUE;
-  const statusTableRows = pdfDate === ALL_DATES_VALUE
-    ? requests
-    : requests.filter(req => (
-        getDateKeyFromIso(getFilterDateValue(req, filter)) === pdfDate
-      ));
+    ? selectedPeriod
+    : ALL_PERIOD_VALUE;
+  const normalizePartNumberSearch = (value: string): string =>
+    String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const requestPartSearchKey = normalizePartNumberSearch(requestPartSearch);
+  const matchesPartNumber = (partNumber: string | null | undefined): boolean => (
+    !requestPartSearchKey || normalizePartNumberSearch(partNumber || '').includes(requestPartSearchKey)
+  );
+  const allRequestRows = requests.filter(req => matchesPartNumber(req.part_number));
+  const statusTableRowsBase = requests.filter(req =>
+    isDateInPeriod(getFilterDateValue(req, filter), selectedPeriod)
+  );
+  const statusTableRows = statusTableRowsBase.filter(req => matchesPartNumber(req.part_number));
 
   // Render stock table with inline request input
   const renderStockTable = (items: StockItemWithRequest[], store: 'mjm' | 'bjw') => {
@@ -752,6 +855,21 @@ export const KirimBarangView: React.FC = () => {
       {/* Request List View */}
       {viewMode === 'request_list' && (
         <div className="space-y-4">
+          <datalist id="part-options-mjm">
+            {partNumberOptionsByStore.mjm.map(option => (
+              <option key={`mjm-${option.part_number}`} value={option.part_number}>
+                {option.name}
+              </option>
+            ))}
+          </datalist>
+          <datalist id="part-options-bjw">
+            {partNumberOptionsByStore.bjw.map(option => (
+              <option key={`bjw-${option.part_number}`} value={option.part_number}>
+                {option.name}
+              </option>
+            ))}
+          </datalist>
+
           {/* Filter */}
           <div className="flex flex-wrap gap-2 items-center">
             <Filter size={18} className="text-gray-500" />
@@ -774,7 +892,17 @@ export const KirimBarangView: React.FC = () => {
                 {f === 'completed' && 'Diterima'}
               </button>
             ))}
-            <div className="ml-auto flex items-center gap-2">
+            <div className="ml-auto flex w-full md:w-auto items-center gap-2">
+              <div className="relative w-full md:w-72">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" size={14} />
+                <input
+                  type="text"
+                  value={requestPartSearch}
+                  onChange={(e) => setRequestPartSearch(e.target.value)}
+                  placeholder="Cari part number..."
+                  className="w-full pl-9 pr-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-xs text-gray-100 placeholder-gray-500 focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                />
+              </div>
               <button
                 onClick={loadRequests}
                 className="p-2 bg-gray-800 hover:bg-gray-700 rounded-lg text-gray-400"
@@ -796,7 +924,11 @@ export const KirimBarangView: React.FC = () => {
             </div>
           ) : filter === 'all' ? (
             <div className="space-y-3">
-              {requests.map((req) => (
+              {allRequestRows.length === 0 ? (
+                <div className="text-center py-10 text-gray-500 text-sm bg-gray-800/40 border border-gray-700 rounded-xl">
+                  <p>Part number "{requestPartSearch}" tidak ditemukan.</p>
+                </div>
+              ) : allRequestRows.map((req) => (
                 <div
                   key={req.id}
                   className="bg-gray-800/50 border border-gray-700 rounded-xl overflow-hidden"
@@ -820,7 +952,27 @@ export const KirimBarangView: React.FC = () => {
                         </span>
                       </div>
                       <div>
-                        <p className="text-gray-200 font-medium">{req.part_number}</p>
+                        {isPartNumberEditable(req) ? (
+                          <input
+                            type="text"
+                            list={req.from_store === 'mjm' ? 'part-options-mjm' : 'part-options-bjw'}
+                            value={getPartNumberEditValue(req)}
+                            onChange={(e) => updatePartNumberEditValue(req.id, e.target.value)}
+                            onBlur={() => handlePartNumberUpdate(req, getPartNumberEditValue(req))}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                (e.currentTarget as HTMLInputElement).blur();
+                              }
+                            }}
+                            disabled={loading || partNumberOptionsLoading}
+                            className="w-56 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-gray-100 text-xs font-mono"
+                            placeholder={`Ketik part number (${req.from_store.toUpperCase()})`}
+                            title={`Ketik atau pilih part number dari base_${req.from_store}`}
+                          />
+                        ) : (
+                          <p className="text-gray-200 font-medium">{req.part_number}</p>
+                        )}
                         <p className="text-gray-500 text-xs truncate max-w-[200px]">{req.nama_barang}</p>
                       </div>
                     </div>
@@ -1015,15 +1167,14 @@ export const KirimBarangView: React.FC = () => {
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <select
-                    value={selectedDateValue}
-                    onChange={(e) => setPdfDate(e.target.value)}
+                    value={selectedPeriodValue}
+                    onChange={(e) => setSelectedPeriod(e.target.value as PeriodFilterType)}
                     className="px-2 py-1.5 bg-gray-800 border border-gray-700 rounded-lg text-xs text-gray-200"
-                    title="Pilih tanggal dari data"
+                    title="Pilih periode data"
                     disabled={requests.length === 0}
                   >
-                    <option value={ALL_DATES_VALUE}>Semua Tanggal ({requests.length})</option>
-                    {availableDateOptions.map((option) => (
-                      <option key={option.dateKey} value={option.dateKey}>
+                    {availablePeriodOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
                         {option.label} ({option.count})
                       </option>
                     ))}
@@ -1037,7 +1188,7 @@ export const KirimBarangView: React.FC = () => {
                           ? 'bg-blue-700 hover:bg-blue-600'
                           : 'bg-indigo-700 hover:bg-indigo-600'
                     }`}
-                    title="Download PDF per tanggal"
+                    title="Download PDF per periode"
                   >
                     <Download size={14} />
                     PDF
@@ -1057,13 +1208,16 @@ export const KirimBarangView: React.FC = () => {
                 <div className="border-t border-gray-700">
                   {statusTableRows.length === 0 ? (
                     <div className="text-center py-10 text-gray-500 text-sm">
-                      {pdfDate === ALL_DATES_VALUE ? (
+                      {selectedPeriod === ALL_PERIOD_VALUE ? (
                         <p>Tidak ada data request untuk filter {filterDisplayLabel.toLowerCase()}</p>
                       ) : (
-                        <p>Tidak ada data request untuk filter {filterDisplayLabel.toLowerCase()} pada tanggal {statusTableDateLabel}</p>
+                        <p>Tidak ada data request untuk filter {filterDisplayLabel.toLowerCase()} pada periode {statusTableDateLabel}</p>
+                      )}
+                      {requestPartSearchKey && (
+                        <p className="mt-1 text-xs text-gray-400">Part number "{requestPartSearch}" tidak ditemukan.</p>
                       )}
                       {requests.length > 0 && (
-                        <p className="mt-1 text-xs text-gray-400">Coba ubah pilihan tanggal di atas untuk melihat data lainnya.</p>
+                        <p className="mt-1 text-xs text-gray-400">Coba ubah pilihan periode di atas untuk melihat data lainnya.</p>
                       )}
                     </div>
                   ) : (
@@ -1089,7 +1243,29 @@ export const KirimBarangView: React.FC = () => {
                           {statusTableRows.map((req, index) => (
                             <tr key={req.id} className="border-t border-gray-700/50 hover:bg-gray-700/20">
                               <td className="px-3 py-2 text-gray-300">{index + 1}</td>
-                              <td className="px-3 py-2 text-gray-200 font-mono">{req.part_number}</td>
+                              <td className="px-3 py-2 text-gray-200 font-mono">
+                                {isPartNumberEditable(req) ? (
+                                  <input
+                                    type="text"
+                                    list={req.from_store === 'mjm' ? 'part-options-mjm' : 'part-options-bjw'}
+                                    value={getPartNumberEditValue(req)}
+                                    onChange={(e) => updatePartNumberEditValue(req.id, e.target.value)}
+                                    onBlur={() => handlePartNumberUpdate(req, getPartNumberEditValue(req))}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') {
+                                        e.preventDefault();
+                                        (e.currentTarget as HTMLInputElement).blur();
+                                      }
+                                    }}
+                                    disabled={loading || partNumberOptionsLoading}
+                                    className="w-52 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-gray-100 text-xs font-mono"
+                                    placeholder={`Ketik part number (${req.from_store.toUpperCase()})`}
+                                    title={`Ketik atau pilih part number dari base_${req.from_store}`}
+                                  />
+                                ) : (
+                                  req.part_number
+                                )}
+                              </td>
                               <td className="px-3 py-2 text-gray-200">{req.nama_barang}</td>
                               <td className="px-3 py-2 text-center">
                                 <span className={req.from_store === 'mjm' ? 'text-blue-300' : 'text-purple-300'}>
