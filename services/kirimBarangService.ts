@@ -179,16 +179,30 @@ export const createKirimBarangRequest = async (
 // Approve a request
 export const approveKirimBarang = async (
   id: string,
-  approvedBy: string
+  approvedBy: string,
+  quantityOverride?: number
 ): Promise<{ success: boolean; error?: string }> => {
   try {
+    const parsedOverride = typeof quantityOverride === 'number'
+      ? Math.floor(quantityOverride)
+      : null;
+    if (parsedOverride !== null && parsedOverride <= 0) {
+      return { success: false, error: 'Qty harus lebih dari 0' };
+    }
+
+    const updatePayload: Record<string, any> = {
+      status: 'approved',
+      approved_by: approvedBy,
+      approved_at: new Date().toISOString()
+    };
+
+    if (parsedOverride !== null) {
+      updatePayload.quantity = parsedOverride;
+    }
+
     const { error } = await supabase
       .from('kirim_barang')
-      .update({
-        status: 'approved',
-        approved_by: approvedBy,
-        approved_at: new Date().toISOString()
-      })
+      .update(updatePayload)
       .eq('id', id);
 
     if (error) {
@@ -206,7 +220,8 @@ export const approveKirimBarang = async (
 // Mark as sent and update stock (decrease from source store)
 export const sendKirimBarang = async (
   id: string,
-  sentBy: string
+  sentBy: string,
+  quantityOverride?: number
 ): Promise<{ success: boolean; error?: string }> => {
   try {
     // First get the transfer details
@@ -218,6 +233,15 @@ export const sendKirimBarang = async (
 
     if (fetchError || !transfer) {
       return { success: false, error: 'Transfer not found' };
+    }
+
+    const parsedOverride = typeof quantityOverride === 'number'
+      ? Math.floor(quantityOverride)
+      : null;
+    const quantityToSend = parsedOverride !== null ? parsedOverride : transfer.quantity;
+
+    if (quantityToSend <= 0) {
+      return { success: false, error: 'Qty kirim harus lebih dari 0' };
     }
 
     // Get source table
@@ -234,12 +258,12 @@ export const sendKirimBarang = async (
       return { success: false, error: 'Item not found in source store' };
     }
 
-    if (sourceItem.quantity < transfer.quantity) {
+    if (sourceItem.quantity < quantityToSend) {
       return { success: false, error: `Stok tidak cukup. Tersedia: ${sourceItem.quantity}` };
     }
 
     // Decrease stock from source
-    const newSourceQty = sourceItem.quantity - transfer.quantity;
+    const newSourceQty = sourceItem.quantity - quantityToSend;
     const { error: updateSourceError } = await supabase
       .from(sourceTable)
       .update({ quantity: newSourceQty })
@@ -255,7 +279,8 @@ export const sendKirimBarang = async (
       .update({
         status: 'sent',
         sent_by: sentBy,
-        sent_at: new Date().toISOString()
+        sent_at: new Date().toISOString(),
+        quantity: quantityToSend
       })
       .eq('id', id);
 

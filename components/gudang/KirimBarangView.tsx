@@ -1,5 +1,5 @@
 // FILE: src/components/gudang/KirimBarangView.tsx
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Search, Package, ArrowRightLeft, Plus, Send, Check, X,
   Truck, ChevronDown, ChevronUp, AlertCircle, RefreshCw,
@@ -22,20 +22,13 @@ import {
 
 type ViewMode = 'stock_comparison' | 'request_list';
 type FilterType = 'all' | 'incoming' | 'outgoing' | 'rejected' | 'pending' | 'approved' | 'completed';
+const ALL_DATES_VALUE = 'all_dates';
 
 // Extended stock item with request quantity
 interface StockItemWithRequest extends StockItem {
   requestQty: number;
   catatan: string;
 }
-
-const getTodayDateInputValue = (): string => {
-  const date = new Date();
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-};
 
 const getDateKeyFromIso = (value: string | null | undefined): string => {
   if (!value) return '';
@@ -68,7 +61,7 @@ export const KirimBarangView: React.FC = () => {
   const [requests, setRequests] = useState<KirimBarangItem[]>([]);
   const [stockComparisonMap, setStockComparisonMap] = useState<Record<string, { mjm: number; bjw: number }>>({});
   const [filter, setFilter] = useState<FilterType>('all');
-  const [pdfDate, setPdfDate] = useState<string>(getTodayDateInputValue());
+  const [pdfDate, setPdfDate] = useState<string>(ALL_DATES_VALUE);
   const [isStatusTableMinimized, setIsStatusTableMinimized] = useState(false);
   const [expandedRequest, setExpandedRequest] = useState<string | null>(null);
   const [rejectModal, setRejectModal] = useState<{ id: string; show: boolean; reason: string }>({
@@ -78,6 +71,7 @@ export const KirimBarangView: React.FC = () => {
   });
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [sendingItem, setSendingItem] = useState<string | null>(null);
+  const [sendQtyEdits, setSendQtyEdits] = useState<Record<string, string>>({});
 
   // Toast helper
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
@@ -100,11 +94,18 @@ export const KirimBarangView: React.FC = () => {
 
       if (availableDateKeys.length > 0) {
         const latestDate = [...availableDateKeys].sort((a, b) => (a < b ? 1 : -1))[0];
-        setPdfDate(prevDate => (availableDateKeys.includes(prevDate) ? prevDate : latestDate));
+        setPdfDate(prevDate => (
+          prevDate === ALL_DATES_VALUE || availableDateKeys.includes(prevDate)
+            ? prevDate
+            : latestDate
+        ));
+      } else {
+        setPdfDate(ALL_DATES_VALUE);
       }
 
-      if (filter === 'completed' || filter === 'all') {
-        const comparisonByPart = await getBulkStockComparison(data.map(item => item.part_number));
+      const uniquePartNumbers = Array.from(new Set(data.map(item => item.part_number).filter(Boolean)));
+      if (uniquePartNumbers.length > 0) {
+        const comparisonByPart = await getBulkStockComparison(uniquePartNumbers);
         const comparisonByRequest: Record<string, { mjm: number; bjw: number }> = {};
         data.forEach(item => {
           comparisonByRequest[item.id] = comparisonByPart[item.part_number] || { mjm: 0, bjw: 0 };
@@ -209,11 +210,21 @@ export const KirimBarangView: React.FC = () => {
   };
 
   // Action handlers for request list
-  const handleApprove = async (id: string) => {
+  const handleApprove = async (id: string, quantityOverride?: number) => {
+    if (typeof quantityOverride === 'number' && quantityOverride <= 0) {
+      showToast('Qty harus lebih dari 0', 'error');
+      return;
+    }
+
     setLoading(true);
-    const result = await approveKirimBarang(id, userName);
+    const result = await approveKirimBarang(id, userName, quantityOverride);
     if (result.success) {
       showToast('Request disetujui!');
+      setSendQtyEdits(prev => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
       loadRequests();
     } else {
       showToast(result.error || 'Gagal menyetujui', 'error');
@@ -221,11 +232,21 @@ export const KirimBarangView: React.FC = () => {
     setLoading(false);
   };
 
-  const handleSend = async (id: string) => {
+  const handleSend = async (id: string, quantityOverride?: number) => {
+    if (typeof quantityOverride === 'number' && quantityOverride <= 0) {
+      showToast('Qty kirim harus lebih dari 0', 'error');
+      return;
+    }
+
     setLoading(true);
-    const result = await sendKirimBarang(id, userName);
+    const result = await sendKirimBarang(id, userName, quantityOverride);
     if (result.success) {
       showToast('Barang sudah dikirim! Stok sudah dikurangi.');
+      setSendQtyEdits(prev => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
       loadRequests();
     } else {
       showToast(result.error || 'Gagal mengirim', 'error');
@@ -301,21 +322,50 @@ export const KirimBarangView: React.FC = () => {
     return getDateValueByFilter(item, activeFilter);
   };
 
-  const handleDownloadFilterPdf = () => {
-    if (!pdfDate) {
-      showToast('Pilih tanggal terlebih dulu', 'error');
-      return;
-    }
+  const isSendQtyEditable = (item: KirimBarangItem) =>
+    (item.status === 'pending' || item.status === 'approved') && item.from_store === currentStore;
 
-    const filteredRequests = requests.filter(item => (
-      getDateKeyFromIso(getFilterDateValue(item, filter)) === pdfDate
-    ));
+  const getSendQtyValue = (item: KirimBarangItem): string => (
+    sendQtyEdits[item.id] ?? String(item.quantity)
+  );
+
+  const getSendQtyNumber = (item: KirimBarangItem): number => {
+    const parsed = Number.parseInt(getSendQtyValue(item), 10);
+    return Number.isNaN(parsed) ? item.quantity : parsed;
+  };
+
+  const updateSendQty = (id: string, value: string) => {
+    if (!/^\d*$/.test(value)) return;
+    setSendQtyEdits(prev => ({ ...prev, [id]: value }));
+  };
+
+  const getStockByStore = (requestId: string, store: 'mjm' | 'bjw'): number | null => {
+    const stock = stockComparisonMap[requestId];
+    if (!stock) return null;
+    return store === 'mjm' ? stock.mjm : stock.bjw;
+  };
+
+  const handleDownloadFilterPdf = () => {
+    const isAllDatesSelected = pdfDate === ALL_DATES_VALUE;
+    const filteredRequests = isAllDatesSelected
+      ? requests
+      : requests.filter(item => (
+          getDateKeyFromIso(getFilterDateValue(item, filter)) === pdfDate
+        ));
 
     const filterLabel = getFilterDisplayLabel(filter);
     const filterDateLabel = getFilterDateLabel(filter);
+    const selectedDateLabel = isAllDatesSelected
+      ? 'Semua Tanggal'
+      : new Date(`${pdfDate}T00:00:00`).toLocaleDateString('id-ID');
 
     if (filteredRequests.length === 0) {
-      showToast(`Tidak ada data filter ${filterLabel.toLowerCase()} pada tanggal tersebut`, 'error');
+      showToast(
+        isAllDatesSelected
+          ? `Tidak ada data filter ${filterLabel.toLowerCase()}`
+          : `Tidak ada data filter ${filterLabel.toLowerCase()} pada tanggal tersebut`,
+        'error'
+      );
       return;
     }
 
@@ -362,7 +412,7 @@ export const KirimBarangView: React.FC = () => {
         <div class="subtitle">Transfer barang antar toko (per tanggal)</div>
         <div class="meta">
           Toko Aktif: <strong>${currentStore.toUpperCase()}</strong> |
-          ${filterDateLabel}: <strong>${new Date(`${pdfDate}T00:00:00`).toLocaleDateString('id-ID')}</strong> |
+          ${filterDateLabel}: <strong>${selectedDateLabel}</strong> |
           Total Data: <strong>${filteredRequests.length}</strong> |
           Tanggal Cetak: <strong>${new Date().toLocaleString('id-ID')}</strong>
         </div>
@@ -441,14 +491,38 @@ export const KirimBarangView: React.FC = () => {
   };
 
   const statusTableDateLabel = pdfDate
-    ? new Date(`${pdfDate}T00:00:00`).toLocaleDateString('id-ID')
-    : '-';
+    ? (pdfDate === ALL_DATES_VALUE
+      ? 'Semua Tanggal'
+      : new Date(`${pdfDate}T00:00:00`).toLocaleDateString('id-ID'))
+    : 'Semua Tanggal';
   const filterDisplayLabel = getFilterDisplayLabel(filter);
   const filterDateLabel = getFilterDateLabel(filter);
-  const showStockComparisonColumns = filter === 'all' || filter === 'completed';
-  const statusTableRows = requests.filter(req => (
-    getDateKeyFromIso(getFilterDateValue(req, filter)) === pdfDate
-  ));
+  const availableDateOptions = useMemo(() => {
+    const dateCountMap = new Map<string, number>();
+    requests.forEach((item) => {
+      const dateKey = getDateKeyFromIso(getFilterDateValue(item, filter));
+      if (!dateKey) return;
+      dateCountMap.set(dateKey, (dateCountMap.get(dateKey) || 0) + 1);
+    });
+
+    return Array.from(dateCountMap.entries())
+      .sort((a, b) => (a[0] < b[0] ? 1 : -1))
+      .map(([dateKey, count]) => ({
+        dateKey,
+        count,
+        label: new Date(`${dateKey}T00:00:00`).toLocaleDateString('id-ID')
+      }));
+  }, [requests, filter]);
+  const selectedDateValue = (
+    pdfDate === ALL_DATES_VALUE || availableDateOptions.some(option => option.dateKey === pdfDate)
+  )
+    ? pdfDate
+    : ALL_DATES_VALUE;
+  const statusTableRows = pdfDate === ALL_DATES_VALUE
+    ? requests
+    : requests.filter(req => (
+        getDateKeyFromIso(getFilterDateValue(req, filter)) === pdfDate
+      ));
 
   // Render stock table with inline request input
   const renderStockTable = (items: StockItemWithRequest[], store: 'mjm' | 'bjw') => {
@@ -738,7 +812,9 @@ export const KirimBarangView: React.FC = () => {
                           </span>
                         </div>
                       )}
-                      <span className="text-lg font-bold text-indigo-400">x{req.quantity}</span>
+                      <span className="text-lg font-bold text-indigo-400">
+                        x{isSendQtyEditable(req) ? getSendQtyNumber(req) : req.quantity}
+                      </span>
                       <span className={`px-2 py-1 rounded-lg text-xs font-medium border ${getStatusColor(req.status)}`}>
                         {getStatusLabel(req.status)}
                       </span>
@@ -818,9 +894,22 @@ export const KirimBarangView: React.FC = () => {
                       <div className="flex flex-wrap gap-2">
                         {req.status === 'pending' && req.from_store === currentStore && (
                           <>
+                            <input
+                              type="number"
+                              min="1"
+                              value={getSendQtyValue(req)}
+                              onChange={(e) => updateSendQty(req.id, e.target.value)}
+                              className="w-20 px-2 py-1.5 bg-gray-700 border border-gray-600 rounded-lg text-sm text-gray-100"
+                              title="Edit qty"
+                            />
                             <button
-                              onClick={() => handleApprove(req.id)}
-                              className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-medium flex items-center gap-1 hover:bg-blue-700"
+                              onClick={() => handleApprove(req.id, getSendQtyNumber(req))}
+                              disabled={getSendQtyNumber(req) <= 0}
+                              className={`px-3 py-1.5 rounded-lg text-sm font-medium flex items-center gap-1 ${
+                                getSendQtyNumber(req) > 0
+                                  ? 'bg-blue-600 text-white hover:bg-blue-700'
+                                  : 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                              }`}
                             >
                               <Check size={14} /> Setujui
                             </button>
@@ -834,12 +923,27 @@ export const KirimBarangView: React.FC = () => {
                         )}
 
                         {req.status === 'approved' && req.from_store === currentStore && (
-                          <button
-                            onClick={() => handleSend(req.id)}
-                            className="px-3 py-1.5 bg-purple-600 text-white rounded-lg text-sm font-medium flex items-center gap-1 hover:bg-purple-700"
-                          >
-                            <Truck size={14} /> Kirim Barang
-                          </button>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="number"
+                              min="1"
+                              value={getSendQtyValue(req)}
+                              onChange={(e) => updateSendQty(req.id, e.target.value)}
+                              className="w-20 px-2 py-1.5 bg-gray-700 border border-gray-600 rounded-lg text-sm text-gray-100"
+                              title="Qty kirim"
+                            />
+                            <button
+                              onClick={() => handleSend(req.id, getSendQtyNumber(req))}
+                              disabled={getSendQtyNumber(req) <= 0}
+                              className={`px-3 py-1.5 text-white rounded-lg text-sm font-medium flex items-center gap-1 ${
+                                getSendQtyNumber(req) > 0
+                                  ? 'bg-purple-600 hover:bg-purple-700'
+                                  : 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                              }`}
+                            >
+                              <Truck size={14} /> Kirim Barang
+                            </button>
+                          </div>
                         )}
 
                         {req.status === 'sent' && req.to_store === currentStore && (
@@ -883,13 +987,20 @@ export const KirimBarangView: React.FC = () => {
                   <p className="text-xs text-gray-400">Total item: {statusTableRows.length}</p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  <input
-                    type="date"
-                    value={pdfDate}
+                  <select
+                    value={selectedDateValue}
                     onChange={(e) => setPdfDate(e.target.value)}
                     className="px-2 py-1.5 bg-gray-800 border border-gray-700 rounded-lg text-xs text-gray-200"
-                    title="Pilih tanggal"
-                  />
+                    title="Pilih tanggal dari data"
+                    disabled={requests.length === 0}
+                  >
+                    <option value={ALL_DATES_VALUE}>Semua Tanggal ({requests.length})</option>
+                    {availableDateOptions.map((option) => (
+                      <option key={option.dateKey} value={option.dateKey}>
+                        {option.label} ({option.count})
+                      </option>
+                    ))}
+                  </select>
                   <button
                     onClick={handleDownloadFilterPdf}
                     className={`px-3 py-1.5 text-white rounded-lg text-xs font-medium flex items-center gap-1 ${
@@ -919,9 +1030,13 @@ export const KirimBarangView: React.FC = () => {
                 <div className="border-t border-gray-700">
                   {statusTableRows.length === 0 ? (
                     <div className="text-center py-10 text-gray-500 text-sm">
-                      <p>Tidak ada data request untuk filter {filterDisplayLabel.toLowerCase()} pada tanggal {statusTableDateLabel}</p>
+                      {pdfDate === ALL_DATES_VALUE ? (
+                        <p>Tidak ada data request untuk filter {filterDisplayLabel.toLowerCase()}</p>
+                      ) : (
+                        <p>Tidak ada data request untuk filter {filterDisplayLabel.toLowerCase()} pada tanggal {statusTableDateLabel}</p>
+                      )}
                       {requests.length > 0 && (
-                        <p className="mt-1 text-xs text-gray-400">Coba ubah tanggal di atas untuk melihat data lainnya.</p>
+                        <p className="mt-1 text-xs text-gray-400">Coba ubah pilihan tanggal di atas untuk melihat data lainnya.</p>
                       )}
                     </div>
                   ) : (
@@ -932,15 +1047,9 @@ export const KirimBarangView: React.FC = () => {
                             <th className="px-3 py-2 text-left text-gray-400">No</th>
                             <th className="px-3 py-2 text-left text-gray-400">Part Number</th>
                             <th className="px-3 py-2 text-left text-gray-400">Nama Barang</th>
-                            <th className="px-3 py-2 text-center text-gray-400">Dari</th>
-                            <th className="px-3 py-2 text-center text-gray-400">Ke</th>
+                            <th className="px-3 py-2 text-center text-gray-400">Stok Dari</th>
+                            <th className="px-3 py-2 text-center text-gray-400">Stok Ke</th>
                             <th className="px-3 py-2 text-right text-gray-400">Qty</th>
-                            {showStockComparisonColumns && (
-                              <>
-                                <th className="px-3 py-2 text-right text-gray-400">Stok MJM</th>
-                                <th className="px-3 py-2 text-right text-gray-400">Stok BJW</th>
-                              </>
-                            )}
                             <th className="px-3 py-2 text-left text-gray-400">Status</th>
                             <th className="px-3 py-2 text-left text-gray-400">Request Oleh</th>
                             <th className="px-3 py-2 text-left text-gray-400">{filterDateLabel}</th>
@@ -954,15 +1063,30 @@ export const KirimBarangView: React.FC = () => {
                               <td className="px-3 py-2 text-gray-300">{index + 1}</td>
                               <td className="px-3 py-2 text-gray-200 font-mono">{req.part_number}</td>
                               <td className="px-3 py-2 text-gray-200">{req.nama_barang}</td>
-                              <td className="px-3 py-2 text-center text-gray-300">{req.from_store.toUpperCase()}</td>
-                              <td className="px-3 py-2 text-center text-gray-300">{req.to_store.toUpperCase()}</td>
-                              <td className="px-3 py-2 text-right text-indigo-300 font-semibold">{req.quantity}</td>
-                              {showStockComparisonColumns && (
-                                <>
-                                  <td className="px-3 py-2 text-right text-blue-300">{stockComparisonMap[req.id]?.mjm ?? '-'}</td>
-                                  <td className="px-3 py-2 text-right text-purple-300">{stockComparisonMap[req.id]?.bjw ?? '-'}</td>
-                                </>
-                              )}
+                              <td className="px-3 py-2 text-center">
+                                <span className={req.from_store === 'mjm' ? 'text-blue-300' : 'text-purple-300'}>
+                                  {req.from_store.toUpperCase()}: {getStockByStore(req.id, req.from_store) ?? '-'}
+                                </span>
+                              </td>
+                              <td className="px-3 py-2 text-center">
+                                <span className={req.to_store === 'mjm' ? 'text-blue-300' : 'text-purple-300'}>
+                                  {req.to_store.toUpperCase()}: {getStockByStore(req.id, req.to_store) ?? '-'}
+                                </span>
+                              </td>
+                              <td className="px-3 py-2 text-right">
+                                {isSendQtyEditable(req) ? (
+                                  <input
+                                    type="number"
+                                    min="1"
+                                    value={getSendQtyValue(req)}
+                                    onChange={(e) => updateSendQty(req.id, e.target.value)}
+                                    className="w-20 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-gray-100 text-xs text-right"
+                                    title="Edit qty kirim"
+                                  />
+                                ) : (
+                                  <span className="text-indigo-300 font-semibold">{req.quantity}</span>
+                                )}
+                              </td>
                               <td className="px-3 py-2">
                                 <span className={`px-2 py-0.5 rounded text-[10px] font-medium border ${getStatusColor(req.status)}`}>
                                   {getStatusLabel(req.status)}
@@ -982,8 +1106,13 @@ export const KirimBarangView: React.FC = () => {
                                   {req.status === 'pending' && req.from_store === currentStore && (
                                     <>
                                       <button
-                                        onClick={() => handleApprove(req.id)}
-                                        className="px-2 py-1 bg-blue-600 text-white rounded text-[10px] font-medium hover:bg-blue-700"
+                                        onClick={() => handleApprove(req.id, getSendQtyNumber(req))}
+                                        disabled={getSendQtyNumber(req) <= 0}
+                                        className={`px-2 py-1 rounded text-[10px] font-medium ${
+                                          getSendQtyNumber(req) > 0
+                                            ? 'bg-blue-600 text-white hover:bg-blue-700'
+                                            : 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                                        }`}
                                       >
                                         Setujui
                                       </button>
@@ -997,8 +1126,13 @@ export const KirimBarangView: React.FC = () => {
                                   )}
                                   {req.status === 'approved' && req.from_store === currentStore && (
                                     <button
-                                      onClick={() => handleSend(req.id)}
-                                      className="px-2 py-1 bg-purple-600 text-white rounded text-[10px] font-medium hover:bg-purple-700"
+                                      onClick={() => handleSend(req.id, getSendQtyNumber(req))}
+                                      disabled={getSendQtyNumber(req) <= 0}
+                                      className={`px-2 py-1 rounded text-[10px] font-medium ${
+                                        getSendQtyNumber(req) > 0
+                                          ? 'bg-purple-600 text-white hover:bg-purple-700'
+                                          : 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                                      }`}
                                     >
                                       Kirim
                                     </button>
