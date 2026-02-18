@@ -128,6 +128,7 @@ export const KirimBarangView: React.FC = () => {
   const [partNumberOptionsByStore, setPartNumberOptionsByStore] = useState<{ mjm: StockItem[]; bjw: StockItem[] }>({ mjm: [], bjw: [] });
   const [partNumberOptionsLoading, setPartNumberOptionsLoading] = useState(false);
   const [partNumberEdits, setPartNumberEdits] = useState<Record<string, string>>({});
+  const [selectedSendRequestIds, setSelectedSendRequestIds] = useState<string[]>([]);
 
   // Toast helper
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
@@ -412,6 +413,19 @@ export const KirimBarangView: React.FC = () => {
     senderShelfMap[requestId] || '-'
   );
 
+  const isBulkSendEligible = (item: KirimBarangItem) =>
+    item.status === 'approved' && item.from_store === currentStore;
+
+  const toggleSelectSendRequest = (id: string, checked: boolean) => {
+    setSelectedSendRequestIds(prev => {
+      if (checked) {
+        if (prev.includes(id)) return prev;
+        return [...prev, id];
+      }
+      return prev.filter(itemId => itemId !== id);
+    });
+  };
+
   const isPartNumberEditable = (item: KirimBarangItem) =>
     item.status === 'pending' && item.from_store === currentStore;
   const getPartNumberEditValue = (item: KirimBarangItem): string =>
@@ -447,6 +461,41 @@ export const KirimBarangView: React.FC = () => {
     } else {
       showToast(result.error || 'Gagal mengubah part number', 'error');
     }
+    setLoading(false);
+  };
+
+  const handleBulkSendSelected = async () => {
+    const selectedRows = statusTableRows.filter(req =>
+      selectedSendRequestIds.includes(req.id) && isBulkSendEligible(req)
+    );
+
+    if (selectedRows.length === 0) {
+      showToast('Pilih minimal 1 request disetujui untuk dikirim', 'error');
+      return;
+    }
+
+    setLoading(true);
+    let successCount = 0;
+    let failCount = 0;
+
+    for (const req of selectedRows) {
+      const result = await sendKirimBarang(req.id, userName, getSendQtyNumber(req));
+      if (result.success) {
+        successCount += 1;
+      } else {
+        failCount += 1;
+      }
+    }
+
+    if (successCount > 0) {
+      showToast(`${successCount} request berhasil dikirim`);
+    }
+    if (failCount > 0) {
+      showToast(`${failCount} request gagal dikirim`, 'error');
+    }
+
+    setSelectedSendRequestIds([]);
+    await loadRequests();
     setLoading(false);
   };
 
@@ -649,6 +698,19 @@ export const KirimBarangView: React.FC = () => {
     isDateInPeriod(getFilterDateValue(req, filter), selectedPeriod)
   );
   const statusTableRows = statusTableRowsBase.filter(req => matchesPartNumber(req.part_number));
+  const approvedSendableRows = statusTableRows.filter(req => isBulkSendEligible(req));
+  const selectedApprovedSendableRows = approvedSendableRows.filter(req => selectedSendRequestIds.includes(req.id));
+  const isAllApprovedSelected = approvedSendableRows.length > 0 && selectedApprovedSendableRows.length === approvedSendableRows.length;
+
+  useEffect(() => {
+    setSelectedSendRequestIds(prev => {
+      const next = prev.filter(id => approvedSendableRows.some(req => req.id === id));
+      if (next.length === prev.length && next.every((id, idx) => id === prev[idx])) {
+        return prev;
+      }
+      return next;
+    });
+  }, [approvedSendableRows]);
 
   // Render stock table with inline request input
   const renderStockTable = (items: StockItemWithRequest[], store: 'mjm' | 'bjw') => {
@@ -1179,6 +1241,21 @@ export const KirimBarangView: React.FC = () => {
                       </option>
                     ))}
                   </select>
+                  {filter === 'approved' && approvedSendableRows.length > 0 && (
+                    <button
+                      onClick={handleBulkSendSelected}
+                      disabled={selectedApprovedSendableRows.length === 0 || loading}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1 ${
+                        selectedApprovedSendableRows.length > 0 && !loading
+                          ? 'bg-purple-700 text-white hover:bg-purple-600'
+                          : 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                      }`}
+                      title="Kirim semua request yang dicentang"
+                    >
+                      <Truck size={14} />
+                      Kirim Terpilih ({selectedApprovedSendableRows.length})
+                    </button>
+                  )}
                   <button
                     onClick={handleDownloadFilterPdf}
                     className={`px-3 py-1.5 text-white rounded-lg text-xs font-medium flex items-center gap-1 ${
@@ -1225,6 +1302,24 @@ export const KirimBarangView: React.FC = () => {
                       <table className="w-full text-xs">
                         <thead className="bg-gray-900/70">
                           <tr>
+                            {filter === 'approved' && (
+                              <th className="px-3 py-2 text-center text-gray-400">
+                                <input
+                                  type="checkbox"
+                                  checked={isAllApprovedSelected}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setSelectedSendRequestIds(approvedSendableRows.map(req => req.id));
+                                    } else {
+                                      setSelectedSendRequestIds([]);
+                                    }
+                                  }}
+                                  disabled={approvedSendableRows.length === 0 || loading}
+                                  className="h-3.5 w-3.5 accent-purple-600"
+                                  title="Pilih semua untuk kirim"
+                                />
+                              </th>
+                            )}
                             <th className="px-3 py-2 text-left text-gray-400">No</th>
                             <th className="px-3 py-2 text-left text-gray-400">Part Number</th>
                             <th className="px-3 py-2 text-left text-gray-400">Nama Barang</th>
@@ -1242,6 +1337,22 @@ export const KirimBarangView: React.FC = () => {
                         <tbody>
                           {statusTableRows.map((req, index) => (
                             <tr key={req.id} className="border-t border-gray-700/50 hover:bg-gray-700/20">
+                              {filter === 'approved' && (
+                                <td className="px-3 py-2 text-center">
+                                  {isBulkSendEligible(req) ? (
+                                    <input
+                                      type="checkbox"
+                                      checked={selectedSendRequestIds.includes(req.id)}
+                                      onChange={(e) => toggleSelectSendRequest(req.id, e.target.checked)}
+                                      disabled={loading}
+                                      className="h-3.5 w-3.5 accent-purple-600"
+                                      title="Pilih request ini untuk kirim massal"
+                                    />
+                                  ) : (
+                                    <span className="text-gray-600">-</span>
+                                  )}
+                                </td>
+                              )}
                               <td className="px-3 py-2 text-gray-300">{index + 1}</td>
                               <td className="px-3 py-2 text-gray-200 font-mono">
                                 {isPartNumberEditable(req) ? (
