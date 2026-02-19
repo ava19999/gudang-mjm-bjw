@@ -16,6 +16,7 @@ import { ClosingView } from './components/finance/ClosingView';
 import { PiutangCustomerView } from './components/finance/PiutangCustomerView';
 import { TagihanTokoView } from './components/finance/TagihanTokoView';
 import { RekapBulananView } from './components/finance/RekapBulananView';
+import { ZakatTahunanView } from './components/finance/ZakatTahunanView';
 import { DataAgungView } from './components/online/DataAgungView';
 import StockOnlineView from './components/online/StockOnlineView';
 import { FotoProdukView } from './components/online/FotoProdukView';
@@ -313,6 +314,7 @@ const AppContent: React.FC = () => {
         {activeView === 'piutang_customer' && isAdmin && <PiutangCustomerView />}
         {activeView === 'tagihan_toko' && isAdmin && <TagihanTokoView />}
         {activeView === 'rekap_bulanan' && isAdmin && <RekapBulananView />}
+        {activeView === 'zakat_tahunan' && isAdmin && <ZakatTahunanView />}
         {activeView === 'data_agung' && isAdmin && <DataAgungView items={items} onRefresh={refreshData} showToast={showToast} />}
           {activeView === 'stock_online' && isAdmin && <StockOnlineView />}
         {activeView === 'foto_produk' && isAdmin && <FotoProdukView />}

@@ -1,6 +1,6 @@
 // FILE: src/components/finance/FinanceMenu.tsx
 import React, { useState } from 'react';
-import { Wallet, PackageX, ChevronDown, ChevronUp, Calendar, CreditCard, Store, BarChart2 } from 'lucide-react';
+import { Wallet, PackageX, ChevronDown, ChevronUp, Calendar, CreditCard, Store, BarChart2, Calculator } from 'lucide-react';
 import { ActiveView } from '../../types/ui';
 
 interface FinanceMenuProps {
@@ -30,6 +30,7 @@ export const FinanceMenu: React.FC<FinanceMenuProps> = ({
     'piutang_customer',
     'tagihan_toko',
     'rekap_bulanan',
+    'zakat_tahunan',
   ].includes(activeView);
 
   const handleMainClick = (e: React.MouseEvent) => {
@@ -70,6 +71,19 @@ export const FinanceMenu: React.FC<FinanceMenuProps> = ({
                 <BarChart2 size={16} />
               </div>
               <span className="text-sm font-medium">Rekap Bulanan</span>
+            </button>
+            <button
+              onClick={() => {
+                setActiveView('zakat_tahunan');
+              }}
+              className={`w-full px-3 py-2.5 text-left hover:bg-gray-700/80 transition-all duration-150 flex items-center gap-2.5 border-t border-gray-700/50 active:scale-[0.98] ${
+                activeView === 'zakat_tahunan' ? 'bg-gradient-to-r from-purple-900/30 to-transparent text-purple-400 shadow-inner' : 'text-gray-300'
+              }`}
+            >
+              <div className={`p-1 rounded-lg ${activeView === 'zakat_tahunan' ? 'bg-purple-900/40' : 'bg-gray-700/50'}`}>
+                <Calculator size={16} />
+              </div>
+              <span className="text-sm font-medium">Zakat Tahunan</span>
             </button>
             <button
               onClick={() => {
@@ -186,6 +200,18 @@ export const FinanceMenu: React.FC<FinanceMenuProps> = ({
           >
             <BarChart2 size={16} />
             <span className="text-sm font-medium">Rekap Bulanan</span>
+          </button>
+          <button
+            onClick={() => {
+              setActiveView('zakat_tahunan');
+              setInternalIsOpen(false);
+            }}
+            className={`w-full px-4 py-3 text-left hover:bg-gray-700 transition-colors flex items-center gap-2 border-t border-gray-700 ${
+              activeView === 'zakat_tahunan' ? 'bg-gray-700 text-purple-400' : 'text-gray-300'
+            }`}
+          >
+            <Calculator size={16} />
+            <span className="text-sm font-medium">Zakat Tahunan</span>
           </button>
           <button
             onClick={() => {
