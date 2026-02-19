@@ -105,6 +105,10 @@ const normalizePart = (value: string | null | undefined): string => {
   return (value || '').trim().toUpperCase();
 };
 
+const normalizePartKey = (value: string | null | undefined): string => {
+  return normalizePart(value).replace(/\s*\(.*?\)\s*/g, ' ').replace(/\s+/g, ' ').trim();
+};
+
 const normalizeText = (value: string | null | undefined): string => {
   const v = (value || '').trim().toUpperCase();
   return v || 'UNKNOWN';
@@ -123,6 +127,23 @@ const isTempoDebt = (tempoValue: string | null | undefined): boolean => {
   if (tempo.includes('STOK')) return false;
   if (tempo.includes('LUNAS')) return false;
   return true;
+};
+
+const isReturMasuk = (row: { tempo?: string | null; customer?: string | null }): boolean => {
+  const tempo = normalizeTempo(row.tempo);
+  const customer = normalizeText(row.customer);
+  if (tempo.includes('RETUR')) return true;
+  if (customer.includes('RETUR')) return true;
+  return false;
+};
+
+const isDateInRange = (value: string | null | undefined, start: string, end: string): boolean => {
+  if (!value) return false;
+  const ts = new Date(value).getTime();
+  const startTs = new Date(start).getTime();
+  const endTs = new Date(end).getTime();
+  if (!Number.isFinite(ts) || !Number.isFinite(startTs) || !Number.isFinite(endTs)) return false;
+  return ts >= startTs && ts <= endTs;
 };
 
 const getModalSourceLabel = (source: ModalSource): string => {
@@ -238,14 +259,12 @@ export const ZakatTahunanView: React.FC = () => {
         fetchAllRows<BarangMasukRow>(
           'barang_masuk_mjm',
           'part_number,customer,tempo,harga_satuan,harga_total,created_at',
-          'created_at',
-          (query) => query.gte('created_at', startDateTime).lte('created_at', endDateTime)
+          'created_at'
         ),
         fetchAllRows<BarangMasukRow>(
           'barang_masuk_bjw',
           'part_number,customer,tempo,harga_satuan,harga_total,created_at',
-          'created_at',
-          (query) => query.gte('created_at', startDateTime).lte('created_at', endDateTime)
+          'created_at'
         ),
         fetchAllRows<BarangKeluarRow>(
           'barang_keluar_mjm',
@@ -274,16 +293,31 @@ export const ZakatTahunanView: React.FC = () => {
       ]);
 
       const allKeluar = [...barangKeluarMjm, ...barangKeluarBjw];
-      const allMasuk = [...barangMasukMjm, ...barangMasukBjw];
+      const allMasukAllHistory = [...barangMasukMjm, ...barangMasukBjw].filter(
+        (row) => !isReturMasuk(row)
+      );
+      const allMasuk = allMasukAllHistory.filter((row) =>
+        isDateInRange(row.created_at, startDateTime, endDateTime)
+      );
 
-      const minCostByPart = new Map<string, number>();
-      for (const row of barangMasukMjm) {
+      const minCostByPartExact = new Map<string, number>();
+      const minCostByPartKey = new Map<string, number>();
+      for (const row of allMasukAllHistory) {
         const part = normalizePart(row.part_number);
+        const partKey = normalizePartKey(row.part_number);
         const price = toNumber(row.harga_satuan);
         if (!part || price <= 0) continue;
-        const prev = minCostByPart.get(part);
-        if (prev === undefined || price < prev) {
-          minCostByPart.set(part, price);
+
+        const prevExact = minCostByPartExact.get(part);
+        if (prevExact === undefined || price < prevExact) {
+          minCostByPartExact.set(part, price);
+        }
+
+        if (partKey) {
+          const prevKey = minCostByPartKey.get(partKey);
+          if (prevKey === undefined || price < prevKey) {
+            minCostByPartKey.set(partKey, price);
+          }
         }
       }
 
@@ -304,10 +338,15 @@ export const ZakatTahunanView: React.FC = () => {
       const itemSummaryRows: ItemSummaryRow[] = baseItems
         .map((item) => {
           const partNumber = normalizePart(item.part_number);
+          const partKey = normalizePartKey(item.part_number);
           const stockQty = toNumber(item.quantity);
           const salesAgg = salesByPart.get(partNumber) || { qty: 0, total: 0 };
           const avgSellPrice = salesAgg.qty > 0 ? salesAgg.total / salesAgg.qty : 0;
-          const minCost = minCostByPart.get(partNumber) || 0;
+
+          const exactCost = minCostByPartExact.get(partNumber) || 0;
+          const keyCost = minCostByPartKey.get(partKey) || 0;
+          const minCostCandidates = [exactCost, keyCost].filter((v) => v > 0);
+          const minCost = minCostCandidates.length > 0 ? Math.min(...minCostCandidates) : 0;
 
           let unitModal = 0;
           let modalSource: ModalSource = 'TANPA_MODAL';
@@ -483,8 +522,9 @@ export const ZakatTahunanView: React.FC = () => {
             Bersih
           </p>
           <p className="text-xs text-gray-500 mt-1">
-            Sumber modal: <span className="text-gray-300">`base_mjm + barang_masuk_mjm`</span>,
+            Sumber modal: <span className="text-gray-300">`base_mjm + seluruh histori barang_masuk_mjm + barang_masuk_bjw`</span>,
             fallback <span className="text-gray-300">avg jual x 80% dari `barang_keluar_mjm + barang_keluar_bjw`</span>.
+            Baris masuk bertipe <span className="text-gray-300">RETUR</span> diabaikan (hanya RESTOCK).
           </p>
         </div>
       </div>
