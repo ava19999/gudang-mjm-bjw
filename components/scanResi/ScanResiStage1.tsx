@@ -116,6 +116,19 @@ const Toast = ({ message, type, onClose }: any) => (
 
 export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh, refreshTrigger }) => {
   const { selectedStore, userName } = useStore();
+
+  const normalizeSubTokoValue = (value: string | null | undefined): SubToko => {
+    const normalized = String(value || '')
+      .trim()
+      .toUpperCase()
+      .replace(/_/g, ' ');
+
+    if (normalized === 'MJM' || normalized === 'BJW' || normalized === 'LARIS' || normalized === 'PRAKTIS PART') {
+      return normalized as SubToko;
+    }
+
+    return (selectedStore === 'bjw' ? 'BJW' : 'MJM') as SubToko;
+  };
   
   // State untuk scanning
   const [ecommerce, setEcommerce] = useState<EcommercePlatform>('SHOPEE');
@@ -198,7 +211,7 @@ export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh, refre
     const allowedSubToko = ['MJM', 'BJW', 'LARIS', 'PRAKTIS PART'];
     if (ecommerce !== 'RESELLER') {
       setSubToko(prev => {
-        const upper = (prev || '').toUpperCase();
+        const upper = String(prev || '').toUpperCase().replace(/_/g, ' ');
         return allowedSubToko.includes(upper) ? upper as SubToko : defaultToko as SubToko;
       });
       setSelectedReseller('');
@@ -277,9 +290,10 @@ export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh, refre
     const now = new Date().toISOString(); // atau gunakan format sesuai kebutuhan
     const defaultToko = selectedStore === 'bjw' ? 'BJW' : 'MJM';
     const allowedSubToko = ['MJM', 'BJW', 'LARIS', 'PRAKTIS PART'];
+    const normalizedSubToko = normalizeSubTokoValue(subToko);
     const subTokoForSave = ecommerce === 'RESELLER'
-      ? subToko
-      : (allowedSubToko.includes((subToko || '').toUpperCase()) ? (subToko as SubToko) : defaultToko as SubToko);
+      ? (String(subToko || '').trim() as SubToko)
+      : (allowedSubToko.includes((normalizedSubToko || '').toUpperCase()) ? normalizedSubToko : defaultToko as SubToko);
 
     const payload = {
       resi: resiInput.trim(),
@@ -701,13 +715,13 @@ export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh, refre
               ) : (
                 <select
                   value={subToko}
-                  onChange={(e) => setSubToko(e.target.value as SubToko)}
+                  onChange={(e) => setSubToko(normalizeSubTokoValue(e.target.value))}
                   className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 >
                   <option value="MJM">MJM</option>
                   <option value="BJW">BJW</option>
                   <option value="LARIS">LARIS</option>
-                  <option value="PRAKTIS_PART">PRAKTIS PART</option>
+                  <option value="PRAKTIS PART">PRAKTIS PART</option>
                 </select>
               )}
             </div>
@@ -1038,13 +1052,13 @@ export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh, refre
                   ) : (
                     <select
                       value={bulkSubToko}
-                      onChange={(e) => setBulkSubToko(e.target.value as SubToko)}
+                      onChange={(e) => setBulkSubToko(normalizeSubTokoValue(e.target.value))}
                       className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent text-sm"
                     >
                       <option value="MJM">MJM</option>
                       <option value="BJW">BJW</option>
                       <option value="LARIS">LARIS</option>
-                      <option value="PRAKTIS_PART">PRAKTIS PART</option>
+                      <option value="PRAKTIS PART">PRAKTIS PART</option>
                     </select>
                   )}
                 </div>

@@ -24,7 +24,7 @@ import {
 } from '../../services/kirimBarangService';
 
 type ViewMode = 'stock_comparison' | 'request_list';
-type FilterType = 'all' | 'incoming' | 'outgoing' | 'rejected' | 'pending' | 'approved' | 'completed';
+type FilterType = 'all' | 'incoming' | 'outgoing' | 'rejected' | 'pending' | 'approved' | 'sent' | 'completed';
 type PeriodFilterType = 'all_period' | 'today' | 'yesterday' | 'last_7_days' | 'last_30_days' | 'this_month' | 'last_month';
 const ALL_PERIOD_VALUE: PeriodFilterType = 'all_period';
 const PERIOD_FILTER_OPTIONS: Array<{ value: PeriodFilterType; label: string }> = [
@@ -94,6 +94,7 @@ const getPeriodDisplayLabel = (period: PeriodFilterType): string => (
 const getDateValueByFilter = (item: KirimBarangItem, activeFilter: FilterType): string | null => {
   switch (activeFilter) {
     case 'approved': return item.approved_at;
+    case 'sent': return item.sent_at;
     case 'rejected': return item.rejected_at;
     case 'completed': return item.received_at;
     default: return item.created_at;
@@ -367,6 +368,7 @@ export const KirimBarangView: React.FC = () => {
       case 'outgoing': return `Keluar dari ${currentStore.toUpperCase()}`;
       case 'pending': return 'Pending';
       case 'approved': return 'Disetujui';
+      case 'sent': return 'Sedang Dikirim';
       case 'rejected': return 'Ditolak';
       case 'completed': return 'Diterima';
       default: return activeFilter;
@@ -376,6 +378,7 @@ export const KirimBarangView: React.FC = () => {
   const getFilterDateLabel = (activeFilter: FilterType): string => {
     switch (activeFilter) {
       case 'approved': return 'Tanggal Disetujui';
+      case 'sent': return 'Tanggal Dikirim';
       case 'rejected': return 'Tanggal Ditolak';
       case 'completed': return 'Tanggal Diterima';
       default: return 'Tanggal Request';
@@ -935,7 +938,7 @@ export const KirimBarangView: React.FC = () => {
           {/* Filter */}
           <div className="flex flex-wrap gap-2 items-center">
             <Filter size={18} className="text-gray-500" />
-            {(['all', 'incoming', 'outgoing', 'rejected', 'pending', 'approved', 'completed'] as FilterType[]).map((f) => (
+            {(['all', 'incoming', 'outgoing', 'rejected', 'pending', 'approved', 'sent', 'completed'] as FilterType[]).map((f) => (
               <button
                 key={f}
                 onClick={() => setFilter(f)}
@@ -951,6 +954,7 @@ export const KirimBarangView: React.FC = () => {
                 {f === 'rejected' && 'Ditolak'}
                 {f === 'pending' && 'Pending'}
                 {f === 'approved' && 'Setujui'}
+                {f === 'sent' && 'Dikirim'}
                 {f === 'completed' && 'Diterima'}
               </button>
             ))}
