@@ -9,6 +9,7 @@ import { DashboardFilterBar } from './DashboardFilterBar';
 import { InventoryList } from './InventoryList';
 import { GlobalHistoryModal } from './GlobalHistoryModal';
 import { ItemHistoryModal } from './ItemHistoryModal';
+import { AssetProfitModal } from './AssetProfitModal';
 import { useStore } from '../context/StoreContext';
 
 interface DashboardProps {
@@ -52,7 +53,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   
   // Data States
   const [stats, setStats] = useState({ totalItems: 0, totalStock: 0, totalAsset: 0, todayIn: 0, todayOut: 0 });
-  const [showHistoryDetail, setShowHistoryDetail] = useState<'in' | 'out' | null>(null);
+  const [showHistoryDetail, setShowHistoryDetail] = useState<'in' | 'out' | 'asset' | null>(null);
   const [selectedItemHistory, setSelectedItemHistory] = useState<InventoryItem | null>(null);
   
   // Form States
@@ -278,8 +279,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
       </div>
 
       {/* 4. MODALS */}
-      {showHistoryDetail && (
+      {(showHistoryDetail === 'in' || showHistoryDetail === 'out') && (
         <GlobalHistoryModal type={showHistoryDetail} onClose={() => setShowHistoryDetail(null)} />
+      )}
+
+      {showHistoryDetail === 'asset' && (
+        <AssetProfitModal onClose={() => setShowHistoryDetail(null)} />
       )}
 
       {selectedItemHistory && (

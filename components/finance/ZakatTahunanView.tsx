@@ -105,10 +105,6 @@ const normalizePart = (value: string | null | undefined): string => {
   return (value || '').trim().toUpperCase();
 };
 
-const normalizePartKey = (value: string | null | undefined): string => {
-  return normalizePart(value).replace(/\s*\(.*?\)\s*/g, ' ').replace(/\s+/g, ' ').trim();
-};
-
 const normalizeText = (value: string | null | undefined): string => {
   const v = (value || '').trim().toUpperCase();
   return v || 'UNKNOWN';
@@ -135,6 +131,11 @@ const isReturMasuk = (row: { tempo?: string | null; customer?: string | null }):
   if (tempo.includes('RETUR')) return true;
   if (customer.includes('RETUR')) return true;
   return false;
+};
+
+const isKeluarKeBjw = (customer: string | null | undefined): boolean => {
+  const normalized = normalizeText(customer).replace(/[^A-Z0-9]/g, '');
+  return normalized.includes('KELUARKEBJW');
 };
 
 const isDateInRange = (value: string | null | undefined, start: string, end: string): boolean => {
@@ -292,7 +293,9 @@ export const ZakatTahunanView: React.FC = () => {
         )
       ]);
 
-      const allKeluar = [...barangKeluarMjm, ...barangKeluarBjw];
+      const allKeluar = [...barangKeluarMjm, ...barangKeluarBjw].filter(
+        (row) => !isKeluarKeBjw(row.customer)
+      );
       const allMasukAllHistory = [...barangMasukMjm, ...barangMasukBjw].filter(
         (row) => !isReturMasuk(row)
       );
@@ -301,23 +304,14 @@ export const ZakatTahunanView: React.FC = () => {
       );
 
       const minCostByPartExact = new Map<string, number>();
-      const minCostByPartKey = new Map<string, number>();
       for (const row of allMasukAllHistory) {
         const part = normalizePart(row.part_number);
-        const partKey = normalizePartKey(row.part_number);
         const price = toNumber(row.harga_satuan);
         if (!part || price <= 0) continue;
 
         const prevExact = minCostByPartExact.get(part);
         if (prevExact === undefined || price < prevExact) {
           minCostByPartExact.set(part, price);
-        }
-
-        if (partKey) {
-          const prevKey = minCostByPartKey.get(partKey);
-          if (prevKey === undefined || price < prevKey) {
-            minCostByPartKey.set(partKey, price);
-          }
         }
       }
 
@@ -338,15 +332,12 @@ export const ZakatTahunanView: React.FC = () => {
       const itemSummaryRows: ItemSummaryRow[] = baseItems
         .map((item) => {
           const partNumber = normalizePart(item.part_number);
-          const partKey = normalizePartKey(item.part_number);
           const stockQty = toNumber(item.quantity);
           const salesAgg = salesByPart.get(partNumber) || { qty: 0, total: 0 };
           const avgSellPrice = salesAgg.qty > 0 ? salesAgg.total / salesAgg.qty : 0;
 
-          const exactCost = minCostByPartExact.get(partNumber) || 0;
-          const keyCost = minCostByPartKey.get(partKey) || 0;
-          const minCostCandidates = [exactCost, keyCost].filter((v) => v > 0);
-          const minCost = minCostCandidates.length > 0 ? Math.min(...minCostCandidates) : 0;
+          // Sesuai database: modal hanya dari part_number exact.
+          const minCost = minCostByPartExact.get(partNumber) || 0;
 
           let unitModal = 0;
           let modalSource: ModalSource = 'TANPA_MODAL';

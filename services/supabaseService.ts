@@ -33,6 +33,270 @@ const parseDateToNumber = (dateVal: any): number => {
   return isNaN(parsed) ? Date.now() : parsed;
 };
 
+const toSafeNumber = (value: unknown): number => {
+  const n = Number(value || 0);
+  return Number.isFinite(n) ? n : 0;
+};
+
+const normalizePart = (value: string | null | undefined): string => {
+  return (value || '').trim().toUpperCase();
+};
+
+const normalizeTempo = (value: string | null | undefined): string => {
+  return (value || '').trim().toUpperCase();
+};
+
+const normalizeText = (value: string | null | undefined): string => {
+  const v = (value || '').trim().toUpperCase();
+  return v || 'UNKNOWN';
+};
+
+const isReturMasuk = (row: { tempo?: string | null; customer?: string | null }): boolean => {
+  const tempo = normalizeTempo(row.tempo);
+  const customer = normalizeText(row.customer);
+  if (tempo.includes('RETUR')) return true;
+  if (customer.includes('RETUR')) return true;
+  return false;
+};
+
+interface ModalMasukRow {
+  part_number: string | null;
+  harga_satuan: number | null;
+  tempo: string | null;
+  customer: string | null;
+}
+
+interface ModalKeluarRow {
+  part_number: string | null;
+  qty_keluar: number | null;
+  harga_total: number | null;
+  customer: string | null;
+}
+
+interface ModalBaseItemRow {
+  part_number: string | null;
+  name: string | null;
+  quantity: number | null;
+}
+
+export type ModalSourceType = 'HARGA_TERENDAH_MASUK' | 'ESTIMASI_80PCT_AVG_JUAL' | 'TANPA_MODAL';
+
+export interface AssetProfitDetailRow {
+  partNumber: string;
+  name: string;
+  stockQty: number;
+  soldQty: number;
+  avgSellPrice: number;
+  unitModal: number;
+  modalSource: ModalSourceType;
+  modalStock: number;
+  salesTotal: number;
+  hppSold: number;
+  keuntungan: number;
+}
+
+export interface AssetProfitDetailsResult {
+  rows: AssetProfitDetailRow[];
+  totalItems: number;
+  totalModalStock: number;
+  totalSales: number;
+  totalHppSold: number;
+  totalProfit: number;
+  estimasiModalItems: number;
+  tanpaModalItems: number;
+}
+
+const fetchAllRowsForModal = async <T,>(
+  table: string,
+  select: string,
+  orderColumn: string
+): Promise<T[]> => {
+  const pageSize = 1000;
+  let from = 0;
+  const rows: T[] = [];
+
+  while (true) {
+    const { data, error } = await supabase
+      .from(table)
+      .select(select)
+      .order(orderColumn, { ascending: true })
+      .range(from, from + pageSize - 1);
+
+    if (error) {
+      console.error(`Gagal mengambil data ${table} untuk hitung modal:`, error);
+      return rows;
+    }
+
+    const page = (data || []) as T[];
+    rows.push(...page);
+
+    if (page.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return rows;
+};
+
+const fetchAllModalLogs = async (): Promise<{ masukRows: ModalMasukRow[]; keluarRows: ModalKeluarRow[] }> => {
+  const [masukMjm, masukBjw, keluarMjm, keluarBjw] = await Promise.all([
+    fetchAllRowsForModal<ModalMasukRow>(
+      'barang_masuk_mjm',
+      'part_number,harga_satuan,tempo,customer,created_at',
+      'created_at'
+    ),
+    fetchAllRowsForModal<ModalMasukRow>(
+      'barang_masuk_bjw',
+      'part_number,harga_satuan,tempo,customer,created_at',
+      'created_at'
+    ),
+    fetchAllRowsForModal<ModalKeluarRow>(
+      'barang_keluar_mjm',
+      'part_number,qty_keluar,harga_total,customer,created_at',
+      'created_at'
+    ),
+    fetchAllRowsForModal<ModalKeluarRow>(
+      'barang_keluar_bjw',
+      'part_number,qty_keluar,harga_total,customer,created_at',
+      'created_at'
+    ),
+  ]);
+
+  return {
+    masukRows: [...masukMjm, ...masukBjw],
+    keluarRows: [...keluarMjm, ...keluarBjw],
+  };
+};
+
+const isKeluarKeBjw = (customer: string | null | undefined): boolean => {
+  const normalized = normalizeText(customer).replace(/[^A-Z0-9]/g, '');
+  return normalized.includes('KELUARKEBJW');
+};
+
+const buildAssetProfitRows = (
+  items: Array<{ part_number?: string | null; name?: string | null; quantity?: number | null }>,
+  masukRows: ModalMasukRow[],
+  keluarRows: ModalKeluarRow[]
+): AssetProfitDetailRow[] => {
+  if (!items || items.length === 0) return [];
+
+  const minCostByPartExact = new Map<string, number>();
+
+  for (const row of masukRows) {
+    if (isReturMasuk(row)) continue;
+
+    const part = normalizePart(row.part_number);
+    if (!part) continue;
+
+    const price = toSafeNumber(row.harga_satuan);
+    if (price <= 0) continue;
+
+    const exactPrev = minCostByPartExact.get(part);
+    if (exactPrev === undefined || price < exactPrev) {
+      minCostByPartExact.set(part, price);
+    }
+  }
+
+  const salesByPart = new Map<string, { qty: number; total: number }>();
+  for (const row of keluarRows) {
+    if (isKeluarKeBjw(row.customer)) continue;
+
+    const part = normalizePart(row.part_number);
+    if (!part) continue;
+
+    if (!salesByPart.has(part)) {
+      salesByPart.set(part, { qty: 0, total: 0 });
+    }
+
+    const agg = salesByPart.get(part)!;
+    agg.qty += toSafeNumber(row.qty_keluar);
+    agg.total += toSafeNumber(row.harga_total);
+  }
+
+  return items
+    .map((item) => {
+      const part = normalizePart(item.part_number);
+      const stockQty = toSafeNumber(item.quantity);
+      const salesAgg = salesByPart.get(part) || { qty: 0, total: 0 };
+      const avgSellPrice = salesAgg.qty > 0 ? salesAgg.total / salesAgg.qty : 0;
+
+      // Sesuai database: modal diambil hanya dari part_number exact yang sama.
+      const minCost = minCostByPartExact.get(part) || 0;
+
+      let unitModal = 0;
+      let modalSource: ModalSourceType = 'TANPA_MODAL';
+      if (minCost > 0) {
+        unitModal = minCost;
+        modalSource = 'HARGA_TERENDAH_MASUK';
+      } else if (avgSellPrice > 0) {
+        unitModal = avgSellPrice * 0.8;
+        modalSource = 'ESTIMASI_80PCT_AVG_JUAL';
+      }
+
+      const soldQty = salesAgg.qty;
+      const salesTotal = salesAgg.total;
+      const modalStock = stockQty * unitModal;
+      const hppSold = soldQty * unitModal;
+      const keuntungan = salesTotal - hppSold;
+
+      return {
+        partNumber: part,
+        name: (item.name || '').trim(),
+        stockQty,
+        soldQty,
+        avgSellPrice,
+        unitModal,
+        modalSource,
+        modalStock,
+        salesTotal,
+        hppSold,
+        keuntungan,
+      };
+    })
+    .sort((a, b) => b.salesTotal - a.salesTotal);
+};
+
+const summarizeAssetProfitRows = (rows: AssetProfitDetailRow[]): AssetProfitDetailsResult => {
+  return {
+    rows,
+    totalItems: rows.length,
+    totalModalStock: rows.reduce((sum, row) => sum + row.modalStock, 0),
+    totalSales: rows.reduce((sum, row) => sum + row.salesTotal, 0),
+    totalHppSold: rows.reduce((sum, row) => sum + row.hppSold, 0),
+    totalProfit: rows.reduce((sum, row) => sum + row.keuntungan, 0),
+    estimasiModalItems: rows.filter((row) => row.modalSource === 'ESTIMASI_80PCT_AVG_JUAL').length,
+    tanpaModalItems: rows.filter((row) => row.modalSource === 'TANPA_MODAL').length,
+  };
+};
+
+const calculateModalStockTotal = async (items: Array<{ part_number?: string | null; quantity?: number | null }>): Promise<number> => {
+  if (!items || items.length === 0) return 0;
+  try {
+    const { masukRows, keluarRows } = await fetchAllModalLogs();
+    const rows = buildAssetProfitRows(items, masukRows, keluarRows);
+    return rows.reduce((sum, row) => sum + row.modalStock, 0);
+  } catch (err) {
+    console.error('Gagal menghitung total modal stock:', err);
+    return 0;
+  }
+};
+
+export const fetchAssetProfitDetails = async (store: string | null): Promise<AssetProfitDetailsResult> => {
+  const table = getTableName(store);
+
+  try {
+    const [baseItems, { masukRows, keluarRows }] = await Promise.all([
+      fetchAllRowsForModal<ModalBaseItemRow>(table, 'part_number,name,quantity', 'part_number'),
+      fetchAllModalLogs(),
+    ]);
+
+    const rows = buildAssetProfitRows(baseItems, masukRows, keluarRows);
+    return summarizeAssetProfitRows(rows);
+  } catch (err) {
+    console.error('Gagal mengambil detail asset/profit:', err);
+    return summarizeAssetProfitRows([]);
+  }
+};
+
 // --- FETCH DISTINCT ECOMMERCE VALUES ---
 export const fetchDistinctEcommerce = async (store: string | null): Promise<string[]> => {
   const table = store === 'mjm' ? 'barang_keluar_mjm' : (store === 'bjw' ? 'barang_keluar_bjw' : null);
@@ -1027,13 +1291,8 @@ export const fetchInventoryStats = async (store: string | null): Promise<any> =>
     .gte('created_at', todayStart);
   const todayOut = (outData || []).reduce((acc, row) => acc + (Number(row.qty_keluar) || 0), 0);
   
-  // 5. Calculate total asset (need prices)
-  const priceMap = await fetchLatestPricesForItems(items, store);
-  const totalAsset = items.reduce((acc, item) => {
-    const pk = (item.part_number || '').trim();
-    const price = priceMap[pk]?.harga || 0;
-    return acc + (price * (Number(item.quantity) || 0));
-  }, 0);
+  // 5. Calculate total asset as total modal stock (same basis as Zakat Tahunan modal)
+  const totalAsset = await calculateModalStockTotal(items);
   
   return { totalItems, totalStock, totalAsset, todayIn, todayOut };
 };

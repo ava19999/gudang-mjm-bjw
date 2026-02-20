@@ -54,6 +54,127 @@ const normalizePartNumber = (partNumber: string): string => (
   String(partNumber || '').trim().toUpperCase()
 );
 
+const getBarangMasukTable = (store: 'mjm' | 'bjw'): 'barang_masuk_mjm' | 'barang_masuk_bjw' => (
+  store === 'mjm' ? 'barang_masuk_mjm' : 'barang_masuk_bjw'
+);
+
+const getTransferCustomerLabel = (fromStore: 'mjm' | 'bjw'): string => (
+  `BARANG MASUK ${String(fromStore || '').trim().toUpperCase()}`
+);
+
+interface EnsureTransferInLogOptions {
+  stokAkhir?: number;
+  shelf?: string;
+  receivedAtIso?: string;
+}
+
+const ensureTransferIncomingLog = async (
+  transfer: Pick<
+    KirimBarangItem,
+    'from_store' | 'to_store' | 'part_number' | 'nama_barang' | 'brand' | 'application' | 'quantity' | 'created_at' | 'updated_at' | 'received_at'
+  >,
+  options: EnsureTransferInLogOptions = {}
+): Promise<{ success: boolean; error?: string }> => {
+  try {
+    const transferQty = Number(transfer.quantity || 0);
+    if (transferQty <= 0) {
+      return { success: false, error: 'Qty transfer tidak valid' };
+    }
+
+    const inLogTable = getBarangMasukTable(transfer.to_store);
+    const transferCustomer = getTransferCustomerLabel(transfer.from_store);
+    const receivedAtIso = options.receivedAtIso
+      || transfer.received_at
+      || transfer.updated_at
+      || transfer.created_at
+      || getWIBDate().toISOString();
+
+    let finalDestQty = Number(options.stokAkhir);
+    let destinationShelf = options.shelf || '-';
+
+    if (!Number.isFinite(finalDestQty)) {
+      const destTable = transfer.to_store === 'mjm' ? 'base_mjm' : 'base_bjw';
+      const { data: latestDestStock, error: latestDestStockError } = await supabase
+        .from(destTable)
+        .select('quantity, shelf')
+        .eq('part_number', transfer.part_number)
+        .maybeSingle();
+
+      if (!latestDestStockError && latestDestStock) {
+        finalDestQty = Number(latestDestStock.quantity || 0);
+        destinationShelf = latestDestStock.shelf || destinationShelf;
+      }
+    }
+
+    if (!Number.isFinite(finalDestQty)) {
+      finalDestQty = transferQty;
+    }
+
+    const receivedDate = new Date(receivedAtIso);
+    const hasValidReceivedDate = !Number.isNaN(receivedDate.getTime());
+    const matchToleranceMs = 2 * 1000;
+    const existingWindowStart = hasValidReceivedDate
+      ? new Date(receivedDate.getTime() - matchToleranceMs).toISOString()
+      : null;
+    const existingWindowEnd = hasValidReceivedDate
+      ? new Date(receivedDate.getTime() + matchToleranceMs).toISOString()
+      : null;
+
+    let existingLogQuery = supabase
+      .from(inLogTable)
+      .select('id')
+      .eq('part_number', transfer.part_number)
+      .eq('customer', transferCustomer)
+      .eq('qty_masuk', transferQty)
+      .limit(1);
+
+    if (existingWindowStart && existingWindowEnd) {
+      existingLogQuery = existingLogQuery
+        .gte('created_at', existingWindowStart)
+        .lte('created_at', existingWindowEnd);
+    }
+
+    const { data: existingLog, error: existingLogError } = await existingLogQuery.maybeSingle();
+    if (existingLogError && existingLogError.code !== 'PGRST116') {
+      console.error('ensureTransferIncomingLog Existing Log Check Error:', existingLogError);
+    }
+
+    if (existingLog) {
+      return { success: true };
+    }
+
+    const logPayload = {
+      part_number: transfer.part_number,
+      nama_barang: transfer.nama_barang || transfer.part_number,
+      brand: transfer.brand || '',
+      application: transfer.application || '',
+      rak: destinationShelf,
+      qty_masuk: transferQty,
+      harga_satuan: 0,
+      harga_total: 0,
+      customer: transferCustomer,
+      ecommerce: '-',
+      tempo: 'CASH',
+      stok_akhir: finalDestQty,
+      created_at: hasValidReceivedDate ? receivedDate.toISOString() : getWIBDate().toISOString()
+    };
+
+    const { error: insertLogError } = await supabase
+      .from(inLogTable)
+      .insert([logPayload]);
+
+    if (insertLogError) {
+      console.error('ensureTransferIncomingLog Insert Log Error:', insertLogError);
+      return { success: false, error: insertLogError.message };
+    }
+
+    return { success: true };
+  } catch (error: any) {
+    console.error('ensureTransferIncomingLog Exception:', error);
+    return { success: false, error: error.message };
+  }
+};
+
 const dedupePendingRequests = (items: KirimBarangItem[]): KirimBarangItem[] => {
   const seenPendingKeys = new Set<string>();
   const result: KirimBarangItem[] = [];
@@ -161,7 +282,23 @@ export const fetchKirimBarang = async (
       return [];
     }
 
-    return dedupePendingRequests((data || []) as KirimBarangItem[]);
+    const dedupedData = dedupePendingRequests((data || []) as KirimBarangItem[]);
+
+    // Auto-sync transfer yang sudah diterima agar masuk ke Detail Barang Masuk.
+    const receivedTransfers = dedupedData.filter(item => (
+      item.status === 'received' && (!store || item.to_store === store)
+    ));
+
+    if (receivedTransfers.length > 0) {
+      await Promise.all(receivedTransfers.map(async transfer => {
+        const syncResult = await ensureTransferIncomingLog(transfer);
+        if (!syncResult.success) {
+          console.warn(`fetchKirimBarang sync log gagal untuk transfer ${transfer.id}:`, syncResult.error);
+        }
+      }));
+    }
+
+    return dedupedData;
   } catch (error) {
     console.error('fetchKirimBarang Exception:', error);
     return [];
@@ -381,8 +518,18 @@ export const receiveKirimBarang = async (
       return { success: false, error: 'Transfer not found' };
     }
 
+    const transferQty = Number(transfer.quantity || 0);
+    if (transferQty <= 0) {
+      return { success: false, error: 'Qty transfer tidak valid' };
+    }
+
+    if (transfer.status !== 'sent' && transfer.status !== 'received') {
+      return { success: false, error: 'Transfer belum berstatus dikirim' };
+    }
+
     // Get destination table
     const destTable = transfer.to_store === 'mjm' ? 'base_mjm' : 'base_bjw';
+    const receivedAtIso = transfer.received_at || getWIBDate().toISOString();
 
     // Get current stock in destination (or create if not exists)
     const { data: destItem, error: destError } = await supabase
@@ -396,49 +543,70 @@ export const receiveKirimBarang = async (
       return { success: false, error: 'Error checking destination stock' };
     }
 
-    if (destItem) {
-      // Item exists, increase quantity
-      const newDestQty = (destItem.quantity || 0) + transfer.quantity;
-      const { error: updateDestError } = await supabase
-        .from(destTable)
-        .update({ quantity: newDestQty })
-        .eq('part_number', transfer.part_number);
+    let finalDestQty = destItem ? Number(destItem.quantity || 0) : transferQty;
+    let destinationShelf = destItem?.shelf || '-';
 
-      if (updateDestError) {
-        return { success: false, error: 'Failed to update destination stock' };
+    // Only mutate stock + status when transfer is still in sent state.
+    if (transfer.status === 'sent') {
+      if (destItem) {
+        // Item exists, increase quantity
+        finalDestQty = (destItem.quantity || 0) + transferQty;
+        const { error: updateDestError } = await supabase
+          .from(destTable)
+          .update({ quantity: finalDestQty })
+          .eq('part_number', transfer.part_number);
+
+        if (updateDestError) {
+          return { success: false, error: 'Failed to update destination stock' };
+        }
+      } else {
+        // Item doesn't exist, create new entry
+        const { error: insertError } = await supabase.from(destTable).insert({
+          part_number: transfer.part_number,
+          name: transfer.nama_barang,
+          brand: transfer.brand || '',
+          application: transfer.application || '',
+          quantity: transferQty,
+          shelf: '-',
+          price: 0,
+          cost_price: 0,
+          ecommerce: ''
+        });
+
+        if (insertError) {
+          return { success: false, error: 'Failed to create item in destination' };
+        }
+
+        destinationShelf = '-';
+        finalDestQty = transferQty;
       }
-    } else {
-      // Item doesn't exist, create new entry
-      const { error: insertError } = await supabase.from(destTable).insert({
-        part_number: transfer.part_number,
-        name: transfer.nama_barang,
-        brand: transfer.brand || '',
-        application: transfer.application || '',
-        quantity: transfer.quantity,
-        shelf: '-',
-        price: 0,
-        cost_price: 0,
-        ecommerce: ''
-      });
 
-      if (insertError) {
-        return { success: false, error: 'Failed to create item in destination' };
+      // Update transfer status
+      const { error: updateError } = await supabase
+        .from('kirim_barang')
+        .update({
+          status: 'received',
+          received_by: receivedBy,
+          received_at: receivedAtIso
+        })
+        .eq('id', id);
+
+      if (updateError) {
+        console.error('receiveKirimBarang Update Error:', updateError);
+        return { success: false, error: updateError.message };
       }
     }
 
-    // Update transfer status
-    const { error: updateError } = await supabase
-      .from('kirim_barang')
-      .update({
-        status: 'received',
-        received_by: receivedBy,
-        received_at: new Date().toISOString()
-      })
-      .eq('id', id);
-
-    if (updateError) {
-      console.error('receiveKirimBarang Update Error:', updateError);
-      return { success: false, error: updateError.message };
+    const syncLogResult = await ensureTransferIncomingLog(transfer, {
+      stokAkhir: finalDestQty,
+      shelf: destinationShelf,
+      receivedAtIso
+    });
+    if (!syncLogResult.success) {
+      return {
+        success: false,
+        error: `Barang diterima, tapi gagal masuk Detail Barang Masuk: ${syncLogResult.error}`
+      };
     }
 
     return { success: true };

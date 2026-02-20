@@ -6,7 +6,7 @@ import { StatCard } from './dashboard/StatCard';
 
 interface DashboardStatsProps {
   stats: { totalItems: number; totalStock: number; totalAsset: number; todayIn: number; todayOut: number };
-  onShowDetail: (type: 'in' | 'out') => void;
+  onShowDetail: (type: 'in' | 'out' | 'asset') => void;
 }
 
 export const DashboardStats: React.FC<DashboardStatsProps> = ({ stats, onShowDetail }) => {
@@ -54,6 +54,9 @@ export const DashboardStats: React.FC<DashboardStatsProps> = ({ stats, onShowDet
                     value={formatCompactNumber(stats.totalAsset)}
                     color="yellow"
                     backgroundImage
+                    interactive
+                    onClick={() => onShowDetail('asset')}
+                    detailText="Lihat Detail"
                 />
             </div>
         </div>
