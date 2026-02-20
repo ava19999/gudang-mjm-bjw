@@ -44,6 +44,7 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
   const [priceSearchQuery, setPriceSearchQuery] = useState('');
   const [sellPriceSearchQuery, setSellPriceSearchQuery] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const submitInFlightRef = useRef(false);
 
   useEffect(() => {
     if (initialData) {
@@ -168,6 +169,8 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
   );
 
   const handleSubmit = async (e: React.FormEvent) => {
+    if (submitInFlightRef.current) return;
+    submitInFlightRef.current = true;
     e.preventDefault();
     setLoading(true);
     setError(null);
@@ -227,6 +230,7 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
       setError("Kesalahan Sistem.");
     } finally {
       setLoading(false);
+      submitInFlightRef.current = false;
     }
   };
 

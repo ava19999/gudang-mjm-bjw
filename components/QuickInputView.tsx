@@ -68,6 +68,7 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
   const itemsPerPage = 100;
   const COLUMNS_COUNT = 8; 
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const saveAllInFlightRef = useRef(false);
   const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
 
   // --- FETCH SUPPLIERS LIST ---
@@ -395,89 +396,96 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
   };
 
   const saveAllRows = async () => {
+    if (saveAllInFlightRef.current) return;
+    saveAllInFlightRef.current = true;
     setIsSavingAll(true);
-    const rowsToSave = rows.filter(row => checkIsRowComplete(row));
-    if (rowsToSave.length === 0) {
-        setIsSavingAll(false);
-        if (showToast) showToast('Isi lengkap data sebelum menyimpan!', 'error');
-        return;
-    }
-    
-    if (mode === 'out') {
-      // Barang Keluar: Group by customer + tanggal, save to orders
-      // First validate all rows
-      const validationResults = await Promise.all(rowsToSave.map(row => saveRow(row)));
-      const allValid = validationResults.every(r => r);
-      
-      if (!allValid) {
-        setIsSavingAll(false);
-        if (showToast) showToast('Beberapa item gagal validasi. Periksa kembali.', 'error');
-        return;
+
+    try {
+      const rowsToSave = rows.filter(row => checkIsRowComplete(row));
+      if (rowsToSave.length === 0) {
+          if (showToast) showToast('Isi lengkap data sebelum menyimpan!', 'error');
+          return;
       }
       
-      // Group by customer + date (BJW: include tempo to avoid mixing SALES/non-SALES in one order)
-      const groupedOrders: Record<string, QuickInputRow[]> = {};
-      rowsToSave.forEach(row => {
-        const key = selectedStore === 'bjw'
-          ? JSON.stringify([row.customer.trim().toLowerCase(), row.tanggal, (row.tempo || 'CASH').trim().toUpperCase()])
-          : JSON.stringify([row.customer.trim().toLowerCase(), row.tanggal]);
-        if (!groupedOrders[key]) groupedOrders[key] = [];
-        groupedOrders[key].push(row);
-      });
-      
-      // Save each group as an order
-      let successCount = 0;
-      for (const [key, groupRows] of Object.entries(groupedOrders)) {
-        const firstRow = groupRows[0];
-        const cartItems = groupRows.map(row => ({
-          partNumber: row.partNumber,
-          name: row.namaBarang,
-          cartQuantity: row.qtyKeluar,
-          price: row.hargaSatuan,
-          brand: row.brand || '',
-          application: row.aplikasi || '',
-        }));
+      if (mode === 'out') {
+        // Barang Keluar: Group by customer + tanggal, save to orders
+        // First validate all rows
+        const validationResults = await Promise.all(rowsToSave.map(row => saveRow(row)));
+        const allValid = validationResults.every(r => r);
         
-        const success = await saveOfflineOrder(cartItems, firstRow.customer, firstRow.tempo || 'CASH', selectedStore);
-        if (success) {
-          successCount += groupRows.length;
-          // Remove saved rows
-          setRows(prev => prev.filter(r => !groupRows.find(gr => gr.id === r.id)));
+        if (!allValid) {
+          if (showToast) showToast('Beberapa item gagal validasi. Periksa kembali.', 'error');
+          return;
+        }
+        
+        // Group by customer + date (BJW: include tempo to avoid mixing SALES/non-SALES in one order)
+        const groupedOrders: Record<string, QuickInputRow[]> = {};
+        rowsToSave.forEach(row => {
+          const key = selectedStore === 'bjw'
+            ? JSON.stringify([row.customer.trim().toLowerCase(), row.tanggal, (row.tempo || 'CASH').trim().toUpperCase()])
+            : JSON.stringify([row.customer.trim().toLowerCase(), row.tanggal]);
+          if (!groupedOrders[key]) groupedOrders[key] = [];
+          groupedOrders[key].push(row);
+        });
+        
+        // Save each group as an order
+        let successCount = 0;
+        for (const [key, groupRows] of Object.entries(groupedOrders)) {
+          const firstRow = groupRows[0];
+          const cartItems = groupRows.map(row => ({
+            partNumber: row.partNumber,
+            name: row.namaBarang,
+            cartQuantity: row.qtyKeluar,
+            price: row.hargaSatuan,
+            brand: row.brand || '',
+            application: row.aplikasi || '',
+          }));
+          
+          const success = await saveOfflineOrder(cartItems, firstRow.customer, firstRow.tempo || 'CASH', selectedStore);
+          if (success) {
+            successCount += groupRows.length;
+            // Remove saved rows
+            setRows(prev => prev.filter(r => !groupRows.find(gr => gr.id === r.id)));
+          }
+        }
+        
+        if (showToast && successCount > 0) {
+          showToast(`${successCount} item berhasil disimpan ke Proses Pesanan`, 'success');
+        }
+        
+        if (successCount === rowsToSave.length) {
+          // Reset with empty rows
+          const initialRows = createInitialRowsForMode(mode);
+          setRows(initialRows);
+        }
+        
+        if (onRefresh) onRefresh();
+        setRefreshTableTrigger(prev => prev + 1);
+      } else {
+        // Barang Masuk: proses berurutan untuk mencegah race/update ganda.
+        let successCount = 0;
+        for (const row of rowsToSave) {
+          const success = await saveRow(row);
+          if (success) successCount += 1;
+        }
+        
+        if (showToast && successCount > 0) showToast(`${successCount} item berhasil diproses`, 'success');
+        if (successCount > 0) {
+            if (onRefresh) onRefresh();
+            setRefreshTableTrigger(prev => prev + 1); 
+        }
+        
+        const remainingRows = rows.length - successCount;
+        if (remainingRows === 0) {
+           // Reset dengan rows kosong baru sesuai mode
+           const initialRows = createInitialRowsForMode(mode);
+           setRows(initialRows);
         }
       }
-      
-      if (showToast && successCount > 0) {
-        showToast(`${successCount} item berhasil disimpan ke Proses Pesanan`, 'success');
-      }
-      
-      if (successCount === rowsToSave.length) {
-        // Reset with empty rows
-        const initialRows = createInitialRowsForMode(mode);
-        setRows(initialRows);
-      }
-      
-      if (onRefresh) onRefresh();
-      setRefreshTableTrigger(prev => prev + 1);
-    } else {
-      // Barang Masuk: existing logic
-      const results = await Promise.all(rowsToSave.map(row => saveRow(row)));
-      const successCount = results.filter(r => r).length;
-      
-      if (showToast && successCount > 0) showToast(`${successCount} item berhasil diproses`, 'success');
-      if (successCount > 0) {
-          if (onRefresh) onRefresh();
-          setRefreshTableTrigger(prev => prev + 1); 
-      }
-      
-      const remainingRows = rows.length - successCount;
-      if (remainingRows === 0) {
-         // Reset dengan rows kosong baru sesuai mode
-         const initialRows = createInitialRowsForMode(mode);
-         setRows(initialRows);
-      }
+    } finally {
+      setIsSavingAll(false);
+      saveAllInFlightRef.current = false;
     }
-    
-    setIsSavingAll(false);
   };
 
   const validRowsCount = rows.filter(r => checkIsRowComplete(r)).length;
