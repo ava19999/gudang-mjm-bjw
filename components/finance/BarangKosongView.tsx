@@ -81,6 +81,26 @@ interface SupplierOrderItem {
   harga_total: number;
 }
 
+interface ImporterCatalogItem {
+  part_number: string;
+  nama_barang: string;
+  brand?: string;
+  application?: string;
+  stock_mjm: number;
+  stock_bjw: number;
+  cheapest_price: number;
+}
+
+interface ImporterPriceHistoryRow {
+  id: string;
+  part_number: string;
+  supplier: string;
+  store: 'MJM' | 'BJW';
+  harga_satuan: number;
+  tempo: string;
+  created_at: string;
+}
+
 // Toast Component
 const Toast: React.FC<{ msg: string; type: 'success' | 'error'; onClose: () => void }> = ({ msg, type, onClose }) => (
   <div className={`fixed top-4 left-1/2 -translate-x-1/2 z-[100] px-6 py-3 rounded-full shadow-xl flex items-center text-white text-sm font-bold animate-in fade-in slide-in-from-top-2 ${type === 'success' ? 'bg-green-600' : 'bg-red-600'}`}>
@@ -104,6 +124,25 @@ const formatDate = (dateStr: string) => {
 const isUnknownSupplierLabel = (supplier: string) => {
   const normalized = (supplier || '').toUpperCase();
   return normalized.includes('TANPA SUPPLIER') || normalized.includes('UNKNOWN');
+};
+
+const normalizeSupplierName = (supplier: string): string => {
+  return (supplier || '').trim().replace(/\s+/g, ' ').toUpperCase();
+};
+
+const isReturRow = (row: Record<string, any>): boolean => {
+  const fields = ['status', 'keterangan', 'catatan', 'note', 'notes', 'remark', 'tipe', 'jenis'];
+  return fields.some((field) => {
+    const value = row?.[field];
+    if (value === null || value === undefined) return false;
+    const text = String(value).toLowerCase();
+    return (
+      text.includes('retur') ||
+      text.includes('return') ||
+      text.includes('batal') ||
+      text.includes('cancel')
+    );
+  });
 };
 
 const getFirstString = (row: Record<string, any>, keys: string[], fallback = ''): string => {
@@ -1388,6 +1427,445 @@ const SupplierCard: React.FC<{
   );
 };
 
+// Importer Catalog Modal
+const ImporterCatalogModal: React.FC<{
+  importerName: string;
+  onImporterNameChange: (value: string) => void;
+  suggestions: string[];
+  items: ImporterCatalogItem[];
+  loading: boolean;
+  error: string | null;
+  onRefresh: () => void;
+  onClose: () => void;
+  onAddSelected: (importerName: string, items: ImporterCatalogItem[]) => Promise<void> | void;
+}> = ({
+  importerName,
+  onImporterNameChange,
+  suggestions,
+  items,
+  loading,
+  error,
+  onRefresh,
+  onClose,
+  onAddSelected
+}) => {
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedByPartNumber, setSelectedByPartNumber] = useState<Record<string, boolean>>({});
+  const [sortKey, setSortKey] = useState<'part_number' | 'nama_barang' | 'stock_mjm' | 'stock_bjw' | 'cheapest_price'>('cheapest_price');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+  const [historyTarget, setHistoryTarget] = useState<ImporterCatalogItem | null>(null);
+  const [priceHistoryRows, setPriceHistoryRows] = useState<ImporterPriceHistoryRow[]>([]);
+  const [priceHistoryLoading, setPriceHistoryLoading] = useState(false);
+  const [priceHistoryError, setPriceHistoryError] = useState<string | null>(null);
+
+  const filteredItems = useMemo(() => {
+    const query = searchTerm.trim().toLowerCase();
+    const source = [...items];
+    if (!query) return source;
+
+    return source.filter((item) =>
+      item.part_number.toLowerCase().includes(query) ||
+      item.nama_barang.toLowerCase().includes(query) ||
+      (item.brand || '').toLowerCase().includes(query) ||
+      (item.application || '').toLowerCase().includes(query)
+    );
+  }, [items, searchTerm]);
+
+  const sortedItems = useMemo(() => {
+    const source = [...filteredItems];
+    source.sort((a, b) => {
+      let compare = 0;
+      if (sortKey === 'part_number') compare = a.part_number.localeCompare(b.part_number);
+      if (sortKey === 'nama_barang') compare = a.nama_barang.localeCompare(b.nama_barang);
+      if (sortKey === 'stock_mjm') compare = a.stock_mjm - b.stock_mjm;
+      if (sortKey === 'stock_bjw') compare = a.stock_bjw - b.stock_bjw;
+      if (sortKey === 'cheapest_price') {
+        const aPrice = a.cheapest_price || Number.MAX_SAFE_INTEGER;
+        const bPrice = b.cheapest_price || Number.MAX_SAFE_INTEGER;
+        compare = aPrice - bPrice;
+      }
+
+      if (compare === 0) {
+        compare = a.part_number.localeCompare(b.part_number);
+      }
+
+      return sortDirection === 'asc' ? compare : -compare;
+    });
+    return source;
+  }, [filteredItems, sortDirection, sortKey]);
+
+  const selectedItems = useMemo(
+    () => sortedItems.filter((item) => selectedByPartNumber[item.part_number]),
+    [sortedItems, selectedByPartNumber]
+  );
+  const selectedCount = selectedItems.length;
+  const selectedTotal = selectedItems.reduce((sum, item) => sum + item.cheapest_price, 0);
+  const allFilteredSelected = sortedItems.length > 0 && selectedCount === sortedItems.length;
+
+  const toggleSort = (key: 'part_number' | 'nama_barang' | 'stock_mjm' | 'stock_bjw' | 'cheapest_price') => {
+    if (sortKey === key) {
+      setSortDirection(prev => (prev === 'asc' ? 'desc' : 'asc'));
+      return;
+    }
+    setSortKey(key);
+    setSortDirection('asc');
+  };
+
+  const toggleSelectAllFiltered = () => {
+    if (allFilteredSelected) {
+      setSelectedByPartNumber((prev) => {
+        const next = { ...prev };
+        sortedItems.forEach((item) => {
+          delete next[item.part_number];
+        });
+        return next;
+      });
+      return;
+    }
+
+    setSelectedByPartNumber((prev) => {
+      const next = { ...prev };
+      sortedItems.forEach((item) => {
+        next[item.part_number] = true;
+      });
+      return next;
+    });
+  };
+
+  const fetchPriceHistory = async (item: ImporterCatalogItem) => {
+    setHistoryTarget(item);
+    setPriceHistoryRows([]);
+    setPriceHistoryError(null);
+    setPriceHistoryLoading(true);
+
+    try {
+      const [{ data: mjmData, error: mjmError }, { data: bjwData, error: bjwError }] = await Promise.all([
+        supabase
+          .from('barang_masuk_mjm')
+          .select('*')
+          .eq('part_number', item.part_number)
+          .order('created_at', { ascending: false })
+          .limit(200),
+        supabase
+          .from('barang_masuk_bjw')
+          .select('*')
+          .eq('part_number', item.part_number)
+          .order('created_at', { ascending: false })
+          .limit(200)
+      ]);
+
+      if (mjmError) throw mjmError;
+      if (bjwError) throw bjwError;
+
+      const mapRows = (rows: Record<string, any>[], store: 'MJM' | 'BJW'): ImporterPriceHistoryRow[] =>
+        rows
+          .filter((row) => !isReturRow(row))
+          .map((row, idx) => {
+            const supplier = getFirstString(row, ['customer', 'supplier', 'importir'], '-');
+            const price = getFirstNumber(row, ['harga_satuan', 'price', 'harga', 'unit_price', 'modal'], 0);
+            const tempo = getFirstString(row, ['tempo'], '-');
+            const createdAt = getFirstString(row, ['created_at', 'tanggal'], '');
+
+            return {
+              id: `${store}-${row.id || idx}-${createdAt || 'nodate'}`,
+              part_number: item.part_number,
+              supplier,
+              store,
+              harga_satuan: price,
+              tempo,
+              created_at: createdAt
+            };
+          })
+          .filter((row) => row.harga_satuan > 0);
+
+      const combined = [...mapRows((mjmData || []) as Record<string, any>[], 'MJM'), ...mapRows((bjwData || []) as Record<string, any>[], 'BJW')]
+        .sort((a, b) => {
+          const aTime = a.created_at ? new Date(a.created_at).getTime() : 0;
+          const bTime = b.created_at ? new Date(b.created_at).getTime() : 0;
+          return bTime - aTime;
+        });
+
+      setPriceHistoryRows(combined);
+    } catch (error: any) {
+      console.error('Error fetching importer price history:', error);
+      setPriceHistoryError(error.message || 'Gagal memuat history harga');
+    } finally {
+      setPriceHistoryLoading(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[120] bg-black/70 flex items-center justify-center p-4">
+      <div className="w-full max-w-7xl bg-gray-900 border border-gray-700 rounded-xl overflow-hidden max-h-[90vh] flex flex-col">
+        <div className="p-4 border-b border-gray-700 flex items-center justify-between gap-3">
+          <div>
+            <h3 className="text-lg font-bold text-white">Menu Importir Baru</h3>
+            <p className="text-xs text-gray-400">List barang dari base_mjm + base_bjw dengan modal termurah (exclude retur)</p>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-2 bg-gray-800 hover:bg-gray-700 rounded-lg text-gray-300"
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="p-4 border-b border-gray-700 bg-gray-800/60 space-y-3">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div className="md:col-span-2">
+              <label className="text-xs text-gray-400 block mb-1">Nama Importir Tujuan</label>
+              <input
+                type="text"
+                list="importer-suggestion-list"
+                value={importerName}
+                onChange={(e) => onImporterNameChange(e.target.value)}
+                placeholder="Contoh: RMX RADJA PADANG"
+                className="w-full px-3 py-2 bg-gray-900 border border-gray-600 rounded-lg text-gray-100 focus:border-blue-500 outline-none"
+              />
+              <datalist id="importer-suggestion-list">
+                {suggestions.map((supplier) => (
+                  <option key={supplier} value={supplier} />
+                ))}
+              </datalist>
+            </div>
+            <div>
+              <label className="text-xs text-gray-400 block mb-1">Cari Barang</label>
+              <input
+                type="text"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="Part number / nama barang..."
+                className="w-full px-3 py-2 bg-gray-900 border border-gray-600 rounded-lg text-gray-100 focus:border-blue-500 outline-none"
+              />
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={toggleSelectAllFiltered}
+              className="px-3 py-2 bg-gray-700 hover:bg-gray-600 text-gray-100 rounded-lg text-xs font-bold"
+            >
+              {allFilteredSelected ? 'Batal Pilih Semua' : 'Pilih Semua Hasil Filter'}
+            </button>
+            <button
+              onClick={onRefresh}
+              disabled={loading}
+              className="px-3 py-2 bg-gray-700 hover:bg-gray-600 text-gray-100 rounded-lg text-xs font-bold disabled:opacity-60"
+            >
+              {loading ? 'Memuat...' : 'Refresh Data'}
+            </button>
+            <div className="text-xs text-emerald-300">
+              Terpilih {selectedCount} item, estimasi modal {formatCurrency(selectedTotal)}
+            </div>
+            <button
+              onClick={() => onAddSelected(importerName, selectedItems)}
+              disabled={!importerName.trim() || selectedCount === 0}
+              className="ml-auto px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold disabled:opacity-50"
+            >
+              Tambah ke Keranjang Importir
+            </button>
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-auto">
+          {loading ? (
+            <div className="h-full flex items-center justify-center text-gray-400">
+              <Loader2 size={22} className="animate-spin mr-2" />
+              Memuat data barang...
+            </div>
+          ) : error ? (
+            <div className="h-full flex items-center justify-center text-red-400 text-sm px-4 text-center">
+              {error}
+            </div>
+          ) : sortedItems.length === 0 ? (
+            <div className="h-full flex items-center justify-center text-gray-400 text-sm">
+              Tidak ada barang ditemukan.
+            </div>
+          ) : (
+            <table className="w-full min-w-[980px]">
+              <thead className="sticky top-0 bg-gray-900 border-b border-gray-700">
+                <tr className="text-xs text-gray-400 uppercase">
+                  <th className="px-3 py-2 text-center">Pilih</th>
+                  <th className="px-3 py-2 text-left">
+                    <button
+                      onClick={() => toggleSort('part_number')}
+                      className="inline-flex items-center gap-1 hover:text-white transition-colors"
+                    >
+                      Part Number
+                      {sortKey === 'part_number' && (sortDirection === 'asc' ? <ChevronUp size={12} /> : <ChevronDown size={12} />)}
+                    </button>
+                  </th>
+                  <th className="px-3 py-2 text-left">
+                    <button
+                      onClick={() => toggleSort('nama_barang')}
+                      className="inline-flex items-center gap-1 hover:text-white transition-colors"
+                    >
+                      Nama / Brand / Aplikasi
+                      {sortKey === 'nama_barang' && (sortDirection === 'asc' ? <ChevronUp size={12} /> : <ChevronDown size={12} />)}
+                    </button>
+                  </th>
+                  <th className="px-3 py-2 text-center">
+                    <button
+                      onClick={() => toggleSort('stock_mjm')}
+                      className="inline-flex items-center gap-1 hover:text-white transition-colors"
+                    >
+                      Stok MJM
+                      {sortKey === 'stock_mjm' && (sortDirection === 'asc' ? <ChevronUp size={12} /> : <ChevronDown size={12} />)}
+                    </button>
+                  </th>
+                  <th className="px-3 py-2 text-center">
+                    <button
+                      onClick={() => toggleSort('stock_bjw')}
+                      className="inline-flex items-center gap-1 hover:text-white transition-colors"
+                    >
+                      Stok BJW
+                      {sortKey === 'stock_bjw' && (sortDirection === 'asc' ? <ChevronUp size={12} /> : <ChevronDown size={12} />)}
+                    </button>
+                  </th>
+                  <th className="px-3 py-2 text-right">
+                    <button
+                      onClick={() => toggleSort('cheapest_price')}
+                      className="inline-flex items-center gap-1 hover:text-white transition-colors"
+                    >
+                      Modal Termurah
+                      {sortKey === 'cheapest_price' && (sortDirection === 'asc' ? <ChevronUp size={12} /> : <ChevronDown size={12} />)}
+                    </button>
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-800">
+                {sortedItems.map((item) => (
+                  <tr key={item.part_number} className="hover:bg-gray-800/50">
+                    <td className="px-3 py-2 text-center">
+                      <input
+                        type="checkbox"
+                        checked={!!selectedByPartNumber[item.part_number]}
+                        onChange={(e) => {
+                          const checked = e.target.checked;
+                          setSelectedByPartNumber((prev) => {
+                            if (checked) return { ...prev, [item.part_number]: true };
+                            const next = { ...prev };
+                            delete next[item.part_number];
+                            return next;
+                          });
+                        }}
+                        className="w-4 h-4 accent-blue-500 cursor-pointer"
+                      />
+                    </td>
+                    <td className="px-3 py-2">
+                      <span className="font-mono text-blue-400 text-sm">{item.part_number}</span>
+                    </td>
+                    <td className="px-3 py-2">
+                      <div className="text-sm text-gray-100 font-semibold">{item.nama_barang}</div>
+                      <div className="text-xs text-gray-400">
+                        {item.brand && item.brand !== '-' ? `Brand: ${item.brand}` : ''}
+                        {item.brand && item.brand !== '-' && item.application && item.application !== '-' ? ' | ' : ''}
+                        {item.application && item.application !== '-' ? `App: ${item.application}` : ''}
+                      </div>
+                    </td>
+                    <td className="px-3 py-2 text-center">
+                      <span className="px-2 py-1 rounded text-xs font-bold bg-blue-900/40 text-blue-300">
+                        {item.stock_mjm}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 text-center">
+                      <span className="px-2 py-1 rounded text-xs font-bold bg-purple-900/40 text-purple-300">
+                        {item.stock_bjw}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      <div className="inline-flex items-center gap-2">
+                        <span className="text-sm font-bold text-emerald-300">
+                          {item.cheapest_price > 0 ? formatCurrency(item.cheapest_price) : '-'}
+                        </span>
+                        <button
+                          onClick={() => fetchPriceHistory(item)}
+                          className="p-1 rounded bg-gray-800 hover:bg-blue-600 text-gray-400 hover:text-white transition-colors"
+                          title="Lihat history harga"
+                        >
+                          <History size={13} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        {historyTarget && (
+          <div className="fixed inset-0 z-[130] bg-black/70 flex items-center justify-center p-4">
+            <div className="w-full max-w-5xl max-h-[85vh] overflow-hidden bg-gray-900 border border-gray-700 rounded-xl flex flex-col">
+              <div className="p-4 border-b border-gray-700 flex items-center justify-between">
+                <div>
+                  <h4 className="text-base font-bold text-white flex items-center gap-2">
+                    <History size={16} className="text-blue-400" />
+                    History Harga
+                  </h4>
+                  <p className="text-xs text-gray-400 mt-1">
+                    <span className="font-mono text-blue-400">{historyTarget.part_number}</span> - {historyTarget.nama_barang}
+                  </p>
+                </div>
+                <button
+                  onClick={() => setHistoryTarget(null)}
+                  className="p-2 bg-gray-800 hover:bg-gray-700 rounded-lg text-gray-300"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-auto p-4">
+                {priceHistoryLoading ? (
+                  <div className="py-10 flex items-center justify-center text-gray-400">
+                    <Loader2 size={20} className="animate-spin mr-2" />
+                    Memuat history harga...
+                  </div>
+                ) : priceHistoryError ? (
+                  <div className="py-10 text-center text-red-400 text-sm">
+                    {priceHistoryError}
+                  </div>
+                ) : priceHistoryRows.length === 0 ? (
+                  <div className="py-10 text-center text-gray-400 text-sm">
+                    Tidak ada history harga.
+                  </div>
+                ) : (
+                  <table className="w-full">
+                    <thead className="sticky top-0 bg-gray-900 border-b border-gray-700">
+                      <tr className="text-xs text-gray-400 uppercase">
+                        <th className="px-3 py-2 text-left">Tanggal</th>
+                        <th className="px-3 py-2 text-center">Toko</th>
+                        <th className="px-3 py-2 text-left">Supplier</th>
+                        <th className="px-3 py-2 text-right">Harga</th>
+                        <th className="px-3 py-2 text-center">Tempo</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-800">
+                      {priceHistoryRows.map((row) => (
+                        <tr key={row.id} className="hover:bg-gray-800/40">
+                          <td className="px-3 py-2 text-sm text-gray-300">{formatDate(row.created_at)}</td>
+                          <td className="px-3 py-2 text-center">
+                            <span className={`px-2 py-0.5 rounded text-xs font-bold ${row.store === 'MJM' ? 'bg-blue-900/40 text-blue-300' : 'bg-purple-900/40 text-purple-300'}`}>
+                              {row.store}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2 text-sm text-gray-200">{row.supplier || '-'}</td>
+                          <td className="px-3 py-2 text-right text-sm font-bold text-emerald-300">{formatCurrency(row.harga_satuan || 0)}</td>
+                          <td className="px-3 py-2 text-center text-xs text-gray-300">{row.tempo || '-'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 // Cart Sidebar Component
 const CartSidebar: React.FC<{
   cart: CartItem[];
@@ -1539,6 +2017,11 @@ export const BarangKosongView: React.FC = () => {
   const [savingOrder, setSavingOrder] = useState(false);
   const [currentPONumber, setCurrentPONumber] = useState('');
   const [currentSupplier, setCurrentSupplier] = useState<string>('');
+  const [showImporterModal, setShowImporterModal] = useState(false);
+  const [importerNameDraft, setImporterNameDraft] = useState('RMX RADJA PADANG');
+  const [importerCatalogItems, setImporterCatalogItems] = useState<ImporterCatalogItem[]>([]);
+  const [importerCatalogLoading, setImporterCatalogLoading] = useState(false);
+  const [importerCatalogError, setImporterCatalogError] = useState<string | null>(null);
   
   // Tempo values for filtering
   const TEMPO_VALUES = ['3 BLN', '2 BLN', '1 BLN'];
@@ -1883,6 +2366,114 @@ export const BarangKosongView: React.FC = () => {
   useEffect(() => {
     fetchData();
   }, [selectedStore, activeTab]);
+
+  const loadImporterCatalog = async () => {
+    setImporterCatalogLoading(true);
+    setImporterCatalogError(null);
+
+    try {
+      const [
+        { data: baseMJMData, error: baseMJMError },
+        { data: baseBJWData, error: baseBJWError },
+        { data: masukMJMData, error: masukMJMError },
+        { data: masukBJWData, error: masukBJWError }
+      ] = await Promise.all([
+        supabase.from('base_mjm').select('part_number, name, quantity, brand, application'),
+        supabase.from('base_bjw').select('part_number, name, quantity, brand, application'),
+        supabase.from('barang_masuk_mjm').select('*'),
+        supabase.from('barang_masuk_bjw').select('*')
+      ]);
+
+      if (baseMJMError) throw baseMJMError;
+      if (baseBJWError) throw baseBJWError;
+      if (masukMJMError) throw masukMJMError;
+      if (masukBJWError) throw masukBJWError;
+
+      const normalizePN = (pn: string): string => pn?.trim().toUpperCase().replace(/\s+/g, ' ') || '';
+      const catalogMap = new Map<string, ImporterCatalogItem>();
+
+      const upsertBaseItem = (
+        row: Record<string, any>,
+        source: 'mjm' | 'bjw'
+      ) => {
+        const normalizedPN = normalizePN(String(row?.part_number || ''));
+        if (!normalizedPN) return;
+
+        const existing = catalogMap.get(normalizedPN);
+        const name = (row?.name || '').trim() || existing?.nama_barang || '-';
+        const brand = (row?.brand || '').trim() || existing?.brand || '-';
+        const application = (row?.application || '').trim() || existing?.application || '-';
+        const qty = Number(row?.quantity) || 0;
+
+        if (!existing) {
+          catalogMap.set(normalizedPN, {
+            part_number: normalizedPN,
+            nama_barang: name,
+            brand,
+            application,
+            stock_mjm: source === 'mjm' ? qty : 0,
+            stock_bjw: source === 'bjw' ? qty : 0,
+            cheapest_price: 0
+          });
+          return;
+        }
+
+        existing.nama_barang = name || existing.nama_barang;
+        existing.brand = brand || existing.brand;
+        existing.application = application || existing.application;
+        if (source === 'mjm') existing.stock_mjm = qty;
+        if (source === 'bjw') existing.stock_bjw = qty;
+      };
+
+      (baseMJMData || []).forEach((row: any) => upsertBaseItem(row, 'mjm'));
+      (baseBJWData || []).forEach((row: any) => upsertBaseItem(row, 'bjw'));
+
+      const cheapestMap = new Map<string, number>();
+      const absorbCheapestPrice = (rows: Record<string, any>[]) => {
+        rows.forEach((row) => {
+          if (isReturRow(row)) return;
+
+          const partNumber = getFirstString(row, ['part_number', 'partNumber', 'pn', 'sku']).toUpperCase();
+          if (!partNumber) return;
+
+          const normalizedPN = normalizePN(partNumber);
+          if (!catalogMap.has(normalizedPN)) return;
+
+          const price = getFirstNumber(row, ['harga_satuan', 'price', 'harga', 'unit_price', 'modal'], 0);
+          if (!Number.isFinite(price) || price <= 0) return;
+
+          const existing = cheapestMap.get(normalizedPN);
+          if (existing === undefined || price < existing) {
+            cheapestMap.set(normalizedPN, price);
+          }
+        });
+      };
+
+      absorbCheapestPrice((masukMJMData || []) as Record<string, any>[]);
+      absorbCheapestPrice((masukBJWData || []) as Record<string, any>[]);
+
+      const items = Array.from(catalogMap.entries())
+        .map(([normalizedPN, item]) => ({
+          ...item,
+          part_number: normalizedPN,
+          cheapest_price: cheapestMap.get(normalizedPN) || 0
+        }))
+        .sort((a, b) => a.part_number.localeCompare(b.part_number));
+
+      setImporterCatalogItems(items);
+    } catch (error: any) {
+      console.error('Error loading importer catalog:', error);
+      setImporterCatalogError(`Gagal memuat menu importir baru: ${error.message || 'Unknown error'}`);
+      setImporterCatalogItems([]);
+    } finally {
+      setImporterCatalogLoading(false);
+    }
+  };
+
+  const openImporterModal = () => {
+    setShowImporterModal(true);
+    loadImporterCatalog();
+  };
   
   const loadCartFromOrderSupplier = async (): Promise<CartItem[]> => {
     try {
@@ -2211,6 +2802,79 @@ export const BarangKosongView: React.FC = () => {
     if (error) throw error;
   };
 
+  const addImporterCatalogItemsToCart = async (
+    importerNameRaw: string,
+    items: ImporterCatalogItem[]
+  ) => {
+    const importerName = normalizeSupplierName(importerNameRaw);
+    if (!importerName) {
+      setToast({ msg: 'Nama importir tujuan wajib diisi', type: 'error' });
+      return;
+    }
+    if (items.length === 0) {
+      setToast({ msg: 'Pilih minimal 1 barang', type: 'error' });
+      return;
+    }
+
+    const targetStore = (selectedStore || 'mjm').toLowerCase();
+    const nextCart = [...cart];
+    const upsertPayloadMap = new Map<string, CartItem>();
+
+    items.forEach((item) => {
+      const existingIndex = nextCart.findIndex((cartItem) =>
+        cartItem.part_number === item.part_number &&
+        cartItem.supplier.toLowerCase() === importerName.toLowerCase() &&
+        (cartItem.store || targetStore).toLowerCase() === targetStore
+      );
+
+      if (existingIndex >= 0) {
+        const updatedItem: CartItem = {
+          ...nextCart[existingIndex],
+          qty: nextCart[existingIndex].qty + 1
+        };
+        nextCart[existingIndex] = updatedItem;
+        upsertPayloadMap.set(
+          `${updatedItem.part_number}::${updatedItem.supplier}::${targetStore}`,
+          updatedItem
+        );
+        return;
+      }
+
+      const newCartItem: CartItem = {
+        part_number: item.part_number,
+        nama_barang: item.nama_barang,
+        supplier: importerName,
+        qty: 1,
+        price: item.cheapest_price || 0,
+        tempo: activeTab === 'TEMPO' ? 'TEMPO' : 'CASH',
+        store: targetStore,
+        brand: item.brand,
+        application: item.application
+      };
+
+      nextCart.push(newCartItem);
+      upsertPayloadMap.set(
+        `${newCartItem.part_number}::${newCartItem.supplier}::${targetStore}`,
+        newCartItem
+      );
+    });
+
+    setCart(nextCart);
+    setShowCart(true);
+
+    try {
+      await Promise.all(
+        Array.from(upsertPayloadMap.values()).map((cartItem) => upsertOrderSupplierCartItem(cartItem))
+      );
+      setToast({ msg: `${items.length} barang masuk ke keranjang ${importerName}`, type: 'success' });
+      setImporterNameDraft(importerName);
+      setShowImporterModal(false);
+    } catch (error: any) {
+      console.error('Error syncing importer catalog cart to order_supplier:', error);
+      setToast({ msg: `Gagal simpan ke order_supplier: ${error.message}`, type: 'error' });
+    }
+  };
+
   // Cart functions
   const addToCart = async (item: SupplierItem, supplier: string) => {
     const targetStore = (selectedStore || 'mjm').toLowerCase();
@@ -2502,6 +3166,14 @@ export const BarangKosongView: React.FC = () => {
               <span className="hidden md:inline">Riwayat PO</span>
             </button>
             <button
+              onClick={openImporterModal}
+              className="flex items-center gap-1 px-3 py-2 bg-blue-600/20 hover:bg-blue-600 text-blue-300 hover:text-white rounded-lg transition-colors text-sm font-bold"
+              title="Menu Importir Baru"
+            >
+              <Plus size={18} />
+              <span className="hidden md:inline">Importir Baru</span>
+            </button>
+            <button
               onClick={() => setShowCart(!showCart)}
               className="relative p-2 bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors"
             >
@@ -2717,6 +3389,21 @@ export const BarangKosongView: React.FC = () => {
         )}
       </div>
       
+      {/* Importer Catalog Modal */}
+      {showImporterModal && (
+        <ImporterCatalogModal
+          importerName={importerNameDraft}
+          onImporterNameChange={setImporterNameDraft}
+          suggestions={knownSuppliers}
+          items={importerCatalogItems}
+          loading={importerCatalogLoading}
+          error={importerCatalogError}
+          onRefresh={loadImporterCatalog}
+          onClose={() => setShowImporterModal(false)}
+          onAddSelected={addImporterCatalogItemsToCart}
+        />
+      )}
+
       {/* Purchase History Modal */}
       {historyItem && (
         <PurchaseHistoryModal
