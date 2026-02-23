@@ -36,6 +36,17 @@ interface ResellerStats {
 
 export const ResellerView: React.FC<ResellerViewProps> = ({ onRefresh, refreshTrigger }) => {
   const { selectedStore } = useStore();
+
+  const getEffectiveUnitPrice = (trx: Pick<ResellerTransaction, 'harga_satuan' | 'harga_total' | 'qty_keluar'>): number => {
+    const unitPrice = Number(trx.harga_satuan) || 0;
+    if (unitPrice > 0) return unitPrice;
+
+    const qty = Number(trx.qty_keluar) || 0;
+    const total = Number(trx.harga_total) || 0;
+    if (qty <= 0 || total <= 0) return 0;
+
+    return Math.round(total / qty);
+  };
   
   // State
   const [transactions, setTransactions] = useState<ResellerTransaction[]>([]);
@@ -95,20 +106,30 @@ export const ResellerView: React.FC<ResellerViewProps> = ({ onRefresh, refreshTr
           }
           
           // Add store indicator to each transaction with safe mapping
-          return (data || []).map(t => ({
-            id: t.id || '',
-            created_at: t.created_at || '',
-            customer: t.customer || '',
-            part_number: t.part_number || '',
-            name: t.name || '',
-            qty_keluar: t.qty_keluar || 0,
-            harga_satuan: t.harga_satuan || 0,
-            harga_total: t.harga_total || 0,
-            resi: t.resi || '',
-            ecommerce: t.ecommerce || '',
-            kode_toko: t.kode_toko || '',
-            source_store: storeName
-          }));
+          return (data || []).map(t => {
+            const qtyKeluar = Number(t.qty_keluar) || 0;
+            const hargaTotal = Number(t.harga_total) || 0;
+            const hargaSatuan = getEffectiveUnitPrice({
+              qty_keluar: qtyKeluar,
+              harga_satuan: Number(t.harga_satuan) || 0,
+              harga_total: hargaTotal
+            });
+
+            return {
+              id: t.id || '',
+              created_at: t.created_at || '',
+              customer: t.customer || '',
+              part_number: t.part_number || '',
+              name: t.name || '',
+              qty_keluar: qtyKeluar,
+              harga_satuan: hargaSatuan,
+              harga_total: hargaTotal,
+              resi: t.resi || '',
+              ecommerce: t.ecommerce || '',
+              kode_toko: t.kode_toko || '',
+              source_store: storeName
+            };
+          });
         } catch (err) {
           console.error(`Exception fetching from ${table}:`, err);
           return [];
@@ -395,7 +416,7 @@ export const ResellerView: React.FC<ResellerViewProps> = ({ onRefresh, refreshTr
                   <td>${t.customer || '-'}</td>
                   <td>${t.part_number || '-'}</td>
                   <td class="text-center">${t.qty_keluar}</td>
-                  <td class="text-right">Rp ${(t.harga_satuan || 0).toLocaleString('id-ID')}</td>
+                  <td class="text-right">Rp ${getEffectiveUnitPrice(t).toLocaleString('id-ID')}</td>
                   <td class="text-right">Rp ${(t.harga_total || 0).toLocaleString('id-ID')}</td>
                   <td>${t.resi || '-'}</td>
                 </tr>
@@ -824,7 +845,7 @@ export const ResellerView: React.FC<ResellerViewProps> = ({ onRefresh, refreshTr
                         <td className="py-3 px-4 text-gray-300 font-mono text-xs">{trx.part_number}</td>
                         <td className="py-3 px-4 text-white max-w-[200px] truncate">{trx.name}</td>
                         <td className="py-3 px-4 text-right text-gray-300 font-medium">{trx.qty_keluar}</td>
-                        <td className="py-3 px-4 text-right text-yellow-400">{formatCompactNumber(trx.harga_satuan)}</td>
+                        <td className="py-3 px-4 text-right text-yellow-400">{formatCompactNumber(getEffectiveUnitPrice(trx))}</td>
                         <td className="py-3 px-4 text-right text-green-400 font-bold">{formatCompactNumber(trx.harga_total)}</td>
                         <td className="py-3 px-4 text-gray-400 text-xs">{trx.resi || '-'}</td>
                       </tr>

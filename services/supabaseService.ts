@@ -1787,6 +1787,158 @@ export const updateSoldItemDate = async (
   }
 };
 
+// 4.3 UPDATE SOLD ITEM QTY + ADJUST STOCK
+export const updateSoldItemQty = async (
+  itemId: string,
+  newQtyKeluar: number,
+  store: string | null
+): Promise<{ success: boolean; msg: string; delta?: number }> => {
+  const outTable = store === 'mjm' ? 'barang_keluar_mjm' : (store === 'bjw' ? 'barang_keluar_bjw' : null);
+  const stockTable = store === 'mjm' ? 'base_mjm' : (store === 'bjw' ? 'base_bjw' : null);
+  if (!outTable || !stockTable) return { success: false, msg: 'Toko tidak valid' };
+
+  const targetQty = Number(newQtyKeluar);
+  if (!Number.isInteger(targetQty) || targetQty <= 0) {
+    return { success: false, msg: 'Qty harus bilangan bulat lebih dari 0' };
+  }
+
+  try {
+    // 1) Ambil data item terjual saat ini
+    const { data: soldItem, error: soldError } = await supabase
+      .from(outTable)
+      .select('id, part_number, qty_keluar, harga_total, tempo')
+      .eq('id', itemId)
+      .single();
+
+    if (soldError || !soldItem) {
+      return { success: false, msg: 'Data item terjual tidak ditemukan' };
+    }
+
+    const partNumber = (soldItem.part_number || '').trim();
+    if (!partNumber) {
+      return { success: false, msg: 'Part number tidak valid pada item terjual' };
+    }
+
+    const currentQty = Number(soldItem.qty_keluar || 0);
+    const delta = targetQty - currentQty;
+
+    if (delta === 0) {
+      return { success: true, msg: 'Qty tidak berubah', delta: 0 };
+    }
+
+    const isKilatItem = normalizeTempo(soldItem.tempo) === 'KILAT';
+    const shouldAdjustStock = !isKilatItem;
+
+    // 2) Ambil stok saat ini di base table
+    let stockItem: { part_number: string; quantity: number } | null = null;
+    let stockPartNumber = partNumber;
+    let stockQty = 0;
+
+    if (shouldAdjustStock) {
+      const { data: stockExact, error: stockExactErr } = await supabase
+        .from(stockTable)
+        .select('part_number, quantity')
+        .eq('part_number', partNumber)
+        .maybeSingle();
+
+      if (stockExactErr) {
+        return { success: false, msg: 'Gagal mengambil data stok: ' + stockExactErr.message };
+      }
+
+      if (stockExact) {
+        stockItem = stockExact;
+      } else {
+        const { data: stockIlike, error: stockIlikeErr } = await supabase
+          .from(stockTable)
+          .select('part_number, quantity')
+          .ilike('part_number', partNumber)
+          .maybeSingle();
+
+        if (stockIlikeErr) {
+          return { success: false, msg: 'Gagal mengambil data stok: ' + stockIlikeErr.message };
+        }
+        stockItem = stockIlike || null;
+      }
+
+      if (!stockItem) {
+        return { success: false, msg: `Part number ${partNumber} tidak ditemukan di stok` };
+      }
+
+      stockPartNumber = stockItem.part_number || partNumber;
+      stockQty = Number(stockItem.quantity || 0);
+
+      // 3) Hitung stok baru berdasarkan delta qty
+      // delta > 0: qty jual naik -> stok berkurang
+      // delta < 0: qty jual turun -> stok bertambah
+      const absDelta = Math.abs(delta);
+      const newStockQty = delta > 0 ? stockQty - absDelta : stockQty + absDelta;
+
+      if (delta > 0 && stockQty < absDelta) {
+        return { success: false, msg: `Stok tidak cukup. Sisa stok ${stockQty}, butuh ${absDelta}` };
+      }
+
+      const { error: stockUpdateErr } = await supabase
+        .from(stockTable)
+        .update({ quantity: newStockQty })
+        .eq('part_number', stockPartNumber);
+
+      if (stockUpdateErr) {
+        return { success: false, msg: 'Gagal update stok: ' + stockUpdateErr.message };
+      }
+
+      stockQty = newStockQty;
+    }
+
+    // 4) Update qty pada barang_keluar
+    const hargaTotalNow = Number(soldItem.harga_total || 0);
+    const newHargaSatuan = targetQty > 0 ? Math.round(hargaTotalNow / targetQty) : 0;
+    const soldPayload: any = {
+      qty_keluar: targetQty,
+      harga_satuan: newHargaSatuan
+    };
+
+    if (shouldAdjustStock) {
+      soldPayload.stock_ahir = stockQty;
+    }
+
+    const { error: soldUpdateErr } = await supabase
+      .from(outTable)
+      .update(soldPayload)
+      .eq('id', itemId);
+
+    if (soldUpdateErr) {
+      // Rollback stok jika update barang_keluar gagal
+      if (shouldAdjustStock) {
+        const rollbackQty = Number(stockItem?.quantity || 0);
+        await supabase
+          .from(stockTable)
+          .update({ quantity: rollbackQty })
+          .eq('part_number', stockPartNumber);
+      }
+      return { success: false, msg: 'Gagal update qty terjual: ' + soldUpdateErr.message };
+    }
+
+    if (isKilatItem) {
+      return {
+        success: true,
+        msg: `Qty berhasil diupdate ke ${targetQty} (item KILAT, stok base tidak diubah)`,
+        delta
+      };
+    }
+
+    const absDelta = Math.abs(delta);
+    const stockAction = delta > 0 ? `berkurang ${absDelta}` : `bertambah ${absDelta}`;
+    return {
+      success: true,
+      msg: `Qty berhasil diupdate ke ${targetQty}, stok ${stockAction}`,
+      delta
+    };
+  } catch (err: any) {
+    console.error('Update Sold Item Qty Exception:', err);
+    return { success: false, msg: 'Error: ' + (err.message || 'Unknown error') };
+  }
+};
+
 // 5. FETCH RETUR
 export const fetchReturItems = async (store: string | null): Promise<ReturRow[]> => {
   const table = store === 'mjm' ? 'retur_mjm' : (store === 'bjw' ? 'retur_bjw' : null);

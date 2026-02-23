@@ -6,7 +6,7 @@ import { useStore } from '../context/StoreContext';
 import { 
   fetchOfflineOrders, fetchSoldItems, fetchReturItems,
   processOfflineOrderItem, updateOfflineOrder, fetchInventory, createReturFromSold, updateReturStatus,
-  fetchDistinctEcommerce, deleteBarangLog, updateSoldItemPrice, updateSoldItemDate,
+  fetchDistinctEcommerce, deleteBarangLog, updateSoldItemPrice, updateSoldItemDate, updateSoldItemQty,
   fetchSalesOrders, processSalesOrderItem, fetchSalesPaidItems
 } from '../services/supabaseService';
 import { OfflineOrderRow, SoldItemRow, ReturRow, CartItem } from '../types';
@@ -352,6 +352,9 @@ export const OrderManagement: React.FC = () => {
   const [editingSoldItemId, setEditingSoldItemId] = useState<string | null>(null);
   const [editSoldPrice, setEditSoldPrice] = useState<number>(0);
   const [savingSoldPrice, setSavingSoldPrice] = useState(false);
+  const [editingSoldQtyId, setEditingSoldQtyId] = useState<string | null>(null);
+  const [editSoldQty, setEditSoldQty] = useState<number>(0);
+  const [savingSoldQty, setSavingSoldQty] = useState(false);
   const [editingSoldDateId, setEditingSoldDateId] = useState<string | null>(null);
   const [editSoldDate, setEditSoldDate] = useState<string>('');
 
@@ -938,6 +941,42 @@ export const OrderManagement: React.FC = () => {
       showToast('Harga berhasil diupdate!');
       setEditingSoldItemId(null);
       loadData(); // Reload data
+    } else {
+      showToast(result.msg, 'error');
+    }
+  };
+
+  // Handle Edit Sold Item Qty
+  const startEditSoldQty = (item: SoldItemRow, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditingSoldQtyId(item.id);
+    setEditSoldQty(Number(item.qty_keluar || 1));
+  };
+
+  const cancelEditSoldQty = (e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setEditingSoldQtyId(null);
+    setEditSoldQty(0);
+  };
+
+  const saveEditSoldQty = async (item: SoldItemRow, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const newQty = Number(editSoldQty);
+
+    if (!Number.isInteger(newQty) || newQty <= 0) {
+      showToast('Qty harus bilangan bulat lebih dari 0', 'error');
+      return;
+    }
+
+    setSavingSoldQty(true);
+    const result = await updateSoldItemQty(item.id, newQty, selectedStore);
+    setSavingSoldQty(false);
+
+    if (result.success) {
+      showToast(result.msg);
+      setEditingSoldQtyId(null);
+      setEditSoldQty(0);
+      loadData();
     } else {
       showToast(result.msg, 'error');
     }
@@ -2321,10 +2360,49 @@ export const OrderManagement: React.FC = () => {
                               {/* Pricing Info */}
                               <div className="flex items-center gap-3">
                                 {/* Quantity Badge */}
-                                <div className="bg-gray-700/60 rounded-lg px-3 py-1.5 text-center border border-gray-600/50">
-                                  <p className="text-lg font-bold text-white leading-tight">{item.qty_keluar}</p>
-                                  <p className="text-[9px] text-gray-400 uppercase tracking-wide">pcs</p>
-                                </div>
+                                {editingSoldQtyId === item.id ? (
+                                  <div className="flex items-center gap-1.5 bg-gray-700/60 rounded-lg px-2 py-1.5 border border-blue-600/60">
+                                    <input
+                                      type="number"
+                                      min={1}
+                                      step={1}
+                                      value={editSoldQty}
+                                      onChange={(e) => setEditSoldQty(Number(e.target.value))}
+                                      onKeyDown={(e) => {
+                                        if (e.key === 'Enter') saveEditSoldQty(item, e as any);
+                                        if (e.key === 'Escape') cancelEditSoldQty();
+                                      }}
+                                      className="w-16 bg-gray-800 border border-gray-600 rounded px-2 py-1 text-sm text-white font-semibold text-center focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                                      autoFocus
+                                      onClick={(e) => e.stopPropagation()}
+                                    />
+                                    <button
+                                      onClick={(e) => saveEditSoldQty(item, e)}
+                                      disabled={savingSoldQty}
+                                      className="p-1.5 bg-green-600 hover:bg-green-700 text-white rounded transition-colors disabled:opacity-50"
+                                      title="Simpan qty"
+                                    >
+                                      {savingSoldQty ? <RefreshCw size={14} className="animate-spin" /> : <Check size={14} />}
+                                    </button>
+                                    <button
+                                      onClick={(e) => cancelEditSoldQty(e)}
+                                      className="p-1.5 bg-gray-600 hover:bg-gray-500 text-white rounded transition-colors"
+                                      title="Batal edit qty"
+                                    >
+                                      <X size={14} />
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <button
+                                    onClick={(e) => startEditSoldQty(item, e)}
+                                    className="relative bg-gray-700/60 rounded-lg px-3 py-1.5 text-center border border-gray-600/50 hover:bg-gray-700 transition-colors group/qty"
+                                    title="Klik untuk edit qty"
+                                  >
+                                    <p className="text-lg font-bold text-white leading-tight">{item.qty_keluar}</p>
+                                    <p className="text-[9px] text-gray-400 uppercase tracking-wide">pcs</p>
+                                    <Pencil size={10} className="absolute -top-1 -right-1 text-gray-400 opacity-0 group-hover/qty:opacity-100 transition-opacity" />
+                                  </button>
+                                )}
                                 
                                 {/* Price Breakdown - Editable */}
                                 {editingSoldItemId === item.id ? (
