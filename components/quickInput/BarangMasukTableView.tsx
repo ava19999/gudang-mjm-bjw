@@ -131,23 +131,35 @@ export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger, onRefres
 
     // Load part number options for dropdown
     const loadPartOptions = useCallback(async () => {
+        if (!selectedStore) {
+            setPartOptions([]);
+            return;
+        }
+
         try {
-            const tableName = selectedStore === 'mjm' ? 'inventory_mjm' : 'inventory_bjw';
+            const tableName = selectedStore === 'mjm' ? 'base_mjm' : 'base_bjw';
             const { data: parts, error } = await supabase
                 .from(tableName)
-                .select('part_number, nama_barang, stok_akhir')
+                .select('part_number, name, quantity')
+                .not('part_number', 'is', null)
+                .not('part_number', 'eq', '')
                 .order('part_number', { ascending: true })
-                .limit(1000);
+                .limit(5000);
             
             if (!error && parts) {
-                setPartOptions(parts.map(p => ({
+                setPartOptions(parts
+                    .filter(p => p.part_number !== 'SYSTEM-BANNER-PROMO')
+                    .map(p => ({
                     part_number: p.part_number,
-                    name: p.nama_barang || '',
-                    quantity: p.stok_akhir || 0
+                    name: p.name || '',
+                    quantity: Number(p.quantity || 0)
                 })));
+            } else {
+                setPartOptions([]);
             }
         } catch (e) {
             console.error('Error loading part options:', e);
+            setPartOptions([]);
         }
     }, [selectedStore]);
 
@@ -313,8 +325,9 @@ export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger, onRefres
         setSavingId(item.id);
         try {
             const tableName = selectedStore === 'mjm' ? 'barang_masuk_mjm' : 'barang_masuk_bjw';
-            const inventoryTable = selectedStore === 'mjm' ? 'inventory_mjm' : 'inventory_bjw';
+            const inventoryTable = selectedStore === 'mjm' ? 'base_mjm' : 'base_bjw';
             const qtyDiff = newQty - oldQty;
+            let resultingCurrentQty = item.current_qty || 0;
 
             // Update barang_masuk record (including part_number)
             const { error: updateError } = await supabase
@@ -336,51 +349,63 @@ export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger, onRefres
                 // Part number changed: reduce stock from old part, add to new part
                 
                 // 1. Reduce stock from old part number
-                const { data: oldInventory } = await supabase
+                const { data: oldInventory, error: oldInventoryError } = await supabase
                     .from(inventoryTable)
-                    .select('stok_akhir')
+                    .select('quantity')
                     .eq('part_number', oldPartNumber)
-                    .single();
+                    .maybeSingle();
+
+                if (oldInventoryError) throw oldInventoryError;
 
                 if (oldInventory) {
-                    const oldStock = oldInventory.stok_akhir || 0;
+                    const oldStock = Number(oldInventory.quantity || 0);
                     const newOldStock = Math.max(0, oldStock - oldQty);
-                    await supabase
+                    const { error: oldUpdateError } = await supabase
                         .from(inventoryTable)
-                        .update({ stok_akhir: newOldStock })
+                        .update({ quantity: newOldStock })
                         .eq('part_number', oldPartNumber);
+                    if (oldUpdateError) throw oldUpdateError;
                 }
 
                 // 2. Add stock to new part number
-                const { data: newInventory } = await supabase
+                const { data: newInventory, error: newInventoryError } = await supabase
                     .from(inventoryTable)
-                    .select('stok_akhir')
+                    .select('quantity')
                     .eq('part_number', newPartNumber)
-                    .single();
+                    .maybeSingle();
 
-                if (newInventory) {
-                    const currentNewStock = newInventory.stok_akhir || 0;
-                    await supabase
-                        .from(inventoryTable)
-                        .update({ stok_akhir: currentNewStock + newQty })
-                        .eq('part_number', newPartNumber);
-                }
+                if (newInventoryError) throw newInventoryError;
+                if (!newInventory) throw new Error(`Part number ${newPartNumber} tidak ditemukan di ${inventoryTable}`);
+
+                const currentNewStock = Number(newInventory.quantity || 0);
+                const finalNewStock = currentNewStock + newQty;
+                const { error: newUpdateError } = await supabase
+                    .from(inventoryTable)
+                    .update({ quantity: finalNewStock })
+                    .eq('part_number', newPartNumber);
+                if (newUpdateError) throw newUpdateError;
+
+                resultingCurrentQty = finalNewStock;
             } else if (qtyDiff !== 0) {
                 // Same part number, only qty changed
-                const { data: inventoryData } = await supabase
+                const { data: inventoryData, error: inventoryError } = await supabase
                     .from(inventoryTable)
-                    .select('stok_akhir')
+                    .select('quantity')
                     .eq('part_number', item.part_number)
-                    .single();
+                    .maybeSingle();
+
+                if (inventoryError) throw inventoryError;
 
                 if (inventoryData) {
-                    const currentStock = inventoryData.stok_akhir || 0;
+                    const currentStock = Number(inventoryData.quantity || 0);
                     const newStock = Math.max(0, currentStock + qtyDiff);
-
-                    await supabase
+                    const { error: stockUpdateError } = await supabase
                         .from(inventoryTable)
-                        .update({ stok_akhir: newStock })
+                        .update({ quantity: newStock })
                         .eq('part_number', item.part_number);
+                    if (stockUpdateError) throw stockUpdateError;
+
+                    resultingCurrentQty = newStock;
                 }
             }
 
@@ -396,7 +421,7 @@ export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger, onRefres
                         harga_total: newQty * newHarga,
                         customer: editForm.customer,
                         tempo: editForm.tempo,
-                        current_qty: partNumberChanged ? newQty : ((d.current_qty || 0) + qtyDiff)
+                        current_qty: resultingCurrentQty
                     } 
                     : d
             ));

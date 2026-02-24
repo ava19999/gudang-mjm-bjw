@@ -334,7 +334,8 @@ export const fetchDistinctSuppliers = async (store: string | null): Promise<stri
       .select('customer')
       .not('customer', 'is', null)
       .not('customer', 'eq', '')
-      .not('customer', 'eq', '-');
+      .not('customer', 'eq', '-')
+      .not('customer', 'ilike', '%RETUR%');
 
     if (error) {
       console.error('Fetch Distinct Suppliers Error:', error);
@@ -1470,7 +1471,12 @@ export const fetchBarangMasukLog = async (store: string | null, page = 1, limit 
     const from = (page - 1) * limit;
     const to = from + limit - 1;
 
-    let query = supabase.from(table).select('*', { count: 'exact' });
+    let query = supabase
+        .from(table)
+        .select('*', { count: 'exact' })
+        // Exclude rows retur from riwayat barang masuk view.
+        .not('customer', 'ilike', '%RETUR%')
+        .not('tempo', 'ilike', '%RETUR%');
 
     // Apply search filters
     if (filters.search) {
@@ -2511,53 +2517,80 @@ export const fetchBarangKeluarLog = async (store: string | null, page = 1, limit
 };
 
 export const deleteBarangLog = async (
-    id: number, 
+    id: number | string, 
     type: 'in' | 'out', 
     partNumber: string, 
     qty: number, 
-    store: string | null
+    store: string | null,
+    restoreStock: boolean = true
 ): Promise<boolean> => {
     const logTable = getLogTableName(type === 'in' ? 'barang_masuk' : 'barang_keluar', store);
     const stockTable = getTableName(store);
+    const normalizedId = typeof id === 'string' ? id.trim() : id;
+    const parsedNumericId = typeof normalizedId === 'string' && /^\d+$/.test(normalizedId)
+      ? Number(normalizedId)
+      : normalizedId;
 
-    console.log('deleteBarangLog called:', { id, type, partNumber, qty, store, logTable, stockTable });
+    console.log('deleteBarangLog called:', { id: normalizedId, type, partNumber, qty, store, restoreStock, logTable, stockTable });
 
     try {
-        if (!id || !partNumber || qty <= 0) {
-            console.error('Invalid params:', { id, partNumber, qty });
+        if (normalizedId === null || normalizedId === undefined || normalizedId === '' || !partNumber || qty <= 0) {
+            console.error('Invalid params:', { id: normalizedId, partNumber, qty });
             return false;
         }
 
-        const { data: currentItem, error: fetchError } = await supabase
-            .from(stockTable)
-            .select('quantity')
-            .eq('part_number', partNumber)
-            .single();
+        let newQty: number | null = null;
+        let currentQty: number | null = null;
+        let actualPartNumber = partNumber;
 
-        console.log('Current stock:', currentItem, 'Error:', fetchError);
+        if (restoreStock) {
+            let { data: currentItem, error: fetchError } = await supabase
+                .from(stockTable)
+                .select('part_number, quantity')
+                .eq('part_number', partNumber)
+                .maybeSingle();
 
-        if (fetchError || !currentItem) throw new Error("Item tidak ditemukan untuk rollback stok");
+            // Fallback case-insensitive match jika exact tidak ketemu.
+            if ((fetchError || !currentItem) && !fetchError) {
+                const fallback = await supabase
+                    .from(stockTable)
+                    .select('part_number, quantity')
+                    .ilike('part_number', partNumber)
+                    .limit(1)
+                    .maybeSingle();
+                currentItem = fallback.data || null;
+                fetchError = fallback.error || null;
+            }
 
-        let newQty = currentItem.quantity;
-        if (type === 'in') newQty = Math.max(0, newQty - qty);
-        else newQty = newQty + qty;
-        
-        console.log('Stock will be updated from', currentItem.quantity, 'to', newQty);
+            console.log('Current stock:', currentItem, 'Error:', fetchError);
 
-        const { error: deleteError } = await supabase.from(logTable).delete().eq('id', id);
+            if (fetchError || !currentItem) throw new Error("Item tidak ditemukan untuk rollback stok");
+
+            actualPartNumber = currentItem.part_number || partNumber;
+            currentQty = Number(currentItem.quantity || 0);
+            newQty = currentQty;
+            if (type === 'in') newQty = Math.max(0, newQty - qty);
+            else newQty = newQty + qty;
+            
+            console.log('Stock will be updated from', currentQty, 'to', newQty, 'for part', actualPartNumber);
+        }
+
+        const { error: deleteError } = await supabase.from(logTable).delete().eq('id', parsedNumericId as any);
         if (deleteError) throw new Error("Gagal menghapus log: " + deleteError.message);
 
-        const { error: updateError } = await supabase
-            .from(stockTable)
-            .update({ quantity: newQty })
-            .eq('part_number', partNumber);
+        if (restoreStock) {
+            const { error: updateError } = await supabase
+                .from(stockTable)
+                .update({ quantity: newQty as number })
+                .eq('part_number', actualPartNumber);
 
-        if (updateError) {
-            console.error("Stock update error:", updateError);
-            throw new Error("WARNING: Log terhapus tapi stok gagal diupdate: " + updateError.message);
+            if (updateError) {
+                console.error("Stock update error:", updateError);
+                throw new Error("WARNING: Log terhapus tapi stok gagal diupdate: " + updateError.message);
+            }
+            
+            console.log('Stock updated successfully from', currentQty, 'to', newQty);
         }
-        
-        console.log('Stock updated successfully to', newQty);
 
         return true;
     } catch (e) {
@@ -2729,6 +2762,13 @@ export const fetchHistoryLogsPaginated = async (
     let query = supabase
       .from(tableName)
       .select('*', { count: 'exact' });
+
+    // Detail Barang Masuk: exclude data retur agar tidak tampil di modal riwayat.
+    if (type === 'in') {
+      query = query
+        .not('customer', 'ilike', '%RETUR%')
+        .not('tempo', 'ilike', '%RETUR%');
+    }
     
     // Handle both old string format and new object format for backwards compatibility
     if (typeof filters === 'string' && filters.trim()) {

@@ -404,35 +404,28 @@ export const OrderManagement: React.FC = () => {
     return map;
   }, [inventoryBjw]);
 
-  // Load inventory langsung saat komponen mount - TANPA CACHE untuk menghindari masalah
+  // Load inventory hanya dari toko aktif agar tidak tercampur antar toko.
   useEffect(() => {
     const loadInventory = async () => {
       setInventoryLoading(true);
       try {
-        console.log('=== LOADING INVENTORY ===');
-        const [invMjm, invBjw] = await Promise.all([
-          fetchInventory('mjm'),
-          fetchInventory('bjw')
-        ]);
-        
-        console.log('MJM items:', invMjm?.length || 0);
-        console.log('BJW items:', invBjw?.length || 0);
-        
-        // Log sample dari setiap toko
-        if (invMjm?.length > 0) {
-          console.log('Sample MJM:', invMjm[0]);
+        if (!selectedStore) {
+          setInventory([]);
+          setInventoryMjm([]);
+          setInventoryBjw([]);
+          return;
         }
-        if (invBjw?.length > 0) {
-          console.log('Sample BJW:', invBjw[0]);
+
+        const activeInventory = await fetchInventory(selectedStore);
+        setInventory(activeInventory || []);
+
+        if (selectedStore === 'mjm') {
+          setInventoryMjm(activeInventory || []);
+          setInventoryBjw([]);
+        } else {
+          setInventoryMjm([]);
+          setInventoryBjw(activeInventory || []);
         }
-        
-        // Gabungkan semua
-        const all = [...(invMjm || []), ...(invBjw || [])];
-        console.log('Total inventory:', all.length);
-        
-        setInventory(all);
-        setInventoryMjm(invMjm || []);
-        setInventoryBjw(invBjw || []);
       } catch (err) {
         console.error("Error fetching inventory:", err);
       } finally {
@@ -441,14 +434,41 @@ export const OrderManagement: React.FC = () => {
     };
     
     loadInventory();
-  }, []); // Load sekali saat mount
+  }, [selectedStore]);
+
+  // Dedupe part number agar autocomplete tidak menampilkan item ganda.
+  const inventoryOptions = useMemo(() => {
+    const optionMap = new Map<string, any>();
+    inventory.forEach((item) => {
+      const pn = String(item?.partNumber || '').trim().toUpperCase();
+      if (!pn) return;
+
+      const existing = optionMap.get(pn);
+      if (!existing) {
+        optionMap.set(pn, {
+          ...item,
+          partNumber: pn,
+          quantity: Number(item?.quantity || 0)
+        });
+        return;
+      }
+
+      existing.quantity = Number(existing.quantity || 0) + Number(item?.quantity || 0);
+    });
+
+    return Array.from(optionMap.values()).sort((a, b) => {
+      const aPn = String(a?.partNumber || '');
+      const bPn = String(b?.partNumber || '');
+      return aPn.localeCompare(bPn);
+    });
+  }, [inventory]);
 
   // Update selectedItem when partNumber changes
   useEffect(() => {
     if (!editingId) { setSelectedItem(null); return; }
-    const found = inventory.find((item) => item.partNumber === editForm.partNumber);
+    const found = inventoryOptions.find((item) => item.partNumber === editForm.partNumber);
     setSelectedItem(found || null);
-  }, [editForm.partNumber, inventory, editingId]);
+  }, [editForm.partNumber, inventoryOptions, editingId]);
 
   const showToast = (msg: string, type: 'success'|'error' = 'success') => {
     setToast({msg, type});
@@ -709,24 +729,56 @@ export const OrderManagement: React.FC = () => {
     setReturModalOpen(true);
   };
 
+  // Hapus item terjual: pilih apakah stok dikembalikan atau tidak.
+  const askDeleteMode = (totalQty: number, itemCount: number = 1): boolean | null => {
+    const targetLabel = itemCount > 1 ? `${itemCount} item` : 'item ini';
+    const choice = window.prompt(
+      `Mode hapus ${targetLabel}:\n` +
+      `1. Hapus + kembalikan stok (+${totalQty} pcs)\n` +
+      `2. Hapus tanpa kembalikan stok\n\n` +
+      `Ketik 1 atau 2 (Cancel untuk batal).`,
+      '1'
+    );
+
+    if (choice === null) return null;
+    const normalized = choice.trim();
+    if (normalized === '' || normalized === '1') return true;
+    if (normalized === '2') return false;
+
+    showToast('Pilihan tidak valid. Ketik 1 atau 2.', 'error');
+    return null;
+  };
+
   // Handle Delete Sold Item
   const handleDeleteSoldItem = async (item: SoldItemRow) => {
-    if (!window.confirm(`Hapus item "${item.name}" dari data penjualan?\n\nStok akan dikembalikan +${item.qty_keluar} pcs.`)) {
+    const restoreStock = askDeleteMode(item.qty_keluar, 1);
+    if (restoreStock === null) {
       return;
     }
+
+    const confirmMsg = restoreStock
+      ? `Hapus item "${item.name}" dari data penjualan?\n\nStok akan dikembalikan +${item.qty_keluar} pcs.`
+      : `Hapus item "${item.name}" dari data penjualan?\n\nStok TIDAK akan dikembalikan.`;
+
+    if (!window.confirm(confirmMsg)) return;
     
     setLoading(true);
     try {
       const success = await deleteBarangLog(
-        parseInt(item.id),
+        item.id,
         'out',
         item.part_number,
         item.qty_keluar,
-        selectedStore
+        selectedStore,
+        restoreStock
       );
       
       if (success) {
-        showToast(`Item "${item.name}" berhasil dihapus, stok +${item.qty_keluar}`);
+        showToast(
+          restoreStock
+            ? `Item "${item.name}" berhasil dihapus, stok +${item.qty_keluar}`
+            : `Item "${item.name}" berhasil dihapus tanpa top up stok`
+        );
         loadData();
       } else {
         showToast('Gagal menghapus item', 'error');
@@ -742,7 +794,14 @@ export const OrderManagement: React.FC = () => {
     if (items.length === 0) return;
     
     const totalQty = items.reduce((sum, item) => sum + item.qty_keluar, 0);
-    if (!window.confirm(`Hapus SEMUA ${items.length} item dari pesanan ini?\n\nTotal stok yang akan dikembalikan: +${totalQty} pcs`)) {
+    const restoreStock = askDeleteMode(totalQty, items.length);
+    if (restoreStock === null) return;
+
+    const confirmMsg = restoreStock
+      ? `Hapus SEMUA ${items.length} item dari pesanan ini?\n\nTotal stok yang akan dikembalikan: +${totalQty} pcs`
+      : `Hapus SEMUA ${items.length} item dari pesanan ini?\n\nStok TIDAK akan dikembalikan.`;
+
+    if (!window.confirm(confirmMsg)) {
       return;
     }
     
@@ -753,11 +812,12 @@ export const OrderManagement: React.FC = () => {
     for (const item of items) {
       try {
         const success = await deleteBarangLog(
-          parseInt(item.id),
+          item.id,
           'out',
           item.part_number,
           item.qty_keluar,
-          selectedStore
+          selectedStore,
+          restoreStock
         );
         if (success) successCount++;
         else failCount++;
@@ -769,7 +829,11 @@ export const OrderManagement: React.FC = () => {
     setLoading(false);
     
     if (failCount === 0) {
-      showToast(`${successCount} item berhasil dihapus, stok +${totalQty}`);
+      showToast(
+        restoreStock
+          ? `${successCount} item berhasil dihapus, stok +${totalQty}`
+          : `${successCount} item berhasil dihapus tanpa top up stok`
+      );
     } else {
       showToast(`${successCount} berhasil, ${failCount} gagal`, failCount > 0 ? 'error' : 'success');
     }
@@ -1008,7 +1072,7 @@ export const OrderManagement: React.FC = () => {
     setLoading(true);
     // Cari nama barang dari inventory jika partNumber valid
     let namaBarang = editForm.partNumber;
-    const found = inventory.find((item) => item.partNumber === editForm.partNumber);
+    const found = inventoryOptions.find((item) => item.partNumber === editForm.partNumber);
     if (found) {
       namaBarang = found.nama_barang || found.name || editForm.partNumber;
     }
@@ -1660,7 +1724,7 @@ export const OrderManagement: React.FC = () => {
                                         <label className="text-[10px] text-gray-400">Part Number</label>
                                         <Autocomplete
                                           size="small"
-                                          options={inventory}
+                                          options={inventoryOptions}
                                           getOptionLabel={(option) => option?.partNumber || ''}
                                           filterOptions={(options, { inputValue }) => {
                                             console.log('=== FILTER OPTIONS ===');
@@ -1688,7 +1752,7 @@ export const OrderManagement: React.FC = () => {
                                             console.log('Filtered count:', filtered.length);
                                             return filtered.slice(0, 50);
                                           }}
-                                          value={inventory.find((inv) => inv?.partNumber === editForm.partNumber) || null}
+                                          value={inventoryOptions.find((inv) => inv?.partNumber === editForm.partNumber) || null}
                                           onChange={(_, newValue) => {
                                             setEditForm({ ...editForm, partNumber: newValue ? newValue.partNumber : '' });
                                           }}
