@@ -51,6 +51,76 @@ const normalizeText = (value: string | null | undefined): string => {
   return v || 'UNKNOWN';
 };
 
+const INVENTORY_SELECT_COLUMNS = 'part_number,name,brand,application,shelf,quantity,created_at';
+const FOTO_SELECT_COLUMNS = 'part_number,foto_1,foto_2,foto_3,foto_4,foto_5,foto_6,foto_7,foto_8,foto_9,foto_10';
+const BARANG_MASUK_LOG_SELECT_COLUMNS = 'id,created_at,part_number,nama_barang,qty_masuk,stok_akhir,harga_satuan,harga_total,customer,tempo,resi,ecommerce,kode_toko';
+const BARANG_KELUAR_LOG_SELECT_COLUMNS = 'id,created_at,part_number,name,qty_keluar,stock_ahir,harga_satuan,harga_total,customer,tempo,resi,ecommerce,kode_toko';
+const SOLD_ITEM_SELECT_COLUMNS = 'id,created_at,kode_toko,tempo,ecommerce,customer,part_number,name,qty_keluar,harga_satuan,harga_total,resi';
+
+const normalizePartForLookup = (pn: string | null | undefined): string =>
+  (pn || '').trim().toUpperCase().replace(/\s+/g, ' ');
+
+const photoRowCache = new Map<string, any | null>();
+
+const fetchStockQtyMapByPartNumbers = async (
+  stockTable: string,
+  partNumbers: string[]
+): Promise<Record<string, number>> => {
+  const uniquePartNumbers = [...new Set((partNumbers || []).map(p => (p || '').toString().trim()).filter(Boolean))];
+  if (uniquePartNumbers.length === 0) return {};
+
+  const stockRows: Array<{ part_number: string; quantity: number }> = [];
+  const { data: exactRows, error: exactError } = await supabase
+    .from(stockTable)
+    .select('part_number, quantity')
+    .in('part_number', uniquePartNumbers);
+
+  if (!exactError && exactRows) {
+    stockRows.push(...(exactRows as Array<{ part_number: string; quantity: number }>));
+  }
+
+  const normalizedMatched = new Set(
+    stockRows
+      .map(row => normalizePartForLookup(row.part_number))
+      .filter(Boolean)
+  );
+
+  const unresolved = uniquePartNumbers.filter(pn => !normalizedMatched.has(normalizePartForLookup(pn)));
+
+  if (unresolved.length > 0 && unresolved.length <= 40) {
+    const fallbackResults = await Promise.all(
+      unresolved.map((pn) =>
+        supabase
+          .from(stockTable)
+          .select('part_number, quantity')
+          .ilike('part_number', pn)
+          .limit(1)
+      )
+    );
+
+    fallbackResults.forEach(({ data, error }) => {
+      if (!error && data && data[0]) {
+        stockRows.push(data[0] as { part_number: string; quantity: number });
+      }
+    });
+  }
+
+  const stockByNormalized = stockRows.reduce((acc, row) => {
+    const original = (row.part_number || '').toString();
+    const normalized = normalizePartForLookup(original);
+    const qty = Number(row.quantity || 0);
+    if (original) acc[original] = qty;
+    if (normalized) acc[normalized] = qty;
+    return acc;
+  }, {} as Record<string, number>);
+
+  return uniquePartNumbers.reduce((acc, pn) => {
+    const normalized = normalizePartForLookup(pn);
+    acc[pn] = stockByNormalized[pn] ?? stockByNormalized[normalized] ?? 0;
+    return acc;
+  }, {} as Record<string, number>);
+};
+
 const isReturMasuk = (row: { tempo?: string | null; customer?: string | null }): boolean => {
   const tempo = normalizeTempo(row.tempo);
   const customer = normalizeText(row.customer);
@@ -468,7 +538,7 @@ export const fetchInventoryByPartNumber = async (
     // First try exact match on part_number
     let { data, error } = await supabase
       .from(table)
-      .select('*')
+      .select(INVENTORY_SELECT_COLUMNS)
       .ilike('part_number', searchValue)
       .limit(1)
       .single();
@@ -477,7 +547,7 @@ export const fetchInventoryByPartNumber = async (
     if (error || !data) {
       const { data: nameData, error: nameError } = await supabase
         .from(table)
-        .select('*')
+        .select(INVENTORY_SELECT_COLUMNS)
         .ilike('name', `%${searchValue}%`)
         .limit(1)
         .single();
@@ -492,9 +562,9 @@ export const fetchInventoryByPartNumber = async (
     const partNumber = data.part_number;
     const { data: photoData } = await supabase
       .from('foto')
-      .select('*')
+      .select(FOTO_SELECT_COLUMNS)
       .eq('part_number', partNumber)
-      .single();
+      .maybeSingle();
 
     return mapItemFromDB(data, photoData);
   } catch (err) {
@@ -672,12 +742,45 @@ const fetchLatestPricesForItems = async (items: any[], store?: string | null): P
 
 const fetchPhotosForItems = async (items: any[]) => {
   if (!items || items.length === 0) return {};
-  const partNumbers = items.map(i => i.part_number || i.partNumber).filter(Boolean);
+  const partNumbers = [...new Set(items.map(i => i.part_number || i.partNumber).filter(Boolean))];
   if (partNumbers.length === 0) return {};
   try {
-    const { data } = await supabase.from('foto').select('*').in('part_number', partNumbers);
     const photoMap: Record<string, any> = {};
-    (data || []).forEach((row: any) => { if (row.part_number) photoMap[row.part_number] = row; });
+    const missingPartNumbers = partNumbers.filter((pn) => !photoRowCache.has(pn));
+
+    if (missingPartNumbers.length > 0) {
+      const { data } = await supabase
+        .from('foto')
+        .select(FOTO_SELECT_COLUMNS)
+        .in('part_number', missingPartNumbers);
+
+      const fetchedRows = data || [];
+      fetchedRows.forEach((row: any) => {
+        if (row?.part_number) {
+          photoRowCache.set(row.part_number, row);
+        }
+      });
+
+      const fetchedSet = new Set(
+        fetchedRows
+          .map((row: any) => row?.part_number)
+          .filter(Boolean)
+      );
+
+      missingPartNumbers.forEach((pn) => {
+        if (!fetchedSet.has(pn)) {
+          photoRowCache.set(pn, null);
+        }
+      });
+    }
+
+    partNumbers.forEach((pn) => {
+      const cached = photoRowCache.get(pn);
+      if (cached) {
+        photoMap[pn] = cached;
+      }
+    });
+
     return photoMap;
   } catch (e) { return {}; }
 };
@@ -687,10 +790,12 @@ const savePhotosToTable = async (partNumber: string, images: string[]) => {
   try {
     if (!images || images.length === 0) {
       await supabase.from('foto').delete().eq('part_number', partNumber);
+      photoRowCache.set(partNumber, null);
       return;
     }
     const photoPayload = mapImagesToPhotoRow(partNumber, images);
     await supabase.from('foto').upsert(photoPayload, { onConflict: 'part_number' });
+    photoRowCache.set(partNumber, photoPayload);
   } catch (e) { console.error('Error saving photos:', e); }
 };
 
@@ -734,7 +839,7 @@ export const fetchFotoProduk = async (searchTerm?: string): Promise<FotoProdukRo
   try {
     let query = supabase
       .from('foto')
-      .select('*')
+      .select(`id,created_at,${FOTO_SELECT_COLUMNS}`)
       .order('created_at', { ascending: false });
 
     if (searchTerm && searchTerm.trim()) {
@@ -1149,7 +1254,7 @@ export const searchInventoryWithAlias = async (
     // First search directly in inventory
     let { data: directResults } = await supabase
       .from(table)
-      .select('*')
+      .select(INVENTORY_SELECT_COLUMNS)
       .or(`part_number.ilike.%${searchLower}%,name.ilike.%${searchLower}%`)
       .limit(50);
 
@@ -1166,7 +1271,7 @@ export const searchInventoryWithAlias = async (
     if (aliasPartNumbers.length > 0) {
       const { data } = await supabase
         .from(table)
-        .select('*')
+        .select(INVENTORY_SELECT_COLUMNS)
         .in('part_number', aliasPartNumbers);
       aliasItems = data || [];
     }
@@ -1199,16 +1304,34 @@ export const searchInventoryWithAlias = async (
 };
 
 // --- INVENTORY FUNCTIONS ---
+interface FetchInventoryOptions {
+  includePhotos?: boolean;
+  includePrices?: boolean;
+  includeCostPrices?: boolean;
+}
 
-export const fetchInventory = async (store?: string | null): Promise<InventoryItem[]> => {
+export const fetchInventory = async (
+  store?: string | null,
+  options: FetchInventoryOptions = {}
+): Promise<InventoryItem[]> => {
+  const {
+    includePhotos = true,
+    includePrices = true,
+    includeCostPrices = true
+  } = options;
   const table = getTableName(store);
-  const { data: items, error } = await supabase.from(table).select('*').order('name', { ascending: true });
+  const { data: items, error } = await supabase
+    .from(table)
+    .select(INVENTORY_SELECT_COLUMNS)
+    .order('name', { ascending: true });
   
   if (error || !items) return [];
 
-  const photoMap = await fetchPhotosForItems(items);
-  const priceMap = await fetchLatestPricesForItems(items, store);
-  const costPriceMap = await fetchLatestCostPricesForItems(items, store);
+  const [photoMap, priceMap, costPriceMap] = await Promise.all([
+    includePhotos ? fetchPhotosForItems(items) : Promise.resolve({}),
+    includePrices ? fetchLatestPricesForItems(items, store) : Promise.resolve({}),
+    includeCostPrices ? fetchLatestCostPricesForItems(items, store) : Promise.resolve({})
+  ]);
 
   return items.map(item => {
     const mapped = mapItemFromDB(item, photoMap[item.part_number]);
@@ -1223,7 +1346,7 @@ export const fetchInventoryPaginated = async (store: string | null, page: number
   const table = getTableName(store);
   const from = (page - 1) * perPage;
   const to = from + perPage - 1;
-  let query = supabase.from(table).select('*', { count: 'exact' });
+  let query = supabase.from(table).select(INVENTORY_SELECT_COLUMNS, { count: 'exact' });
 
   // Filter by part number
   if (filters?.partNumber) query = query.ilike('part_number', `%${filters.partNumber}%`);
@@ -1300,7 +1423,7 @@ export const fetchInventoryStats = async (store: string | null): Promise<any> =>
 
 export const fetchInventoryAllFiltered = async (store: string | null, filters?: any): Promise<InventoryItem[]> => {
   const table = getTableName(store);
-  let query = supabase.from(table).select('*');
+  let query = supabase.from(table).select(INVENTORY_SELECT_COLUMNS);
 
   // Filter by part number
   if (filters?.partNumber) query = query.ilike('part_number', `%${filters.partNumber}%`);
@@ -1443,7 +1566,11 @@ export const deleteInventory = async (id: string, store?: string | null): Promis
 
 export const getItemByPartNumber = async (partNumber: string, store?: string | null): Promise<InventoryItem | null> => {
   const table = getTableName(store);
-  const { data, error } = await supabase.from(table).select('*').eq('part_number', partNumber).maybeSingle();
+  const { data, error } = await supabase
+    .from(table)
+    .select(INVENTORY_SELECT_COLUMNS)
+    .eq('part_number', partNumber)
+    .maybeSingle();
   if (error || !data) return null;
   
   const photoMap = await fetchPhotosForItems([data]);
@@ -1473,7 +1600,7 @@ export const fetchBarangMasukLog = async (store: string | null, page = 1, limit 
 
     let query = supabase
         .from(table)
-        .select('*', { count: 'exact' })
+        .select(BARANG_MASUK_LOG_SELECT_COLUMNS, { count: 'exact' })
         // Exclude rows retur from riwayat barang masuk view.
         .not('customer', 'ilike', '%RETUR%')
         .not('tempo', 'ilike', '%RETUR%');
@@ -1511,35 +1638,8 @@ export const fetchBarangMasukLog = async (store: string | null, page = 1, limit 
         return { data: [], total: 0 };
     }
 
-    // Fetch current quantities from stock table
-    // Normalize part numbers to handle variations (spaces, case differences)
-    const normalizePN = (pn: string): string => pn?.trim().toUpperCase().replace(/\s+/g, ' ') || '';
     const partNumbers = [...new Set((data || []).map(row => row.part_number).filter(Boolean))];
-    const normalizedPartNumbers = partNumbers.map(normalizePN);
-    let stockMap: Record<string, number> = {};
-    
-    if (partNumbers.length > 0) {
-        // Query with both original and normalized versions to catch more matches
-        const { data: stockData } = await supabase
-            .from(stockTable)
-            .select('part_number, quantity');
-        
-        if (stockData) {
-            // Create lookup map using normalized part numbers
-            const stockByNormalized = stockData.reduce((acc, item) => {
-                const normalizedKey = normalizePN(item.part_number);
-                acc[normalizedKey] = item.quantity;
-                acc[item.part_number] = item.quantity; // Also keep original
-                return acc;
-            }, {} as Record<string, number>);
-            
-            // Build stockMap matching log part numbers to stock
-            partNumbers.forEach(pn => {
-                const normalized = normalizePN(pn);
-                stockMap[pn] = stockByNormalized[pn] ?? stockByNormalized[normalized] ?? 0;
-            });
-        }
-    }
+    const stockMap = await fetchStockQtyMapByPartNumbers(stockTable, partNumbers);
     
     const mappedData = (data || []).map(row => ({
         ...row,
@@ -1573,7 +1673,7 @@ export const fetchShopItems = async (
   const { searchTerm = '', partNumberSearch = '', nameSearch = '', brandSearch = '', applicationSearch = '' } = filters;
 
   try {
-    let query = supabase.from(table).select('*', { count: 'exact' }); 
+    let query = supabase.from(table).select(INVENTORY_SELECT_COLUMNS, { count: 'exact' }); 
 
     // Search all fields: name, part_number, brand, application
     if (searchTerm) query = query.or(`name.ilike.%${searchTerm}%,part_number.ilike.%${searchTerm}%,brand.ilike.%${searchTerm}%,application.ilike.%${searchTerm}%`);
@@ -1711,7 +1811,7 @@ export const fetchSoldItems = async (store: string | null): Promise<SoldItemRow[
 
   const { data, error } = await supabase
     .from(table)
-    .select('*')
+    .select(SOLD_ITEM_SELECT_COLUMNS)
     .order('created_at', { ascending: false });
 
   if (error) { console.error('Fetch Sold Error:', error); return []; }
@@ -1724,7 +1824,7 @@ export const fetchSalesPaidItems = async (store: string | null): Promise<SoldIte
 
   const { data, error } = await supabase
     .from('barang_keluar_bjw')
-    .select('*')
+    .select(SOLD_ITEM_SELECT_COLUMNS)
     .ilike('ecommerce', 'SALES')
     .ilike('tempo', 'CASH')
     .order('created_at', { ascending: false });
@@ -2453,16 +2553,47 @@ export const saveOfflineOrder = async (
   }
 };
 
-export const fetchBarangKeluarLog = async (store: string | null, page = 1, limit = 20, search = '') => {
+interface BarangKeluarFilters {
+    search?: string;
+    partNumber?: string;
+    customer?: string;
+    dateFrom?: string;
+    dateTo?: string;
+}
+
+export const fetchBarangKeluarLog = async (
+    store: string | null,
+    page = 1,
+    limit = 20,
+    filters: BarangKeluarFilters | string | undefined = {}
+) => {
     const table = getLogTableName('barang_keluar', store);
     const stockTable = getTableName(store);
     const from = (page - 1) * limit;
     const to = from + limit - 1;
 
-    let query = supabase.from(table).select('*', { count: 'exact' });
+    let query = supabase.from(table).select(BARANG_KELUAR_LOG_SELECT_COLUMNS, { count: 'exact' });
 
-    if (search) {
+    if (typeof filters === 'string' && filters.trim()) {
+        const search = filters.trim();
         query = query.or(`part_number.ilike.%${search}%,name.ilike.%${search}%,customer.ilike.%${search}%`);
+    } else if (typeof filters === 'object') {
+        if (filters.search && filters.search.trim()) {
+            const search = filters.search.trim();
+            query = query.or(`part_number.ilike.%${search}%,name.ilike.%${search}%,customer.ilike.%${search}%`);
+        }
+        if (filters.partNumber && filters.partNumber.trim()) {
+            query = query.ilike('part_number', `%${filters.partNumber.trim()}%`);
+        }
+        if (filters.customer && filters.customer.trim()) {
+            query = query.ilike('customer', `%${filters.customer.trim()}%`);
+        }
+        if (filters.dateFrom) {
+            query = query.gte('created_at', `${filters.dateFrom}T00:00:00`);
+        }
+        if (filters.dateTo) {
+            query = query.lte('created_at', `${filters.dateTo}T23:59:59`);
+        }
     }
 
     // Order by id descending (newest first)
@@ -2475,34 +2606,8 @@ export const fetchBarangKeluarLog = async (store: string | null, page = 1, limit
         return { data: [], total: 0 };
     }
 
-    // Fetch current quantities from stock table
-    // Normalize part numbers to handle variations (spaces, case differences)
-    const normalizePN = (pn: string): string => pn?.trim().toUpperCase().replace(/\s+/g, ' ') || '';
     const partNumbers = [...new Set((data || []).map(row => row.part_number).filter(Boolean))];
-    let stockMap: Record<string, number> = {};
-    
-    if (partNumbers.length > 0) {
-        // Query all stock data and match using normalized part numbers
-        const { data: stockData } = await supabase
-            .from(stockTable)
-            .select('part_number, quantity');
-        
-        if (stockData) {
-            // Create lookup map using normalized part numbers
-            const stockByNormalized = stockData.reduce((acc, item) => {
-                const normalizedKey = normalizePN(item.part_number);
-                acc[normalizedKey] = item.quantity;
-                acc[item.part_number] = item.quantity; // Also keep original
-                return acc;
-            }, {} as Record<string, number>);
-            
-            // Build stockMap matching log part numbers to stock
-            partNumbers.forEach(pn => {
-                const normalized = normalizePN(pn);
-                stockMap[pn] = stockByNormalized[pn] ?? stockByNormalized[normalized] ?? 0;
-            });
-        }
-    }
+    const stockMap = await fetchStockQtyMapByPartNumbers(stockTable, partNumbers);
     
     const mappedData = (data || []).map(row => ({
         ...row,
@@ -2761,7 +2866,7 @@ export const fetchHistoryLogsPaginated = async (
     // Build query
     let query = supabase
       .from(tableName)
-      .select('*', { count: 'exact' });
+      .select(type === 'in' ? BARANG_MASUK_LOG_SELECT_COLUMNS : BARANG_KELUAR_LOG_SELECT_COLUMNS, { count: 'exact' });
 
     // Detail Barang Masuk: exclude data retur agar tidak tampil di modal riwayat.
     if (type === 'in') {
@@ -2827,34 +2932,8 @@ export const fetchHistoryLogsPaginated = async (
       return { data: [], count: 0 };
     }
     
-    // Fetch current quantities from stock table
-    // Normalize part numbers to handle variations (spaces, case differences)
-    const normalizePN = (pn: string): string => pn?.trim().toUpperCase().replace(/\s+/g, ' ') || '';
     const partNumbers = [...new Set((data || []).map(row => row.part_number).filter(Boolean))];
-    let stockMap: Record<string, number> = {};
-    
-    if (partNumbers.length > 0) {
-      // Query all stock data and match using normalized part numbers
-      const { data: stockData } = await supabase
-        .from(stockTable)
-        .select('part_number, quantity');
-      
-      if (stockData) {
-        // Create lookup map using normalized part numbers
-        const stockByNormalized = stockData.reduce((acc, item) => {
-          const normalizedKey = normalizePN(item.part_number);
-          acc[normalizedKey] = item.quantity;
-          acc[item.part_number] = item.quantity; // Also keep original
-          return acc;
-        }, {} as Record<string, number>);
-        
-        // Build stockMap matching log part numbers to stock
-        partNumbers.forEach(pn => {
-          const normalized = normalizePN(pn);
-          stockMap[pn] = stockByNormalized[pn] ?? stockByNormalized[normalized] ?? 0;
-        });
-      }
-    }
+    const stockMap = await fetchStockQtyMapByPartNumbers(stockTable, partNumbers);
     
     // Map data ke format StockHistory yang dipakai HistoryTable
     const mappedData = (data || []).map((row: any) => {

@@ -1,5 +1,5 @@
 // FILE: src/components/GlobalHistoryModal.tsx
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { StockHistory } from '../types';
 import { fetchHistoryLogsPaginated } from '../services/supabaseService';
 import { HistoryTable, SortConfig } from './HistoryTable';
@@ -15,119 +15,78 @@ const ITEMS_PER_PAGE = 50;
 
 export const GlobalHistoryModal: React.FC<GlobalHistoryModalProps> = ({ type, onClose }) => {
   const { selectedStore } = useStore();
-  const [allData, setAllData] = useState<StockHistory[]>([]); // All data from server
+  const [data, setData] = useState<StockHistory[]>([]);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [loadingProgress, setLoadingProgress] = useState('');
+  const [totalCount, setTotalCount] = useState(0);
   
   // Filter states
   const [filterCustomer, setFilterCustomer] = useState('');
   const [filterPartNumber, setFilterPartNumber] = useState('');
+  const [debouncedFilterCustomer, setDebouncedFilterCustomer] = useState('');
+  const [debouncedFilterPartNumber, setDebouncedFilterPartNumber] = useState('');
   
   // Sort state
   const [sortConfig, setSortConfig] = useState<SortConfig>({ key: 'timestamp', direction: 'desc' });
 
-  // Load ALL data once on mount
   useEffect(() => {
-    setLoading(true);
-    setLoadingProgress('Mengambil data...');
-    
-    const loadAllData = async () => {
-      try {
-        // Load all data (use large limit)
-        const { data: result, count } = await fetchHistoryLogsPaginated(
-          type, 
-          1, 
-          100000, // Get all data
-          {}, 
-          selectedStore,
-          'timestamp',
-          'desc'
-        );
-        setAllData(result);
-        setLoadingProgress(`${count.toLocaleString('id-ID')} data dimuat`);
-      } catch (error) {
-        console.error('Error loading data:', error);
-        setAllData([]);
-      } finally {
-        setLoading(false);
-      }
-    };
-    
-    loadAllData();
-  }, [type, selectedStore]);
+    const timer = setTimeout(() => {
+      setDebouncedFilterCustomer(filterCustomer);
+      setDebouncedFilterPartNumber(filterPartNumber);
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [filterCustomer, filterPartNumber]);
 
-  // Reset page when filters change
+  // Reset page when filters/sort change
   useEffect(() => {
     setPage(1);
-  }, [filterCustomer, filterPartNumber, sortConfig]);
+  }, [type, selectedStore, debouncedFilterCustomer, debouncedFilterPartNumber, sortConfig]);
 
-  // Client-side filtering
-  const filteredData = useMemo(() => {
-    let result = [...allData];
-    
-    // Filter by customer/supplier
-    if (filterCustomer.trim()) {
-      const search = filterCustomer.toLowerCase();
-      result = result.filter(item => 
-        (item.reason || '').toLowerCase().includes(search) ||
-        ((item as any).customer || '').toLowerCase().includes(search)
-      );
-    }
-    
-    // Filter by part number or name
-    if (filterPartNumber.trim()) {
-      const search = filterPartNumber.toLowerCase();
-      result = result.filter(item => 
-        (item.partNumber || '').toLowerCase().includes(search) ||
-        (item.name || '').toLowerCase().includes(search)
-      );
-    }
-    
-    return result;
-  }, [allData, filterCustomer, filterPartNumber]);
+  useEffect(() => {
+    let cancelled = false;
+    const loadData = async () => {
+      setLoading(true);
+      setLoadingProgress('Mengambil data...');
+      try {
+        const { data: result, count } = await fetchHistoryLogsPaginated(
+          type,
+          page,
+          ITEMS_PER_PAGE,
+          {
+            customer: debouncedFilterCustomer || undefined,
+            partNumber: debouncedFilterPartNumber || undefined
+          },
+          selectedStore,
+          sortConfig.key || undefined,
+          sortConfig.direction
+        );
 
-  // Client-side sorting
-  const sortedData = useMemo(() => {
-    if (!sortConfig.key) return filteredData;
-    
-    return [...filteredData].sort((a, b) => {
-      let aVal: any = (a as any)[sortConfig.key!];
-      let bVal: any = (b as any)[sortConfig.key!];
-      
-      // Handle special cases
-      if (sortConfig.key === 'customer') {
-        aVal = ((a as any).customer || a.reason || '').toLowerCase();
-        bVal = ((b as any).customer || b.reason || '').toLowerCase();
+        if (!cancelled) {
+          setData(result);
+          setTotalCount(count || 0);
+          setLoadingProgress(`${(count || 0).toLocaleString('id-ID')} data ditemukan`);
+        }
+      } catch (error) {
+        console.error('Error loading data:', error);
+        if (!cancelled) {
+          setData([]);
+          setTotalCount(0);
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
       }
-      
-      // Handle numeric values
-      if (typeof aVal === 'number' && typeof bVal === 'number') {
-        return sortConfig.direction === 'asc' ? aVal - bVal : bVal - aVal;
-      }
-      
-      // Handle null/undefined
-      if (aVal == null) aVal = '';
-      if (bVal == null) bVal = '';
-      
-      // Handle string values
-      aVal = String(aVal).toLowerCase();
-      bVal = String(bVal).toLowerCase();
-      
-      if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
-      if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1;
-      return 0;
-    });
-  }, [filteredData, sortConfig]);
+    };
 
-  // Client-side pagination
-  const paginatedData = useMemo(() => {
-    const start = (page - 1) * ITEMS_PER_PAGE;
-    return sortedData.slice(start, start + ITEMS_PER_PAGE);
-  }, [sortedData, page]);
+    loadData();
+    return () => {
+      cancelled = true;
+    };
+  }, [type, page, selectedStore, debouncedFilterCustomer, debouncedFilterPartNumber, sortConfig]);
 
-  const totalPages = Math.ceil(sortedData.length / ITEMS_PER_PAGE);
-  const totalCount = sortedData.length;
+  const totalPages = Math.ceil(totalCount / ITEMS_PER_PAGE);
 
   // Handle sort
   const handleSort = (key: string) => {
@@ -177,10 +136,10 @@ export const GlobalHistoryModal: React.FC<GlobalHistoryModalProps> = ({ type, on
                     <Loader2 className="animate-spin text-blue-500" size={30}/>
                     <span className="text-sm text-gray-400">{loadingProgress}</span>
                   </div>
-                ) : paginatedData.length === 0 ? (
+                ) : data.length === 0 ? (
                   <div className="text-center py-10 text-gray-500">Tidak ada data history</div>
                 ) : (
-                    <HistoryTable data={paginatedData} sortConfig={sortConfig} onSort={handleSort} />
+                    <HistoryTable data={data} sortConfig={sortConfig} onSort={handleSort} />
                 )}
             </div>
             <div className="p-3 border-t border-gray-700 flex justify-between items-center bg-gray-800 rounded-b-2xl">

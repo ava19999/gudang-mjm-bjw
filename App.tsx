@@ -95,12 +95,17 @@ const AppContent: React.FC = () => {
   const refreshData = async () => {
     setLoading(true);
     try {
-        const inventoryData = await fetchInventory(selectedStore);
-        const bannerItem = inventoryData.find(i => i.partNumber === BANNER_PART_NUMBER);
-        if (bannerItem) setBannerUrl(bannerItem.imageUrl);
+        const [inventoryData, bannerItem, historyData] = await Promise.all([
+          fetchInventory(selectedStore, {
+            includePhotos: false,
+            includePrices: false,
+            includeCostPrices: false
+          }),
+          getItemByPartNumber(BANNER_PART_NUMBER, selectedStore),
+          fetchHistory()
+        ]);
         setItems(inventoryData.filter(i => i.partNumber !== BANNER_PART_NUMBER));
-
-        const historyData = await fetchHistory();
+        setBannerUrl(bannerItem?.imageUrl || '');
         setHistory(historyData);
         setRefreshTrigger(prev => prev + 1);
 

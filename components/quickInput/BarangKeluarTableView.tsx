@@ -18,6 +18,12 @@ export const BarangKeluarTableView: React.FC<Props> = ({ refreshTrigger }) => {
     const [filterDateTo, setFilterDateTo] = useState('');
     const [filterPartNumber, setFilterPartNumber] = useState('');
     const [filterCustomer, setFilterCustomer] = useState('');
+    const [debouncedFilters, setDebouncedFilters] = useState({
+        dateFrom: '',
+        dateTo: '',
+        partNumber: '',
+        customer: ''
+    });
     const LIMIT = 10;
 
     const loadData = async () => {
@@ -31,10 +37,10 @@ export const BarangKeluarTableView: React.FC<Props> = ({ refreshTrigger }) => {
                 customer?: string;
             } = {};
             
-            if (filterDateFrom) filters.dateFrom = filterDateFrom;
-            if (filterDateTo) filters.dateTo = filterDateTo;
-            if (filterPartNumber) filters.partNumber = filterPartNumber;
-            if (filterCustomer) filters.customer = filterCustomer;
+            if (debouncedFilters.partNumber) filters.partNumber = debouncedFilters.partNumber;
+            if (debouncedFilters.customer) filters.customer = debouncedFilters.customer;
+            if (debouncedFilters.dateFrom) filters.dateFrom = debouncedFilters.dateFrom;
+            if (debouncedFilters.dateTo) filters.dateTo = debouncedFilters.dateTo;
             
             // Fetch with server-side filtering
             const { data: logs, total } = await fetchBarangKeluarLog(
@@ -58,16 +64,26 @@ export const BarangKeluarTableView: React.FC<Props> = ({ refreshTrigger }) => {
         setFilterDateTo('');
         setFilterPartNumber('');
         setFilterCustomer('');
+        setDebouncedFilters({ dateFrom: '', dateTo: '', partNumber: '', customer: '' });
         setPage(1);
     };
 
     useEffect(() => { setPage(1); }, [selectedStore]);
     // Server-side filtering: searches entire database, not just current page
-    useEffect(() => { 
-        setPage(1); // Reset to page 1 when filters change
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            setDebouncedFilters({
+                dateFrom: filterDateFrom,
+                dateTo: filterDateTo,
+                partNumber: filterPartNumber,
+                customer: filterCustomer
+            });
+            setPage(1); // Reset to page 1 when filters change
+        }, 350);
+        return () => clearTimeout(timer);
     }, [filterDateFrom, filterDateTo, filterPartNumber, filterCustomer]);
     
-    useEffect(() => { loadData(); }, [selectedStore, page, refreshTrigger, filterDateFrom, filterDateTo, filterPartNumber, filterCustomer]);
+    useEffect(() => { loadData(); }, [selectedStore, page, refreshTrigger, debouncedFilters]);
 
     const totalPages = Math.ceil(totalRows / LIMIT);
 

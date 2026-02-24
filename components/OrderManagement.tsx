@@ -416,7 +416,11 @@ export const OrderManagement: React.FC = () => {
           return;
         }
 
-        const activeInventory = await fetchInventory(selectedStore);
+        const activeInventory = await fetchInventory(selectedStore, {
+          includePhotos: false,
+          includePrices: false,
+          includeCostPrices: false
+        });
         setInventory(activeInventory || []);
 
         if (selectedStore === 'mjm') {

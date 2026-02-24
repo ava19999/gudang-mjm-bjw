@@ -36,6 +36,12 @@ export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger, onRefres
     const [filterDateTo, setFilterDateTo] = useState('');
     const [filterPartNumber, setFilterPartNumber] = useState('');
     const [filterCustomer, setFilterCustomer] = useState('');
+    const [debouncedFilters, setDebouncedFilters] = useState({
+        dateFrom: '',
+        dateTo: '',
+        partNumber: '',
+        customer: ''
+    });
     const [deletingId, setDeletingId] = useState<number | null>(null);
     const [editingId, setEditingId] = useState<number | null>(null);
     const [editForm, setEditForm] = useState<{
@@ -219,10 +225,10 @@ export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger, onRefres
         try {
             // Build filters object for server-side filtering
             const filters = {
-                partNumber: filterPartNumber || undefined,
-                customer: filterCustomer || undefined,
-                dateFrom: filterDateFrom || undefined,
-                dateTo: filterDateTo || undefined,
+                partNumber: debouncedFilters.partNumber || undefined,
+                customer: debouncedFilters.customer || undefined,
+                dateFrom: debouncedFilters.dateFrom || undefined,
+                dateTo: debouncedFilters.dateTo || undefined,
             };
             
             const { data: logs, total } = await fetchBarangMasukLog(selectedStore, page, LIMIT, filters);
@@ -285,6 +291,7 @@ export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger, onRefres
         setFilterDateTo('');
         setFilterPartNumber('');
         setFilterCustomer('');
+        setDebouncedFilters({ dateFrom: '', dateTo: '', partNumber: '', customer: '' });
         setPage(1);
     };
 
@@ -439,8 +446,19 @@ export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger, onRefres
     };
 
     useEffect(() => { setPage(1); }, [selectedStore]);
-    // Note: Filters trigger immediate reload. For production, consider debouncing filter inputs to reduce API calls.
-    useEffect(() => { loadData(); }, [selectedStore, page, refreshTrigger, filterDateFrom, filterDateTo, filterPartNumber, filterCustomer]);
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            setDebouncedFilters({
+                dateFrom: filterDateFrom,
+                dateTo: filterDateTo,
+                partNumber: filterPartNumber,
+                customer: filterCustomer
+            });
+        }, 350);
+        return () => clearTimeout(timer);
+    }, [filterDateFrom, filterDateTo, filterPartNumber, filterCustomer]);
+
+    useEffect(() => { loadData(); }, [selectedStore, page, refreshTrigger, debouncedFilters]);
 
     const totalPages = Math.ceil(totalRows / LIMIT);
 
