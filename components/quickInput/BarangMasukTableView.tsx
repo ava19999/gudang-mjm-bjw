@@ -39,12 +39,13 @@ export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger, onRefres
     const [deletingId, setDeletingId] = useState<number | null>(null);
     const [editingId, setEditingId] = useState<number | null>(null);
     const [editForm, setEditForm] = useState<{
+        tanggal: string;
         part_number: string;
         quantity: string;
         harga_satuan: string;
         customer: string;
         tempo: string;
-    }>({ part_number: '', quantity: '', harga_satuan: '', customer: '', tempo: '' });
+    }>({ tanggal: '', part_number: '', quantity: '', harga_satuan: '', customer: '', tempo: '' });
     const [savingId, setSavingId] = useState<number | null>(null);
     
     // Part number dropdown states
@@ -289,8 +290,21 @@ export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger, onRefres
     };
 
     const handleEdit = (item: any) => {
+        const toDateInputValue = (value: string | null | undefined): string => {
+            if (!value) return '';
+            const direct = value.match(/^(\d{4}-\d{2}-\d{2})/);
+            if (direct) return direct[1];
+            const parsed = new Date(value);
+            if (Number.isNaN(parsed.getTime())) return '';
+            const y = parsed.getFullYear();
+            const m = String(parsed.getMonth() + 1).padStart(2, '0');
+            const d = String(parsed.getDate()).padStart(2, '0');
+            return `${y}-${m}-${d}`;
+        };
+
         setEditingId(item.id);
         setEditForm({
+            tanggal: toDateInputValue(item.created_at),
             part_number: item.part_number || '',
             quantity: String(item.quantity || item.qty_masuk || 0),
             harga_satuan: String(item.harga_satuan || 0),
@@ -301,13 +315,14 @@ export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger, onRefres
 
     const handleCancelEdit = () => {
         setEditingId(null);
-        setEditForm({ part_number: '', quantity: '', harga_satuan: '', customer: '', tempo: '' });
+        setEditForm({ tanggal: '', part_number: '', quantity: '', harga_satuan: '', customer: '', tempo: '' });
     };
 
     const handleSaveEdit = async (item: any) => {
         const newQty = parseInt(editForm.quantity);
         const newHarga = parseFloat(editForm.harga_satuan) || 0;
         const newPartNumber = editForm.part_number.trim().toUpperCase();
+        const newTanggal = editForm.tanggal;
         const oldQty = item.quantity || item.qty_masuk || 0;
         const oldPartNumber = item.part_number;
         const partNumberChanged = newPartNumber !== oldPartNumber;
@@ -322,17 +337,28 @@ export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger, onRefres
             return;
         }
 
+        if (!newTanggal) {
+            alert('Tanggal wajib diisi');
+            return;
+        }
+
         setSavingId(item.id);
         try {
             const tableName = selectedStore === 'mjm' ? 'barang_masuk_mjm' : 'barang_masuk_bjw';
             const inventoryTable = selectedStore === 'mjm' ? 'base_mjm' : 'base_bjw';
             const qtyDiff = newQty - oldQty;
             let resultingCurrentQty = item.current_qty || 0;
+            const oldCreatedAt = typeof item.created_at === 'string' ? item.created_at : '';
+            const timeSuffixIndex = oldCreatedAt.indexOf('T');
+            const updatedCreatedAt = timeSuffixIndex > -1
+                ? `${newTanggal}${oldCreatedAt.slice(timeSuffixIndex)}`
+                : `${newTanggal}T00:00:00+00:00`;
 
             // Update barang_masuk record (including part_number)
             const { error: updateError } = await supabase
                 .from(tableName)
                 .update({
+                    created_at: updatedCreatedAt,
                     part_number: newPartNumber,
                     qty_masuk: newQty,
                     harga_satuan: newHarga,
@@ -421,13 +447,14 @@ export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger, onRefres
                         harga_total: newQty * newHarga,
                         customer: editForm.customer,
                         tempo: editForm.tempo,
+                        created_at: updatedCreatedAt,
                         current_qty: resultingCurrentQty
                     } 
                     : d
             ));
 
             setEditingId(null);
-            setEditForm({ part_number: '', quantity: '', harga_satuan: '', customer: '', tempo: '' });
+            setEditForm({ tanggal: '', part_number: '', quantity: '', harga_satuan: '', customer: '', tempo: '' });
             
             if (onRefresh) onRefresh();
         } catch (error) {
@@ -543,7 +570,18 @@ export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger, onRefres
                         ) : (
                             data.map((item, idx) => (
                                 <tr key={item.id || idx} className={`hover:bg-gray-800/50 transition-colors ${editingId === item.id ? 'bg-gray-800/80' : ''}`}>
-                                    <td className="px-3 py-2 text-gray-400 font-mono whitespace-nowrap">{formatDate(item.created_at)}</td>
+                                    <td className="px-3 py-2 text-gray-400 font-mono whitespace-nowrap">
+                                        {editingId === item.id ? (
+                                            <input
+                                                type="date"
+                                                value={editForm.tanggal}
+                                                onChange={(e) => setEditForm({ ...editForm, tanggal: e.target.value })}
+                                                className="w-36 px-2 py-1 text-xs bg-gray-900 border border-gray-500 rounded text-gray-300 focus:outline-none"
+                                            />
+                                        ) : (
+                                            formatDate(item.created_at)
+                                        )}
+                                    </td>
                                     <td className="px-3 py-2 font-bold font-mono relative">
                                         {editingId === item.id ? (
                                             <div ref={partDropdownRef} className="relative">
@@ -668,7 +706,10 @@ export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger, onRefres
                                                 className="w-20 px-2 py-1 text-xs bg-gray-900 border border-gray-500 rounded text-gray-300 focus:outline-none"
                                             >
                                                 <option value="CASH">CASH</option>
-                                                <option value="TEMPO">TEMPO</option>
+                                                <option value="1 BLN">1 BLN</option>
+                                                <option value="2 BLN">2 BLN</option>
+                                                <option value="3 BLN">3 BLN</option>
+                                                <option value="NADIR">NADIR</option>
                                             </select>
                                         ) : (
                                             <span className="text-gray-500">{item.tempo || '-'}</span>
