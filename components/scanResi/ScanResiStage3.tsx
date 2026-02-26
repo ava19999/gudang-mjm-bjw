@@ -1202,6 +1202,12 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
   // Helper untuk status-stage dan validasi harga
   const isStage1or2Pending = (row: Stage3Row) => row.status_message === 'Belum Scan S1' || row.status_message === 'Pending S2';
   const isHargaKosong = (row: Stage3Row) => (row.qty_keluar || 0) > 0 && (row.harga_total || 0) <= 0;
+  const isRowReadyToProcess = (row: Stage3Row) => {
+    const hasPartNumber = Boolean(row.part_number && row.part_number.trim() !== '');
+    const normalValid = row.is_db_verified && row.is_stock_valid && hasPartNumber;
+    const doubleOverridden = row.status_message === 'Double' && row.force_override_double && row.is_stock_valid && hasPartNumber;
+    return normalValid || doubleOverridden;
+  };
 
   // REALTIME COLLABORATION STATE
   const [activeUsers, setActiveUsers] = useState<{userId: string, userName: string, color: string}[]>([]);
@@ -3123,17 +3129,32 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
       alert(`Tidak bisa input ke Barang Keluar karena masih ada harga 0 (${hargaKosongRows.length} item).\nIsi harga terlebih dulu. Contoh resi: ${sample}`);
       return;
     }
-    const validRows = rows.filter(r => {
-      // Kondisi normal: verified, stock valid, dan ada part_number
-      const normalValid = r.is_db_verified && r.is_stock_valid && r.part_number;
-      
-      // ATAU: Status Double tapi user sudah force override
-      const doubleOverridden = r.status_message === 'Double' && r.force_override_double && r.is_stock_valid && r.part_number;
-      
-      return normalValid || doubleOverridden;
-    });
-    if (validRows.length === 0) { alert("Tidak ada item siap proses (Pastikan Status Hijau atau centang Override untuk Double)."); return; }
-    if (!confirm(`Proses ${validRows.length} item ke Barang Keluar?`)) return;
+
+    // ALL-OR-NOTHING PER RESI: hanya proses resi yang SEMUA item-nya ready
+    const groupedByResi = rows.reduce((acc, row) => {
+      const key = row.resi || 'NO_RESI';
+      if (!acc[key]) acc[key] = [];
+      acc[key].push(row);
+      return acc;
+    }, {} as Record<string, Stage3Row[]>);
+
+    const readyResiEntries = Object.entries(groupedByResi).filter(([, resiItems]) =>
+      resiItems.length > 0 && resiItems.every(isRowReadyToProcess)
+    );
+    const blockedResis = Object.entries(groupedByResi)
+      .filter(([, resiItems]) => resiItems.some(r => !isRowReadyToProcess(r)))
+      .map(([resi]) => resi);
+
+    const validRows = readyResiEntries.flatMap(([, resiItems]) => resiItems);
+    if (validRows.length === 0) {
+      alert("Tidak ada resi yang siap diproses penuh. Pastikan setiap item dalam satu resi berstatus Ready.");
+      return;
+    }
+
+    const blockedInfo = blockedResis.length > 0
+      ? `\n\nCatatan: ${blockedResis.length} resi belum ready dan tidak diproses.`
+      : '';
+    if (!confirm(`Proses ${validRows.length} item dari ${readyResiEntries.length} resi ke Barang Keluar?${blockedInfo}`)) return;
     
     // PROCESSING MODAL: Initialize
     const initialItems: ProcessingItem[] = validRows.map(r => ({
@@ -3157,6 +3178,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
     
     let successCount = 0;
     let errorCount = 0;
+    const processedIds: string[] = [];
     
     // Process one by one untuk visual feedback
     for (let i = 0; i < validRows.length; i++) {
@@ -3195,6 +3217,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
             item.id === row.id ? { ...item, status: 'success' } : item
           ));
           successCount++;
+          processedIds.push(row.id);
           setProcessingSuccessCount(successCount);
         } else {
           // Update item status to error
@@ -3218,7 +3241,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
     
     // Delete dari scan_resi setelah semua item selesai
     const successfulResis = [...new Set(validRows.filter(r => 
-      initialItems.find(i => i.id === r.id)?.status !== 'error'
+      processedIds.includes(r.id)
     ).map(r => r.resi).filter(Boolean))];
     if (successfulResis.length > 0) {
       await deleteProcessedScanResi(selectedStore, successfulResis);
@@ -3229,10 +3252,8 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
     setLoading(false);
     
     // Refresh data
-    setRows(prev => prev.filter(r => !validRows.find(v => v.id === r.id && 
-      processingItems.find(p => p.id === v.id)?.status !== 'error'
-    )));
-    if (onRefresh) onRefresh();
+    await loadSavedDataFromDB();
+    onRefresh?.();
   };
 
   const isKilatRow = (row: Stage3Row) => row.ecommerce?.toUpperCase().includes('KILAT');
@@ -3317,10 +3338,23 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
   // VISUAL ROWS - array rows sesuai urutan visual di tabel (setelah grouping)
   // Ini penting untuk navigasi keyboard yang benar
   const visualRows = Object.values(groupedByResi).flat();
+  const processableRowCount = Object.values(
+    rows.reduce((acc, row) => {
+      const resiKey = row.resi || 'NO_RESI';
+      if (!acc[resiKey]) acc[resiKey] = [];
+      acc[resiKey].push(row);
+      return acc;
+    }, {} as Record<string, Stage3Row[]>)
+  ).reduce((sum, resiItems) => {
+    if (resiItems.length > 0 && resiItems.every(isRowReadyToProcess)) {
+      return sum + resiItems.length;
+    }
+    return sum;
+  }, 0);
 
   // Hitung status per grup resi
   const getGroupStatus = (items: Stage3Row[]) => {
-    const allReady = items.every(r => r.status_message === 'Ready' || (r.status_message === 'Double' && r.force_override_double));
+    const allReady = items.every(isRowReadyToProcess);
     const hasStokKurang = items.some(r => r.status_message === 'Stok Kurang' || r.status_message === 'Stok Total Kurang');
     const hasBelumScan = items.some(r => r.status_message === 'Belum Scan S1');
     const hasPendingS2 = items.some(r => r.status_message === 'Pending S2');
@@ -3362,6 +3396,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
       alert("Pilih minimal 1 resi untuk diproses!");
       return;
     }
+    const selectedResiArray = Array.from(selectedResis);
     const hargaKosongSelected = rows.filter(r => selectedResis.has(r.resi) && isHargaKosong(r));
     if (hargaKosongSelected.length > 0) {
       const sample = hargaKosongSelected.slice(0, 3).map(r => r.resi || r.no_pesanan || r.part_number || '-').join(', ');
@@ -3369,31 +3404,25 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
       return;
     }
     
-    // VALIDASI: Cek apakah ada resi yang memiliki item dengan stok kurang
-    // Semua item dalam satu resi harus ready sebelum bisa diproses
-    const resiWithStockIssues: string[] = [];
-    selectedResis.forEach(resi => {
+    // VALIDASI: Semua item dalam satu resi harus ready sebelum bisa diproses
+    const resiNotReady: string[] = [];
+    selectedResiArray.forEach(resi => {
       const itemsInResi = rows.filter(r => r.resi === resi);
-      const hasStockIssue = itemsInResi.some(r => !r.is_stock_valid || r.stock_saat_ini < r.qty_keluar);
-      if (hasStockIssue) {
-        resiWithStockIssues.push(resi);
+      const hasNotReadyItem = itemsInResi.length === 0 || itemsInResi.some(r => !isRowReadyToProcess(r));
+      if (hasNotReadyItem) {
+        resiNotReady.push(resi);
       }
     });
     
-    if (resiWithStockIssues.length > 0) {
-      const resiListText = resiWithStockIssues.slice(0, 5).join('\n• ');
-      const moreText = resiWithStockIssues.length > 5 ? `\n... dan ${resiWithStockIssues.length - 5} resi lainnya` : '';
-      alert(`Tidak bisa memproses! Resi berikut memiliki item dengan stok kurang/kosong:\n\n• ${resiListText}${moreText}\n\nSemua item dalam satu resi harus memiliki stok cukup sebelum bisa diproses.`);
+    if (resiNotReady.length > 0) {
+      const resiListText = resiNotReady.slice(0, 5).join('\n- ');
+      const moreText = resiNotReady.length > 5 ? `\n... dan ${resiNotReady.length - 5} resi lainnya` : '';
+      alert(`Tidak bisa memproses! Resi berikut memiliki item belum ready:\n\n- ${resiListText}${moreText}\n\nSemua item dalam satu resi harus Ready sebelum bisa diproses.`);
       return;
     }
     
-    // Filter rows yang resinya dipilih dan statusnya ready
-    const selectedRows = rows.filter(r => {
-      if (!selectedResis.has(r.resi)) return false;
-      const normalValid = r.is_db_verified && r.is_stock_valid && r.part_number;
-      const doubleOverridden = r.status_message === 'Double' && r.force_override_double && r.is_stock_valid && r.part_number;
-      return normalValid || doubleOverridden;
-    });
+    // Karena sudah validasi all-or-nothing per resi, ambil semua item dari resi terpilih
+    const selectedRows = rows.filter(r => selectedResis.has(r.resi));
     
     if (selectedRows.length === 0) {
       alert("Tidak ada item siap proses dari resi yang dipilih. Pastikan status hijau (Ready).");
@@ -3815,11 +3844,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                         <DownloadCloud size={12}/> <span className="hidden sm:inline">DB</span> Pending
                     </button>
                     <button onClick={handleProcess} className="bg-green-600 hover:bg-green-500 text-white px-2 md:px-4 py-1 md:py-1.5 rounded font-bold shadow-md flex gap-1 md:gap-2 items-center text-[10px] md:text-sm transition-all transform active:scale-95">
-                        <Save size={14}/> PROSES ({rows.filter(r => {
-                          const normalValid = r.is_db_verified && r.is_stock_valid && r.part_number;
-                          const doubleOverridden = r.status_message === 'Double' && r.force_override_double && r.is_stock_valid && r.part_number;
-                          return normalValid || doubleOverridden;
-                        }).length})
+                        <Save size={14}/> PROSES ({processableRowCount})
                     </button>
                 </div>
             </div>
@@ -4222,20 +4247,19 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
             {(() => {
               // Hitung resi yang siap vs tidak siap
               const selectedResiArray = Array.from(selectedResis);
-              const resiWithStockIssues = selectedResiArray.filter(resi => {
+              const resiNotReady = selectedResiArray.filter(resi => {
                 const itemsInResi = rows.filter(r => r.resi === resi);
-                return itemsInResi.some(r => !r.is_stock_valid || r.stock_saat_ini < r.qty_keluar);
+                return itemsInResi.length === 0 || itemsInResi.some(r => !isRowReadyToProcess(r));
               });
-              const readyResiCount = selectedResiArray.length - resiWithStockIssues.length;
               
               return (
                 <>
                   <span className="text-blue-200 font-bold text-sm">
                     {selectedResis.size} resi dipilih ({rows.filter(r => selectedResis.has(r.resi)).length} item)
                   </span>
-                  {resiWithStockIssues.length > 0 && (
+                  {resiNotReady.length > 0 && (
                     <span className="text-red-400 text-xs">
-                      ⚠️ {resiWithStockIssues.length} resi tidak bisa diproses (stok kurang)
+                      {resiNotReady.length} resi belum siap diproses
                     </span>
                   )}
                 </>
@@ -4342,8 +4366,8 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                 const firstItem = resiItems[0];
                 const totalQty = resiItems.reduce((sum, r) => sum + r.qty_keluar, 0);
                 const totalHarga = resiItems.reduce((sum, r) => sum + r.harga_total, 0);
-                // Cek apakah ada item dengan stok kurang dalam resi ini
-                const hasStockIssue = resiItems.some(r => !r.is_stock_valid || r.stock_saat_ini < r.qty_keluar);
+                // Cek apakah ada item belum ready dalam resi ini
+                const hasNotReadyItem = resiItems.some(r => !isRowReadyToProcess(r));
                 const canProcess = groupStatus.status === 'Ready';
                 
                 return resiItems.map((row, itemIdx) => {
@@ -4357,21 +4381,21 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                       
                       {/* CHECKBOX - hanya tampil di baris pertama grup */}
                       {isFirstOfGroup ? (
-                        <td rowSpan={resiItems.length} className={`border border-gray-600 p-0 text-center align-middle ${isSelected ? 'bg-blue-900/30' : hasStockIssue ? 'bg-red-900/20' : 'bg-gray-800'}`}>
+                        <td rowSpan={resiItems.length} className={`border border-gray-600 p-0 text-center align-middle ${isSelected ? 'bg-blue-900/30' : hasNotReadyItem ? 'bg-red-900/20' : 'bg-gray-800'}`}>
                           <div className="flex flex-col items-center gap-1 py-1">
                             <input 
                               type="checkbox"
                               checked={isSelected}
                               onChange={() => toggleSelectResi(resiKey)}
-                              className={`w-5 h-5 cursor-pointer ${hasStockIssue ? 'accent-red-500' : 'accent-green-500'}`}
-                              title={hasStockIssue ? 'Ada item dengan stok kurang - tidak bisa diproses' : (canProcess ? 'Siap diproses' : 'Belum siap diproses')}
+                              className={`w-5 h-5 cursor-pointer ${hasNotReadyItem ? 'accent-red-500' : 'accent-green-500'}`}
+                              title={hasNotReadyItem ? 'Ada item belum ready - tidak bisa diproses' : (canProcess ? 'Siap diproses' : 'Belum siap diproses')}
                             />
                             {resiItems.length > 1 && (
-                              <span className={`text-[9px] ${hasStockIssue ? 'text-red-400' : 'text-gray-400'}`}>
-                                {resiItems.length} item{hasStockIssue ? ' ⚠️' : ''}
+                              <span className={`text-[9px] ${hasNotReadyItem ? 'text-red-400' : 'text-gray-400'}`}>
+                                {resiItems.length} item{hasNotReadyItem ? ' ⚠️' : ''}
                               </span>
                             )}
-                            {hasStockIssue && resiItems.length === 1 && (
+                            {hasNotReadyItem && resiItems.length === 1 && (
                               <span className="text-[9px] text-red-400">⚠️</span>
                             )}
                           </div>
