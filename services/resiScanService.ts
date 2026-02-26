@@ -721,42 +721,113 @@ export const fetchPendingCSVItems = async (store: string | null) => {
   
   if (!data || data.length === 0) return [];
   
-  // ===== FILTER: Buang resi yang sudah ada di barang_keluar (sudah terjual) =====
-  const allResis = data.map((d: any) => d.resi).filter(Boolean);
-  const allOrderIds = data.map((d: any) => d.order_id).filter(Boolean);
-  const allToCheck = [...new Set([...allResis, ...allOrderIds])];
-  
-  const existingInBarangKeluar = await checkExistingInBarangKeluar(allToCheck, store);
-  
-  // Jika ada resi yang sudah terjual, update status menjadi 'processed' - AWAIT agar selesai
-  const soldResis: string[] = [];
-  const filteredData = data.filter((item: any) => {
-    const resiUpper = (item.resi || '').trim().toUpperCase();
-    const orderIdUpper = (item.order_id || '').trim().toUpperCase();
-    
-    if (existingInBarangKeluar.has(resiUpper) || existingInBarangKeluar.has(orderIdUpper)) {
-      soldResis.push(item.resi);
-      return false; // Exclude dari hasil
+  // ===== SYNC STATUS PER-ITEM (resi + part_number), BUKAN PER-RESI =====
+  const logTable = getBarangKeluarTable(store);
+  const allResis = [...new Set(data.map((d: any) => d.resi).filter(Boolean))];
+  if (allResis.length === 0) return data;
+
+  // Ambil log barang_keluar untuk resi-resi yang sedang pending
+  const { data: soldLogs, error: soldErr } = await supabase
+    .from(logTable)
+    .select('resi, part_number')
+    .in('resi', allResis)
+    .not('part_number', 'is', null)
+    .limit(5000);
+
+  if (soldErr) {
+    console.warn('[fetchPendingCSVItems] Gagal sync dengan barang_keluar, fallback ke pending murni:', soldErr.message);
+    return data;
+  }
+
+  // Hitung jumlah terjual per key (support duplicate key di satu resi)
+  const soldCountMap = new Map<string, number>();
+  (soldLogs || []).forEach((log: any) => {
+    const resiKey = (log.resi || '').trim().toUpperCase();
+    const partKey = (log.part_number || '').trim().toUpperCase();
+    if (!resiKey || !partKey) return;
+    const key = `${resiKey}||${partKey}`;
+    soldCountMap.set(key, (soldCountMap.get(key) || 0) + 1);
+  });
+
+  // Ambil item processed pada resi yang sama untuk recovery jika dulu salah auto-mark
+  const { data: processedRows, error: processedErr } = await supabase
+    .from(table)
+    .select('*')
+    .eq('status', 'processed')
+    .in('resi', allResis)
+    .limit(2000);
+
+  if (processedErr) {
+    console.warn('[fetchPendingCSVItems] Gagal cek processed rows untuk recovery:', processedErr.message);
+  }
+
+  const falseProcessedIds: Array<string | number> = [];
+  const recoveredRows: any[] = [];
+
+  // Alokasikan sold count ke processed rows dulu (yang valid tetap processed)
+  (processedRows || []).forEach((row: any) => {
+    const resiKey = (row.resi || '').trim().toUpperCase();
+    const partKey = (row.part_number || '').trim().toUpperCase();
+    if (!resiKey || !partKey) return;
+    const key = `${resiKey}||${partKey}`;
+    const current = soldCountMap.get(key) || 0;
+    if (current > 0) {
+      soldCountMap.set(key, current - 1);
+      return;
+    }
+
+    // Tidak ada jejak di barang_keluar => kemungkinan salah auto-mark, kembalikan ke pending
+    falseProcessedIds.push(row.id);
+    recoveredRows.push({ ...row, status: 'pending' });
+  });
+
+  if (falseProcessedIds.length > 0) {
+    const { error: recoverErr } = await supabase
+      .from(table)
+      .update({ status: 'pending' })
+      .in('id', falseProcessedIds as any[]);
+
+    if (recoverErr) {
+      console.error('[fetchPendingCSVItems] Gagal recovery processed->pending:', recoverErr);
+    } else {
+      console.log(`[fetchPendingCSVItems] Recovered ${falseProcessedIds.length} item salah processed menjadi pending.`);
+    }
+  }
+
+  // Sinkron pending -> processed jika memang sudah ada log barang_keluar
+  const pendingSoldIds: Array<string | number> = [];
+  const filteredPending = data.filter((row: any) => {
+    const resiKey = (row.resi || '').trim().toUpperCase();
+    const partKey = (row.part_number || '').trim().toUpperCase();
+    if (!resiKey || !partKey) return true;
+
+    const key = `${resiKey}||${partKey}`;
+    const current = soldCountMap.get(key) || 0;
+    if (current > 0) {
+      soldCountMap.set(key, current - 1);
+      pendingSoldIds.push(row.id);
+      return false;
     }
     return true;
   });
-  
-  // Update status resi yang sudah terjual ke 'processed' - AWAIT agar selesai
-  if (soldResis.length > 0) {
-    console.log(`[fetchPendingCSVItems] Auto-marking ${soldResis.length} resi as processed (already in barang_keluar):`, soldResis);
-    const { error: updateErr } = await supabase
+
+  if (pendingSoldIds.length > 0) {
+    const { error: markErr } = await supabase
       .from(table)
       .update({ status: 'processed' })
-      .in('resi', soldResis);
-    
-    if (updateErr) {
-      console.error('Error auto-updating sold resi status:', updateErr);
+      .in('id', pendingSoldIds as any[]);
+
+    if (markErr) {
+      console.error('[fetchPendingCSVItems] Gagal sync pending->processed:', markErr);
     } else {
-      console.log(`[fetchPendingCSVItems] Successfully marked ${soldResis.length} resi as processed`);
+      console.log(`[fetchPendingCSVItems] Synced ${pendingSoldIds.length} pending item menjadi processed.`);
     }
   }
-  
-  return filteredData;
+
+  // Gabungkan pending asli + row hasil recovery
+  const merged = [...filteredPending, ...recoveredRows];
+  merged.sort((a: any, b: any) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
+  return merged;
 };
 
 // Helper: Cek apakah item ada di KILAT prestock (sudah dikirim ke gudang Shopee)
