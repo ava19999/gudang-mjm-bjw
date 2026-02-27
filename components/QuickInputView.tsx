@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { InventoryItem } from '../types';
 import { updateInventory, getItemByPartNumber, saveOfflineOrder, fetchDistinctSuppliers, fetchDistinctCustomers } from '../services/supabaseService';
-import { createEmptyRow, checkIsRowComplete } from './quickInput/quickInputUtils';
+import { createEmptyRow, checkIsRowComplete, getTodayDate } from './quickInput/quickInputUtils';
 import { QuickInputRow } from './quickInput/types';
 import { QuickInputHeader } from './quickInput/QuickInputHeader';
 import { QuickInputFooter } from './quickInput/QuickInputFooter';
@@ -32,15 +32,19 @@ const createInitialRowsForMode = (mode: 'in' | 'out', count: number = MIN_QUICK_
 
 const normalizeDraftRows = (raw: unknown, mode: 'in' | 'out'): QuickInputRow[] => {
   if (!Array.isArray(raw)) return createInitialRowsForMode(mode);
+  const todayDate = getTodayDate();
+  const enforceTodayOnOutMode = mode === 'out';
 
   const hydrated = raw.map((entry, index) => {
     const baseRow = createEmptyRow(index + 1);
     const draft = entry && typeof entry === 'object' ? (entry as Partial<QuickInputRow>) : {};
+    const draftTanggal = typeof draft.tanggal === 'string' ? draft.tanggal : baseRow.tanggal;
 
     return {
       ...baseRow,
       ...draft,
       id: index + 1,
+      tanggal: enforceTodayOnOutMode ? todayDate : draftTanggal,
       operation: mode,
       error: undefined,
       isLoading: false
@@ -309,10 +313,21 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
   const updateRow = (id: number, updates: Partial<QuickInputRow> | keyof QuickInputRow, value?: any) => {
     setRows(prev => prev.map(row => {
         if (row.id !== id) return row;
+        const todayDate = getTodayDate();
+
         if (typeof updates === 'string') {
-            return { ...row, [updates]: value, error: undefined };
+            const sanitizedValue = mode === 'out' && updates === 'tanggal'
+              ? todayDate
+              : value;
+
+            return { ...row, [updates]: sanitizedValue, error: undefined };
         } else {
-            return { ...row, ...updates, error: undefined };
+            const sanitizedUpdates = { ...updates };
+            if (mode === 'out' && Object.prototype.hasOwnProperty.call(sanitizedUpdates, 'tanggal')) {
+              sanitizedUpdates.tanggal = todayDate;
+            }
+
+            return { ...row, ...sanitizedUpdates, error: undefined };
         }
     }));
   };
@@ -408,6 +423,14 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
       }
       
       if (mode === 'out') {
+        const todayDate = getTodayDate();
+        const rowsWithInvalidDate = rowsToSave.filter(row => row.tanggal !== todayDate);
+        if (rowsWithInvalidDate.length > 0) {
+          rowsWithInvalidDate.forEach(row => updateRow(row.id, 'tanggal', todayDate));
+          if (showToast) showToast('Tanggal barang keluar harus hari ini. Sudah disesuaikan otomatis.', 'error');
+          return;
+        }
+
         // Barang Keluar: Group by customer + tanggal, save to orders
         // First validate all rows
         const validationResults = await Promise.all(rowsToSave.map(row => saveRow(row)));

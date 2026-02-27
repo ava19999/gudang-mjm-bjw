@@ -2,7 +2,7 @@
 import { QuickInputRow } from './types';
 
 // Helper to get today's date in YYYY-MM-DD format (WIB)
-const getTodayDate = (): string => {
+export const getTodayDate = (): string => {
     return new Intl.DateTimeFormat('sv-SE', {
         timeZone: 'Asia/Jakarta'
     }).format(new Date());
