@@ -61,6 +61,14 @@ interface Pembayaran {
   for_months?: string | null;
 }
 
+interface TagihanDraftItem {
+  key: string;
+  tanggal: string;
+  jumlah: string;
+}
+
+type TagihanPersistInput = Omit<TagihanToko, 'id' | 'created_at'>;
+
 // Utility functions
 const formatCurrency = (value: number): string => {
   return new Intl.NumberFormat('id-ID', {
@@ -118,9 +126,211 @@ const parseCurrencyInput = (value: string): string => {
   return value.replace(/\D/g, '');
 };
 
+const LOCAL_TAGIHAN_STORAGE_KEY = 'tagihan_toko_local_fallback_v1';
+
+const getErrorMessage = (error: unknown): string => {
+  if (error && typeof error === 'object' && 'message' in error) {
+    return String((error as { message?: string }).message || '');
+  }
+  return '';
+};
+
+const isMissingTableError = (error: unknown, tableName: string): boolean => {
+  const message = getErrorMessage(error).toLowerCase();
+  if (!message) return false;
+  return (
+    message.includes(`could not find the table 'public.${tableName}'`.toLowerCase()) ||
+    message.includes(`relation "${tableName}" does not exist`) ||
+    message.includes(`relation '${tableName}' does not exist`)
+  );
+};
+
+const readLocalTagihanFallback = (): TagihanToko[] => {
+  if (typeof window === 'undefined') return [];
+
+  try {
+    const raw = window.localStorage.getItem(LOCAL_TAGIHAN_STORAGE_KEY);
+    if (!raw) return [];
+
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+
+    return parsed
+      .map((item: any) => {
+        const id = Number(item?.id);
+        const customer = typeof item?.customer === 'string' ? item.customer : '';
+        const tempo = typeof item?.tempo === 'string' ? item.tempo : '';
+        const tanggal = typeof item?.tanggal === 'string' ? item.tanggal : '';
+        const jumlah = Number(item?.jumlah);
+        const keterangan = typeof item?.keterangan === 'string' ? item.keterangan : '';
+        const createdAt = typeof item?.created_at === 'string' ? item.created_at : new Date().toISOString();
+        const store = typeof item?.store === 'string' ? item.store : 'all';
+
+        if (!Number.isFinite(id) || !customer || !tanggal || !Number.isFinite(jumlah)) {
+          return null;
+        }
+
+        return {
+          id,
+          customer,
+          tempo,
+          tanggal,
+          jumlah,
+          keterangan,
+          created_at: createdAt,
+          store,
+        } satisfies TagihanToko;
+      })
+      .filter((item): item is TagihanToko => item !== null);
+  } catch (error) {
+    console.error('Failed to read local tagihan fallback:', error);
+    return [];
+  }
+};
+
+const writeLocalTagihanFallback = (rows: TagihanToko[]) => {
+  if (typeof window === 'undefined') return;
+
+  try {
+    window.localStorage.setItem(LOCAL_TAGIHAN_STORAGE_KEY, JSON.stringify(rows));
+  } catch (error) {
+    console.error('Failed to write local tagihan fallback:', error);
+  }
+};
+
+const appendLocalTagihanFallback = (rows: TagihanPersistInput[]): TagihanToko[] => {
+  const existing = readLocalTagihanFallback();
+  const timestamp = Date.now();
+  const createdAt = new Date().toISOString();
+  const nextRows = rows.map((row, index) => ({
+    id: -(timestamp + index),
+    ...row,
+    created_at: createdAt,
+  }));
+
+  writeLocalTagihanFallback([...existing, ...nextRows]);
+  return nextRows;
+};
+
+const updateLocalTagihanFallback = (id: number, patch: Partial<TagihanPersistInput>): boolean => {
+  const existing = readLocalTagihanFallback();
+  let found = false;
+
+  const nextRows = existing.map(row => {
+    if (row.id !== id) return row;
+    found = true;
+    return { ...row, ...patch };
+  });
+
+  if (!found) return false;
+  writeLocalTagihanFallback(nextRows);
+  return true;
+};
+
+const deleteLocalTagihanFallback = (id: number): boolean => {
+  const existing = readLocalTagihanFallback();
+  const nextRows = existing.filter(row => row.id !== id);
+
+  if (nextRows.length === existing.length) return false;
+  writeLocalTagihanFallback(nextRows);
+  return true;
+};
+
+const renameLocalTagihanFallback = (oldName: string, newName: string): number => {
+  const existing = readLocalTagihanFallback();
+  let count = 0;
+
+  const nextRows = existing.map(row => {
+    if (row.customer?.trim().toUpperCase() !== oldName) return row;
+    count += 1;
+    return { ...row, customer: newName };
+  });
+
+  if (count > 0) {
+    writeLocalTagihanFallback(nextRows);
+  }
+
+  return count;
+};
+
+const createTagihanDraftItem = (): TagihanDraftItem => ({
+  key: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+  tanggal: '',
+  jumlah: '',
+});
+
+const normalizeDateForDb = (value: string, fallbackDate: string): string | null => {
+  const trimmed = (value || '').trim();
+  if (!trimmed) return fallbackDate;
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    return trimmed;
+  }
+
+  const numericMatch = trimmed.match(/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{4})$/);
+  if (numericMatch) {
+    const [, dayStr, monthStr, yearStr] = numericMatch;
+    const day = parseInt(dayStr, 10);
+    const month = parseInt(monthStr, 10);
+    const year = parseInt(yearStr, 10);
+    const parsed = new Date(year, month - 1, day);
+
+    if (
+      parsed.getFullYear() === year &&
+      parsed.getMonth() === month - 1 &&
+      parsed.getDate() === day
+    ) {
+      return `${yearStr}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    }
+  }
+
+  const monthMap: Record<string, number> = {
+    JAN: 1,
+    FEB: 2,
+    MAR: 3,
+    APR: 4,
+    MEI: 5,
+    MAY: 5,
+    JUN: 6,
+    JUL: 7,
+    AGS: 8,
+    AUG: 8,
+    SEP: 9,
+    OCT: 10,
+    OKT: 10,
+    NOV: 11,
+    DEC: 12,
+    DES: 12,
+  };
+
+  const textMonthMatch = trimmed.toUpperCase().match(/^(\d{1,2})[\-\/ ]([A-Z]{3})(?:[\-\/ ](\d{4}))?$/);
+  if (textMonthMatch) {
+    const [, dayStr, monthCode, yearStr] = textMonthMatch;
+    const day = parseInt(dayStr, 10);
+    const month = monthMap[monthCode];
+    const year = yearStr ? parseInt(yearStr, 10) : parseInt(fallbackDate.slice(0, 4), 10);
+
+    if (month) {
+      const parsed = new Date(year, month - 1, day);
+      if (
+        parsed.getFullYear() === year &&
+        parsed.getMonth() === month - 1 &&
+        parsed.getDate() === day
+      ) {
+        return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      }
+    }
+  }
+
+  return null;
+};
+
 // Helper to calculate jatuh tempo month based on tempo string (e.g. "3 BLN")
 const calculateDueMonth = (transactionDate: string, tempo: string): string => {
   const date = new Date(transactionDate);
+  if ((tempo || '').toUpperCase().includes('CASH')) {
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+  }
   const tempoMatch = tempo?.match(/(\d+)/);
   const tempoMonths = tempoMatch ? parseInt(tempoMatch[1]) : 1;
   date.setMonth(date.getMonth() + tempoMonths);
@@ -168,9 +378,8 @@ export const TagihanTokoView: React.FC = () => {
   // Tagihan form states
   const [tagihanCustomer, setTagihanCustomer] = useState('');
   const [tagihanTempo, setTagihanTempo] = useState('');
-  const [tagihanAmount, setTagihanAmount] = useState('');
+  const [tagihanItems, setTagihanItems] = useState<TagihanDraftItem[]>([createTagihanDraftItem()]);
   const [tagihanNote, setTagihanNote] = useState('');
-  const [tagihanDate, setTagihanDate] = useState('');
   
   // Toast
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
@@ -228,6 +437,39 @@ export const TagihanTokoView: React.FC = () => {
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 3000);
+  };
+
+  const totalTagihanDraft = useMemo(() => {
+    return tagihanItems.reduce((total, item) => {
+      const amount = parseFloat(parseCurrencyInput(item.jumlah)) || 0;
+      return total + amount;
+    }, 0);
+  }, [tagihanItems]);
+
+  const handleTagihanItemChange = (key: string, field: 'tanggal' | 'jumlah', value: string) => {
+    setTagihanItems(prev =>
+      prev.map(item =>
+        item.key === key
+          ? {
+              ...item,
+              [field]: field === 'jumlah' ? parseCurrencyInput(value) : value,
+            }
+          : item
+      )
+    );
+  };
+
+  const handleAddTagihanItem = () => {
+    setTagihanItems(prev => [...prev, createTagihanDraftItem()]);
+  };
+
+  const handleRemoveTagihanItem = (key: string) => {
+    setTagihanItems(prev => {
+      if (prev.length === 1) {
+        return [createTagihanDraftItem()];
+      }
+      return prev.filter(item => item.key !== key);
+    });
   };
 
   // Load printed customers marker from localStorage
@@ -386,14 +628,23 @@ export const TagihanTokoView: React.FC = () => {
       setPembayaranList(pembayaranData);
 
       // Load tagihan manual data (filter by due month + store)
-      const { data: tagihanDataRaw } = await supabase
+      const { data: tagihanDataRaw, error: tagihanLoadError } = await supabase
         .from('toko_tagihan')
         .select('*')
         .gte('tanggal', actualFetchFrom)
         .lte('tanggal', dateToStr)
         .order('tanggal', { ascending: false });
-      
-      const tagihanData = (tagihanDataRaw || []).filter(t => {
+
+      if (tagihanLoadError && !isMissingTableError(tagihanLoadError, 'toko_tagihan')) {
+        console.error('Load toko_tagihan error:', tagihanLoadError);
+      }
+
+      const tagihanSource = [
+        ...((tagihanDataRaw || []) as TagihanToko[]),
+        ...readLocalTagihanFallback(),
+      ];
+
+      const tagihanData = tagihanSource.filter(t => {
         const dueMonth = calculateDueMonth(t.tanggal, t.tempo || '1 BLN');
         if (filterStore !== 'all' && t.store && t.store.toLowerCase() !== filterStore) {
           return false;
@@ -639,36 +890,72 @@ export const TagihanTokoView: React.FC = () => {
 
   // Handle tagihan submission
   const handleSubmitTagihan = async () => {
-    if (!tagihanCustomer || !tagihanAmount || parseFloat(parseCurrencyInput(tagihanAmount)) <= 0) {
-      showToast('Masukkan nama customer dan jumlah tagihan yang valid', 'error');
+    const filledTagihanItems = tagihanItems.filter(item => item.tanggal || parseCurrencyInput(item.jumlah));
+
+    if (!tagihanCustomer || filledTagihanItems.length === 0) {
+      showToast('Masukkan nama customer dan minimal 1 rincian tagihan', 'error');
+      return;
+    }
+
+    const hasInvalidAmount = filledTagihanItems.some(
+      item => parseFloat(parseCurrencyInput(item.jumlah)) <= 0
+    );
+
+    if (hasInvalidAmount) {
+      showToast('Semua rincian tagihan harus punya jumlah yang valid', 'error');
       return;
     }
 
     try {
-      const { error } = await supabase
-        .from('toko_tagihan')
-        .insert([{
+      const defaultDate = new Date().toISOString().split('T')[0];
+      const payload = [];
+
+      for (const item of filledTagihanItems) {
+        const normalizedDate = normalizeDateForDb(item.tanggal, defaultDate);
+        if (!normalizedDate) {
+          showToast('Format tanggal tidak valid. Gunakan YYYY-MM-DD, DD/MM/YYYY, atau 20-JAN', 'error');
+          return;
+        }
+
+        payload.push({
           customer: tagihanCustomer.trim().toUpperCase(),
           tempo: tagihanTempo || '1 BLN',
-          tanggal: tagihanDate || new Date().toISOString().split('T')[0],
-          jumlah: parseFloat(parseCurrencyInput(tagihanAmount)),
+          tanggal: normalizedDate,
+          jumlah: parseFloat(parseCurrencyInput(item.jumlah)),
           keterangan: tagihanNote || 'Tagihan manual',
           store: filterStore === 'all' ? 'all' : filterStore,
-        }]);
+        });
+      }
 
-      if (error) throw error;
+      const { error } = await supabase
+        .from('toko_tagihan')
+        .insert(payload);
 
-      showToast('Tagihan berhasil ditambahkan', 'success');
+      const savedToLocalFallback = !!error && isMissingTableError(error, 'toko_tagihan');
+      if (error && !savedToLocalFallback) throw error;
+      if (savedToLocalFallback) {
+        appendLocalTagihanFallback(payload);
+      }
+
+      showToast(
+        savedToLocalFallback
+          ? (payload.length > 1 ? `${payload.length} tagihan disimpan lokal` : 'Tagihan disimpan lokal')
+          : (payload.length > 1 ? `${payload.length} tagihan berhasil ditambahkan` : 'Tagihan berhasil ditambahkan'),
+        'success'
+      );
       setShowTagihanModal(false);
       setTagihanCustomer('');
       setTagihanTempo('');
-      setTagihanAmount('');
+      setTagihanItems([createTagihanDraftItem()]);
       setTagihanNote('');
-      setTagihanDate('');
       loadData();
     } catch (err) {
       console.error('Error adding tagihan:', err);
-      showToast('Gagal menambahkan tagihan', 'error');
+      const dbMessage =
+        err && typeof err === 'object' && 'message' in err
+          ? String((err as { message?: string }).message || '')
+          : '';
+      showToast(dbMessage ? `Gagal menambahkan tagihan: ${dbMessage}` : 'Gagal menambahkan tagihan', 'error');
     }
   };
 
@@ -835,13 +1122,40 @@ export const TagihanTokoView: React.FC = () => {
       return;
     }
 
+    const normalizedDate = normalizeDateForDb(editTagihanDate, editingTagihan.tanggal);
+    if (!normalizedDate) {
+      showToast('Format tanggal tidak valid', 'error');
+      return;
+    }
+
+    if (editingTagihan.id < 0) {
+      const updated = updateLocalTagihanFallback(editingTagihan.id, {
+        jumlah: parseFloat(parseCurrencyInput(editTagihanAmount)),
+        keterangan: editTagihanNote || 'Tagihan manual',
+        tanggal: normalizedDate,
+      });
+
+      if (!updated) {
+        showToast('Tagihan lokal tidak ditemukan', 'error');
+        return;
+      }
+
+      showToast('Tagihan berhasil diupdate', 'success');
+      setEditingTagihan(null);
+      setEditTagihanAmount('');
+      setEditTagihanNote('');
+      setEditTagihanDate('');
+      loadData();
+      return;
+    }
+
     try {
       const { error } = await supabase
         .from('toko_tagihan')
         .update({
           jumlah: parseFloat(parseCurrencyInput(editTagihanAmount)),
           keterangan: editTagihanNote || 'Tagihan manual',
-          tanggal: editTagihanDate,
+          tanggal: normalizedDate,
         })
         .eq('id', editingTagihan.id);
 
@@ -862,6 +1176,18 @@ export const TagihanTokoView: React.FC = () => {
   // Handle delete tagihan
   const handleDeleteTagihan = async (tagihanId: number) => {
     if (!confirm('Yakin ingin menghapus tagihan ini?')) return;
+
+    if (tagihanId < 0) {
+      const deleted = deleteLocalTagihanFallback(tagihanId);
+      if (!deleted) {
+        showToast('Tagihan lokal tidak ditemukan', 'error');
+        return;
+      }
+
+      showToast('Tagihan berhasil dihapus', 'success');
+      loadData();
+      return;
+    }
 
     try {
       const { error } = await supabase
@@ -902,6 +1228,10 @@ export const TagihanTokoView: React.FC = () => {
           });
         }
       });
+      readLocalTagihanFallback().forEach(row => {
+        const n = (row.customer || '').trim().toUpperCase();
+        if (n) names.add(n);
+      });
       setCustomerOptions(Array.from(names).sort());
     } catch (err) {
       console.error('Gagal memuat daftar customer:', err);
@@ -926,15 +1256,21 @@ export const TagihanTokoView: React.FC = () => {
     setSavingCustomerName(true);
     try {
       const updates = [
-        supabase.from('barang_keluar_mjm').update({ customer: newName }).eq('customer', oldName),
-        supabase.from('barang_keluar_bjw').update({ customer: newName }).eq('customer', oldName),
-        supabase.from('toko_pembayaran').update({ customer: newName }).eq('customer', oldName),
-        supabase.from('toko_tagihan').update({ customer: newName }).eq('customer', oldName),
-        supabase.from('inv_tagihan').update({ customer: newName }).eq('customer', oldName)
+        { table: 'barang_keluar_mjm', request: supabase.from('barang_keluar_mjm').update({ customer: newName }).eq('customer', oldName) },
+        { table: 'barang_keluar_bjw', request: supabase.from('barang_keluar_bjw').update({ customer: newName }).eq('customer', oldName) },
+        { table: 'toko_pembayaran', request: supabase.from('toko_pembayaran').update({ customer: newName }).eq('customer', oldName) },
+        { table: 'toko_tagihan', request: supabase.from('toko_tagihan').update({ customer: newName }).eq('customer', oldName) },
+        { table: 'inv_tagihan', request: supabase.from('inv_tagihan').update({ customer: newName }).eq('customer', oldName) }
       ];
-      const results = await Promise.all(updates);
-      const failed = results.find(r => (r as any).error);
+      const results = await Promise.all(updates.map(item => item.request));
+      const failed = results.find((result, index) => {
+        const error = (result as any).error;
+        if (!error) return false;
+        return !(updates[index].table === 'toko_tagihan' && isMissingTableError(error, 'toko_tagihan'));
+      });
       if (failed && (failed as any).error) throw (failed as any).error;
+
+      renameLocalTagihanFallback(oldName, newName);
 
       // Update local state
       const renamePiutang = (list: TokoPiutang[]) =>
@@ -2230,6 +2566,7 @@ export const TagihanTokoView: React.FC = () => {
                   className="w-full px-4 py-2.5 bg-gray-700 border border-gray-600 rounded-xl text-white focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
                 >
                   <option value="">Pilih Tempo</option>
+                  <option value="CASH">CASH</option>
                   <option value="1 BLN">1 BLN</option>
                   <option value="2 BLN">2 BLN</option>
                   <option value="3 BLN">3 BLN</option>
@@ -2237,27 +2574,58 @@ export const TagihanTokoView: React.FC = () => {
               </div>
               
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-1">Jumlah Tagihan</label>
-                <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">Rp.</span>
-                  <input
-                    type="text"
-                    value={formatCurrencyInput(tagihanAmount)}
-                    onChange={(e) => setTagihanAmount(parseCurrencyInput(e.target.value))}
-                    className="w-full pl-12 pr-4 py-2.5 bg-gray-700 border border-gray-600 rounded-xl text-white placeholder-gray-400 focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
-                    placeholder="0"
-                  />
+                <div className="flex items-center justify-between mb-2 gap-3">
+                  <label className="block text-sm font-medium text-gray-300">Rincian Tagihan</label>
+                  <button
+                    type="button"
+                    onClick={handleAddTagihanItem}
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium bg-orange-600/20 hover:bg-orange-600/30 text-orange-300 rounded-lg border border-orange-500/30 transition-colors"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    Tambah Baris
+                  </button>
                 </div>
+                <div className="space-y-2">
+                  {tagihanItems.map((item, index) => (
+                    <div key={item.key} className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-2">
+                      <input
+                        type="date"
+                        value={item.tanggal}
+                        onChange={(e) => handleTagihanItemChange(item.key, 'tanggal', e.target.value)}
+                        className="w-full px-4 py-2.5 bg-gray-700 border border-gray-600 rounded-xl text-white focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
+                      />
+                      <div className="relative">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">Rp.</span>
+                        <input
+                          type="text"
+                          value={formatCurrencyInput(item.jumlah)}
+                          onChange={(e) => handleTagihanItemChange(item.key, 'jumlah', e.target.value)}
+                          className="w-full pl-12 pr-4 py-2.5 bg-gray-700 border border-gray-600 rounded-xl text-white placeholder-gray-400 focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
+                          placeholder={`Tagihan ${index + 1}`}
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveTagihanItem(item.key)}
+                        className="h-11 px-3 bg-gray-700 hover:bg-red-900/40 border border-gray-600 hover:border-red-500/40 rounded-xl text-gray-300 hover:text-red-300 transition-colors"
+                        aria-label={`Hapus baris tagihan ${index + 1}`}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                <p className="mt-2 text-xs text-gray-400">
+                  Isi beberapa tanggal dan nominal. Total dihitung otomatis dari semua baris.
+                </p>
               </div>
-              
+
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-1">Tanggal</label>
-                <input
-                  type="date"
-                  value={tagihanDate}
-                  onChange={(e) => setTagihanDate(e.target.value)}
-                  className="w-full px-4 py-2.5 bg-gray-700 border border-gray-600 rounded-xl text-white focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
-                />
+                <label className="block text-sm font-medium text-gray-300 mb-1">Total Tagihan</label>
+                <div className="px-4 py-3 bg-orange-900/20 border border-orange-800/40 rounded-xl flex items-center justify-between gap-3">
+                  <span className="text-sm text-orange-300">Total {tagihanItems.length} baris</span>
+                  <span className="text-lg font-semibold text-white">{formatCurrency(totalTagihanDraft)}</span>
+                </div>
               </div>
               
               <div>

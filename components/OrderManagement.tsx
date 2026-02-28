@@ -6,7 +6,7 @@ import { useStore } from '../context/StoreContext';
 import { 
   fetchOfflineOrders, fetchSoldItems, fetchReturItems,
   processOfflineOrderItem, updateOfflineOrder, fetchInventory, createReturFromSold, updateReturStatus,
-  fetchDistinctEcommerce, deleteBarangLog, updateSoldItemPrice, updateSoldItemDate, updateSoldItemQty,
+  fetchDistinctEcommerce, deleteBarangLog, updateSoldItemPrice, updateSoldItemDate, updateSoldItemQty, updateSoldItemKodeToko,
   fetchSalesOrders, processSalesOrderItem, fetchSalesPaidItems
 } from '../services/supabaseService';
 import { OfflineOrderRow, SoldItemRow, ReturRow, CartItem } from '../types';
@@ -16,6 +16,19 @@ import {
   ChevronDown, ChevronUp, Layers, User, Pencil, Save, XCircle, Trash2, ChevronLeft, ChevronRight,
   PackageX, RotateCw, ArrowLeftRight, Package, Hash, ShoppingBag, Copy, Printer
 } from 'lucide-react';
+
+interface SoldGroup {
+  id: string;
+  customer: string;
+  resi: string;
+  ecommerce: string;
+  tempo: string;
+  toko: string;
+  date: string;
+  items: SoldItemRow[];
+  totalQty: number;
+  totalAmount: number;
+}
 
 // Toast Component Sederhana
 const Toast = ({ msg, type, onClose }: any) => (
@@ -47,6 +60,67 @@ const getEcommerceColor = (ecommerce: string) => {
     default:
       return { bg: 'bg-gray-800', border: 'border-gray-600', text: 'text-gray-300' };
   }
+};
+
+const formatReceiptDate = (dateStr: string): string => {
+  const date = new Date(dateStr);
+  if (Number.isNaN(date.getTime())) return dateStr || '-';
+  return date.toLocaleDateString('id-ID', {
+    timeZone: 'Asia/Jakarta',
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  });
+};
+
+const terbilangRupiah = (value: number): string => {
+  if (!Number.isFinite(value) || value < 0) return '';
+  const satuan = ['', 'satu', 'dua', 'tiga', 'empat', 'lima', 'enam', 'tujuh', 'delapan', 'sembilan', 'sepuluh', 'sebelas'];
+
+  const toWords = (n: number): string => {
+    if (n < 12) return satuan[n];
+    if (n < 20) return `${satuan[n - 10]} belas`;
+    if (n < 100) return `${toWords(Math.floor(n / 10))} puluh ${toWords(n % 10)}`;
+    if (n < 200) return `seratus ${toWords(n - 100)}`;
+    if (n < 1000) return `${toWords(Math.floor(n / 100))} ratus ${toWords(n % 100)}`;
+    if (n < 2000) return `seribu ${toWords(n - 1000)}`;
+    if (n < 1000000) return `${toWords(Math.floor(n / 1000))} ribu ${toWords(n % 1000)}`;
+    if (n < 1000000000) return `${toWords(Math.floor(n / 1000000))} juta ${toWords(n % 1000000)}`;
+    return `${toWords(Math.floor(n / 1000000000))} miliar ${toWords(n % 1000000000)}`;
+  };
+
+  return toWords(Math.floor(value)).replace(/\s+/g, ' ').trim();
+};
+
+const nextReceiptNumber = (storageKey: string): string => {
+  try {
+    const current = parseInt(window.localStorage.getItem(storageKey) || '0', 10) || 0;
+    const next = current + 1;
+    window.localStorage.setItem(storageKey, String(next));
+    return `INV-${String(next).padStart(5, '0')}`;
+  } catch (error) {
+    return `INV-${Date.now()}`;
+  }
+};
+
+const escapeHtml = (value: string): string =>
+  String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+
+const SOLD_KODE_TOKO_OPTIONS = ['MJM', 'BJW', 'LARIS', 'PRAKTIS PART'] as const;
+
+const normalizeSoldKodeTokoInput = (value: string): string | null => {
+  const normalized = (value || '').trim().toUpperCase().replace(/\s+/g, ' ');
+  if (!normalized) return null;
+  if (normalized === 'PRAKTIS' || normalized === 'PRAKTISPART') return 'PRAKTIS PART';
+  if (SOLD_KODE_TOKO_OPTIONS.includes(normalized as typeof SOLD_KODE_TOKO_OPTIONS[number])) {
+    return normalized;
+  }
+  return null;
 };
 
 // Autocomplete Dropdown with Keyboard Navigation
@@ -303,6 +377,7 @@ export const OrderManagement: React.FC = () => {
   // State Grouping
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const [selectedGroups, setSelectedGroups] = useState<Set<string>>(new Set());
+  const [selectedSoldGroups, setSelectedSoldGroups] = useState<Set<string>>(new Set());
   const [salesPartSearchByGroup, setSalesPartSearchByGroup] = useState<Record<string, string>>({});
 
   // State Data
@@ -612,18 +687,7 @@ export const OrderManagement: React.FC = () => {
       return true;
     });
 
-    const groups: Record<string, { 
-      id: string, 
-      customer: string, 
-      resi: string, 
-      ecommerce: string, 
-      tempo: string,
-      toko: string,
-      date: string, 
-      items: SoldItemRow[], 
-      totalQty: number,
-      totalAmount: number 
-    }> = {};
+    const groups: Record<string, SoldGroup> = {};
     
     filtered.forEach(item => {
       const safeCustomer = (item.customer || 'Tanpa Nama').trim();
@@ -725,7 +789,27 @@ export const OrderManagement: React.FC = () => {
     return groupedSoldData.slice(start, start + ITEMS_PER_PAGE);
   }, [groupedSoldData, soldPage]);
 
+  const selectedSoldGroupList = useMemo(
+    () => groupedSoldData.filter(group => selectedSoldGroups.has(group.id)),
+    [groupedSoldData, selectedSoldGroups]
+  );
+
+  const selectedSoldTotalAmount = useMemo(
+    () => selectedSoldGroupList.reduce((sum, group) => sum + (group.totalAmount || 0), 0),
+    [selectedSoldGroupList]
+  );
+
   const soldTotalPages = Math.ceil(groupedSoldData.length / ITEMS_PER_PAGE);
+
+  useEffect(() => {
+    setSelectedSoldGroups(prev => {
+      if (prev.size === 0) return prev;
+      const validIds = new Set(groupedSoldData.map(group => group.id));
+      const next = new Set(Array.from(prev).filter(id => validIds.has(id)));
+      if (next.size === prev.size) return prev;
+      return next;
+    });
+  }, [groupedSoldData]);
 
   // Handle Retur
   const openReturModal = (item: SoldItemRow) => {
@@ -1050,6 +1134,44 @@ export const OrderManagement: React.FC = () => {
     }
   };
 
+  const handleEditSoldGroupKodeToko = async (group: SoldGroup, e: React.MouseEvent) => {
+    e.stopPropagation();
+
+    const currentKodeToko = (group.toko || '').trim().toUpperCase();
+    const promptValue = window.prompt(
+      `Ganti kode toko untuk transaksi ini (${group.items.length} item).\nPilihan: ${SOLD_KODE_TOKO_OPTIONS.join(', ')}\nMasukkan kode toko baru:`,
+      currentKodeToko || 'MJM'
+    );
+
+    if (promptValue === null) return;
+
+    const nextKodeToko = normalizeSoldKodeTokoInput(promptValue);
+    if (!nextKodeToko) {
+      showToast(`Kode toko tidak valid. Gunakan: ${SOLD_KODE_TOKO_OPTIONS.join(', ')}`, 'error');
+      return;
+    }
+
+    if (nextKodeToko === currentKodeToko) {
+      showToast('Kode toko tidak berubah', 'error');
+      return;
+    }
+
+    setLoading(true);
+    const results = await Promise.all(
+      group.items.map((item) => updateSoldItemKodeToko(item.id, nextKodeToko, selectedStore))
+    );
+    setLoading(false);
+
+    const failed = results.filter((result) => !result.success);
+    if (failed.length > 0) {
+      showToast(failed[0].msg || 'Gagal update kode toko', 'error');
+      return;
+    }
+
+    showToast(`Kode toko transaksi diubah ke ${nextKodeToko}`);
+    loadData();
+  };
+
   // --- HANDLERS ---
 
   // 1. EDIT HANDLERS
@@ -1217,6 +1339,18 @@ export const OrderManagement: React.FC = () => {
     });
   };
 
+  const toggleSoldGroupSelection = (groupId: string) => {
+    setSelectedSoldGroups(prev => {
+      const next = new Set(prev);
+      if (next.has(groupId)) {
+        next.delete(groupId);
+      } else {
+        next.add(groupId);
+      }
+      return next;
+    });
+  };
+
   // Select/Deselect all groups
   const toggleSelectAll = () => {
     if (selectedGroups.size === filteredGroupedOffline.length) {
@@ -1224,6 +1358,14 @@ export const OrderManagement: React.FC = () => {
     } else {
       setSelectedGroups(new Set(filteredGroupedOffline.map(g => g.id)));
     }
+  };
+
+  const toggleSelectAllSold = () => {
+    if (selectedSoldGroupList.length === groupedSoldData.length && groupedSoldData.length > 0) {
+      setSelectedSoldGroups(new Set());
+      return;
+    }
+    setSelectedSoldGroups(new Set(groupedSoldData.map(group => group.id)));
   };
 
   // Bulk ACC all selected groups
@@ -1253,6 +1395,172 @@ export const OrderManagement: React.FC = () => {
     setSelectedGroups(new Set());
     showToast(`${successCount} item berhasil diproses.`);
     loadData();
+  };
+
+  const handlePrintSelectedSoldGroups = () => {
+    if (selectedSoldGroupList.length === 0) {
+      showToast('Pilih minimal 1 transaksi untuk dicetak', 'error');
+      return;
+    }
+
+    const customerKeys = Array.from(
+      new Set(
+        selectedSoldGroupList
+          .map(group => (group.customer || '').trim().toUpperCase())
+          .filter(Boolean)
+      )
+    );
+
+    if (customerKeys.length > 1) {
+      showToast('Pilih transaksi dari 1 customer yang sama untuk cetak tanda terima', 'error');
+      return;
+    }
+
+    const sortedGroups = [...selectedSoldGroupList].sort(
+      (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
+    );
+
+    const receiptCustomer = sortedGroups[0]?.customer || 'Customer';
+    const totalAmount = sortedGroups.reduce((sum, group) => sum + (group.totalAmount || 0), 0);
+    const todayStr = new Date().toLocaleDateString('id-ID', {
+      timeZone: 'Asia/Jakarta',
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+    });
+    const logoSrc = selectedStore === 'bjw' ? '/assets/bjw-logo.png' : '/assets/mjm-logo.png';
+    const invoiceNo = nextReceiptNumber('soldReceiptCounter');
+    const terbilangText = (terbilangRupiah(totalAmount) || '-').toUpperCase();
+    const formatCurrency = (amount: number) =>
+      new Intl.NumberFormat('id-ID', {
+        style: 'currency',
+        currency: 'IDR',
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 0,
+      }).format(amount || 0);
+
+    const rowHtml = sortedGroups.map((group, index) => {
+      const tempoLabel = group.tempo ? ` (${escapeHtml(group.tempo)})` : '';
+      return `<tr>
+        <td class="cell center">${index + 1}</td>
+        <td class="cell">${escapeHtml(formatReceiptDate(group.date))}${tempoLabel}</td>
+        <td class="cell right">${escapeHtml(formatCurrency(group.totalAmount || 0))}</td>
+      </tr>`;
+    });
+
+    const blankRows = Array.from(
+      { length: Math.max(0, 16 - rowHtml.length) },
+      (_, index) => `<tr>
+        <td class="cell center">${rowHtml.length + index + 1}</td>
+        <td class="cell">&nbsp;</td>
+        <td class="cell right">&nbsp;</td>
+      </tr>`
+    );
+
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Tanda Terima ${escapeHtml(receiptCustomer)}</title>
+  <style>
+    @page { size: A4 portrait; margin: 8mm 10mm 8mm 10mm; }
+    body { font-family: Arial, sans-serif; color: #111; margin: 0; }
+    .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 2px; }
+    .title { font-size: 22px; font-weight: 700; letter-spacing: 0.5px; }
+    .header-left { display: flex; flex-direction: column; gap: 6px; }
+    .meta { line-height: 1.5; font-size: 12px; }
+    .table { width: 100%; border-collapse: collapse; margin-top: 2px; }
+    .table th, .table td { border: 1px solid #444; padding: 6px 8px; font-size: 13px; }
+    .table th { background: #f0f0f0; }
+    .cell { font-size: 13px; }
+    .right { text-align: right; }
+    .center { text-align: center; }
+    .total-row { font-weight: 700; background: #f5f5f5; }
+    .foot { margin-top: 16px; font-size: 12px; }
+    .signature { margin-top: 36px; font-size: 12px; }
+    .logo { height: 170px; max-height: 180px; }
+    .table-wrapper { position: relative; }
+    .watermark {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%) rotate(-10deg);
+      width: 65%;
+      opacity: 0.18;
+      z-index: 0;
+      pointer-events: none;
+    }
+    .table,
+    .header,
+    .foot,
+    .signature { position: relative; z-index: 1; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="header-left">
+      <div class="title">TANDA TERIMA</div>
+      <div class="meta">
+        <div><strong>NO</strong>: ${escapeHtml(invoiceNo)}</div>
+        <div><strong>KEPADA</strong>: ${escapeHtml(receiptCustomer)}</div>
+        <div><strong>TGL</strong>: ${escapeHtml(todayStr)}</div>
+      </div>
+    </div>
+    <img src="${logoSrc}" alt="logo" class="logo" />
+  </div>
+  <div class="table-wrapper">
+    <img class="watermark" src="${logoSrc}" alt="watermark" />
+    <table class="table">
+      <thead>
+        <tr>
+          <th style="width:40px;">NO</th>
+          <th style="width:180px;">TGL</th>
+          <th>PEMBAYARAN</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${[...rowHtml, ...blankRows].join('')}
+        <tr class="total-row">
+          <td colspan="2">TOTAL PEMBAYARAN</td>
+          <td class="right">${escapeHtml(formatCurrency(totalAmount))}</td>
+        </tr>
+        <tr>
+          <td colspan="3" style="padding-top:8px; padding-bottom:8px;">
+            <strong>TERBILANG:</strong> ${escapeHtml(terbilangText)} RUPIAH
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="foot">
+    PEMBAYARAN DILAKUKAN MELALUI<br/>
+    REK BCA<br/>
+    3701158464<br/>
+    A.N ALAN ARIF MUZAQI
+  </div>
+  <div class="signature">
+    PENERIMA<br/><br/><br/>
+    ____________________________
+  </div>
+  <script>
+    window.onload = function () {
+      setTimeout(function () {
+        window.print();
+      }, 300);
+    };
+  </script>
+</body>
+</html>`;
+
+    const printWindow = window.open('', '_blank', 'width=1024,height=768');
+    if (!printWindow) {
+      showToast('Popup print diblokir browser', 'error');
+      return;
+    }
+
+    printWindow.document.write(html);
+    printWindow.document.close();
+    setSelectedSoldGroups(new Set());
   };
 
   const formatRupiah = (val: number) => `Rp ${val.toLocaleString('id-ID')}`;
@@ -1603,6 +1911,42 @@ export const OrderManagement: React.FC = () => {
                   <Check size={18}/> ACC {selectedGroups.size} PESANAN
                 </button>
               )}
+            </div>
+          )}
+
+          {activeTab === 'TERJUAL' && groupedSoldData.length > 0 && (
+            <div className="bg-gray-800 border border-gray-600 rounded-xl p-3 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 mt-3">
+              <div className="flex flex-wrap items-center gap-3">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={selectedSoldGroupList.length === groupedSoldData.length && groupedSoldData.length > 0}
+                    onChange={toggleSelectAllSold}
+                    className="w-5 h-5 rounded border-gray-600 bg-gray-700 text-purple-500 focus:ring-purple-500 cursor-pointer"
+                  />
+                  <span className="text-sm font-bold text-gray-300">Pilih Semua Transaksi</span>
+                </label>
+                {selectedSoldGroupList.length > 0 && (
+                  <span className="text-sm text-purple-400 font-bold">
+                    {selectedSoldGroupList.length} dipilih
+                  </span>
+                )}
+              </div>
+              <div className="flex flex-wrap items-center gap-3">
+                {selectedSoldGroupList.length > 0 && (
+                  <span className="text-sm font-semibold text-orange-300">
+                    Total Dipilih: {formatRupiah(selectedSoldTotalAmount)}
+                  </span>
+                )}
+                <button
+                  onClick={handlePrintSelectedSoldGroups}
+                  disabled={selectedSoldGroupList.length === 0}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg bg-purple-600 text-white hover:bg-purple-500 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-bold transition-colors"
+                >
+                  <Printer size={16} />
+                  Print Tanda Terima
+                </button>
+              </div>
             </div>
           )}
         </div>
@@ -2103,6 +2447,7 @@ export const OrderManagement: React.FC = () => {
               const groupKey = group.id;
               // Default to expanded (true) if not explicitly set to false
               const isExpanded = expandedGroups[groupKey] !== false;
+              const isSelected = selectedSoldGroups.has(groupKey);
               const ecommerceColors = getEcommerceColor(group.ecommerce);
               const isOfflineGroup = (group.ecommerce || '').toUpperCase() === 'OFFLINE';
 
@@ -2121,7 +2466,7 @@ export const OrderManagement: React.FC = () => {
               return (
                 <div 
                   key={groupKey} 
-                  className={`group relative bg-gradient-to-br from-gray-800 to-gray-900 border-2 rounded-2xl overflow-hidden transition-all duration-300 hover:shadow-2xl hover:shadow-purple-900/20 ${ecommerceColors.border}`}
+                  className={`group relative bg-gradient-to-br from-gray-800 to-gray-900 border-2 rounded-2xl overflow-hidden transition-all duration-300 hover:shadow-2xl hover:shadow-purple-900/20 ${isSelected ? 'border-purple-500 ring-2 ring-purple-500/20' : ecommerceColors.border}`}
                   style={{ animationDelay: `${groupIdx * 50}ms` }}
                 >
                   {/* Decorative accent line */}
@@ -2135,7 +2480,16 @@ export const OrderManagement: React.FC = () => {
                   
                   {/* GROUP HEADER */}
                   <div className="p-4 flex flex-col md:flex-row justify-between gap-3">
-                    <div className="flex-1 cursor-pointer select-none" onClick={() => toggleExpand(groupKey)}>
+                    <div className="flex items-start gap-3 flex-1">
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={(e) => { e.stopPropagation(); toggleSoldGroupSelection(groupKey); }}
+                        onClick={(e) => e.stopPropagation()}
+                        className="w-6 h-6 mt-1 rounded border-gray-600 bg-gray-700 text-purple-500 focus:ring-purple-500 cursor-pointer flex-shrink-0"
+                        title="Pilih transaksi untuk print tanda terima"
+                      />
+                      <div className="flex-1 cursor-pointer select-none" onClick={() => toggleExpand(groupKey)}>
                       {/* Top Row - Tags */}
                       <div className="flex items-center gap-2 mb-3 flex-wrap">
                         {/* Marketplace Badge */}
@@ -2162,18 +2516,24 @@ export const OrderManagement: React.FC = () => {
                         
                         {/* Store/Toko Badge */}
                         {group.toko && group.toko !== '-' && (
-                          <span className={`inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1.5 rounded-lg border ${
-                            group.toko === 'MJM' 
-                              ? 'bg-cyan-900/40 text-cyan-300 border-cyan-800/50' 
-                              : group.toko === 'BJW' 
-                                ? 'bg-amber-900/40 text-amber-300 border-amber-800/50'
-                                : 'bg-gray-700/60 text-gray-300 border-gray-600/50'
-                          }`}>
+                          <button
+                            type="button"
+                            onClick={(e) => handleEditSoldGroupKodeToko(group, e)}
+                            className={`inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1.5 rounded-lg border hover:brightness-110 transition-colors ${
+                              group.toko === 'MJM' 
+                                ? 'bg-cyan-900/40 text-cyan-300 border-cyan-800/50' 
+                                : group.toko === 'BJW' 
+                                  ? 'bg-amber-900/40 text-amber-300 border-amber-800/50'
+                                  : 'bg-gray-700/60 text-gray-300 border-gray-600/50'
+                            }`}
+                            title="Klik untuk ganti kode toko transaksi ini"
+                          >
                             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
                             </svg>
                             Toko {group.toko}
-                          </span>
+                            <Pencil size={12} className="opacity-70" />
+                          </button>
                         )}
                         
                         {/* Resi Badge */}
@@ -2219,6 +2579,7 @@ export const OrderManagement: React.FC = () => {
                             </span>
                           )}
                         </div>
+                      </div>
                       </div>
                     </div>
 

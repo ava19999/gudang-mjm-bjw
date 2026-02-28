@@ -26,16 +26,12 @@ interface BarangRecord {
   created_at: string;
   store?: 'mjm' | 'bjw';
   ecommerce?: string;
+  kode_toko?: string;
 }
 
 // Utility functions
 const formatCurrency = (value: number): string => {
-  return new Intl.NumberFormat('id-ID', {
-    style: 'currency',
-    currency: 'IDR',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(value);
+  return `Rp. ${Math.round(value || 0).toLocaleString('id-ID')}`;
 };
 
 const formatCompactNumber = (num: number): string => {
@@ -62,6 +58,24 @@ const formatRangeLabel = (start: string, end: string): string => {
   return `${formatMonthLabel(start)} – ${formatMonthLabel(end)}`;
 };
 
+const normalizeTempoLabel = (tempo?: string): string => {
+  return (tempo || 'CASH').trim().toUpperCase() || 'CASH';
+};
+
+const isCashTempo = (tempo?: string): boolean => {
+  return normalizeTempoLabel(tempo) === 'CASH';
+};
+
+const normalizeSubToko = (value?: string): 'MJM' | 'LARIS' | 'BJW' | 'PRAKTIS PART' | '-' => {
+  const normalized = (value || '').trim().toUpperCase().replace(/\s+/g, ' ');
+  if (!normalized) return '-';
+  if (normalized.includes('PRAKTIS')) return 'PRAKTIS PART';
+  if (normalized.includes('LARIS')) return 'LARIS';
+  if (normalized.includes('BJW')) return 'BJW';
+  if (normalized.includes('MJM')) return 'MJM';
+  return '-';
+};
+
 // TODO: Replace with actual chart components
 const DummyChart = ({ title }: { title: string }) => (
   <div className="bg-gray-800 rounded-xl p-6 flex flex-col items-center justify-center min-h-[180px] text-gray-400 border border-gray-700">
@@ -70,14 +84,60 @@ const DummyChart = ({ title }: { title: string }) => (
   </div>
 );
 
+interface SummaryCardRow {
+  label: string;
+  value: number;
+}
+
+const SummaryBreakdownCard = ({
+  title,
+  value,
+  wrapperClassName,
+  titleClassName,
+  rows = [],
+  onActionClick,
+}: {
+  title: string;
+  value: number;
+  wrapperClassName: string;
+  titleClassName: string;
+  rows?: SummaryCardRow[];
+  onActionClick?: () => void;
+}) => (
+  <div className={`${wrapperClassName} rounded-xl p-4`}>
+    <div className="flex items-start justify-between gap-3 mb-1">
+      <div className={`${titleClassName} text-xs font-medium`}>{title}</div>
+      {onActionClick && (
+        <button
+          type="button"
+          onClick={onActionClick}
+          className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-lg bg-gray-900/40 hover:bg-gray-900/60 text-gray-200 border border-white/10 transition-colors"
+        >
+          <History className="w-3.5 h-3.5" />
+          History
+        </button>
+      )}
+    </div>
+    <div className="text-lg md:text-xl font-bold text-white break-words">{formatCurrency(value)}</div>
+    {rows.length > 0 && (
+      <div className="mt-3 pt-3 border-t border-white/10 space-y-1.5">
+        {rows.map((row) => (
+          <div key={row.label} className="flex items-center justify-between gap-3 text-xs md:text-sm">
+            <span className="text-gray-300">{row.label}</span>
+            <span className="font-semibold text-white">{formatCurrency(row.value)}</span>
+          </div>
+        ))}
+      </div>
+    )}
+  </div>
+);
+
 export const RekapBulananView: React.FC = () => {
   const { selectedStore } = useStore();
   // Periode bulan (start-end)
   const [bulanMulai, setBulanMulai] = useState(() => {
     const now = new Date();
-    // default: 12 bulan terakhir
-    const start = new Date(now.getFullYear(), now.getMonth() - 11, 1);
-    return `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}`;
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
   });
   const [bulanAkhir, setBulanAkhir] = useState(() => {
     const now = new Date();
@@ -471,6 +531,23 @@ export const RekapBulananView: React.FC = () => {
     loadHistoryData(customer.customer, customer.tempo, type);
   };
 
+  const openSummaryHistoryModal = (title: string, records: BarangRecord[], subtitle: string) => {
+    setSelectedCustomerForHistory({
+      customer: title,
+      tempo: subtitle,
+      totalHarga: records.reduce((sum, record) => sum + (record.harga_total || 0), 0),
+      itemCount: records.length,
+    });
+    setHistoryType('keluar');
+    setLoadingHistory(false);
+    setHistoryData(
+      [...records].sort(
+        (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      )
+    );
+    setHistoryModal(true);
+  };
+
   // Helper function to check if record is RETUR (check both customer and tempo)
   const isRetur = (record: any) => {
     const customer = (record.customer || '').trim().toUpperCase();
@@ -517,6 +594,77 @@ export const RekapBulananView: React.FC = () => {
     const saldoAkhir = 0;
     return { masukCash, masuk3Bln, masuk2Bln, masuk1Bln, masukTotal, keluarCash, keluar3Bln, keluar2Bln, keluar1Bln, keluarTotal, pettyCash, saldoAkhir };
   }, [barangMasuk, barangKeluar, pettyCashData]);
+
+  const validKeluarRecords = useMemo(
+    () => barangKeluar.filter((record) => !shouldExclude(record)),
+    [barangKeluar]
+  );
+
+  const keluarBreakdown = useMemo(() => {
+    const summary = {
+      offline: { total: 0, cash: 0, tempo: 0, tempo1Bln: 0, tempo2Bln: 0, tempo3Bln: 0 },
+      tiktok: { total: 0, mjm: 0, laris: 0 },
+      shopee: { total: 0, mjm: 0, laris: 0, bjw: 0, praktisPart: 0 },
+      reseller: { total: 0 },
+    };
+
+    barangKeluar.forEach((record) => {
+      if (shouldExclude(record)) return;
+
+      const amount = Number(record.harga_total || 0);
+      const ecommerce = normalizeEcommerce(record.ecommerce);
+      const tempo = normalizeTempoLabel(record.tempo);
+      const subToko = normalizeSubToko((record as any).kode_toko);
+
+      if (ecommerce === 'OFFLINE') {
+        summary.offline.total += amount;
+        if (isCashTempo(tempo)) {
+          summary.offline.cash += amount;
+        } else {
+          summary.offline.tempo += amount;
+          if (tempo.includes('3')) summary.offline.tempo3Bln += amount;
+          else if (tempo.includes('2')) summary.offline.tempo2Bln += amount;
+          else if (tempo.includes('1')) summary.offline.tempo1Bln += amount;
+        }
+        return;
+      }
+
+      if (ecommerce === 'TIKTOK') {
+        summary.tiktok.total += amount;
+        if (subToko === 'MJM') summary.tiktok.mjm += amount;
+        if (subToko === 'LARIS') summary.tiktok.laris += amount;
+        return;
+      }
+
+      if (ecommerce === 'SHOPEE') {
+        summary.shopee.total += amount;
+        if (subToko === 'MJM') summary.shopee.mjm += amount;
+        if (subToko === 'LARIS') summary.shopee.laris += amount;
+        if (subToko === 'BJW') summary.shopee.bjw += amount;
+        if (subToko === 'PRAKTIS PART') summary.shopee.praktisPart += amount;
+        return;
+      }
+
+      if (ecommerce === 'RESELLER') {
+        summary.reseller.total += amount;
+      }
+    });
+
+    return summary;
+  }, [barangKeluar]);
+
+  const keluarHistoryRecords = useMemo(() => {
+    const byEcommerce = (target: string) =>
+      validKeluarRecords.filter((record) => normalizeEcommerce(record.ecommerce) === target);
+
+    return {
+      all: validKeluarRecords,
+      offline: byEcommerce('OFFLINE'),
+      tiktok: byEcommerce('TIKTOK'),
+      shopee: byEcommerce('SHOPEE'),
+      reseller: byEcommerce('RESELLER'),
+    };
+  }, [validKeluarRecords]);
   
   // Group Barang Masuk by Customer and Tempo (excluding RETUR and 0 total)
   const groupedBarangMasuk = useMemo(() => {
@@ -684,23 +832,23 @@ export const RekapBulananView: React.FC = () => {
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
           <div className="bg-gradient-to-br from-green-900/40 to-green-800/20 border border-green-800/30 rounded-xl p-4">
             <div className="text-green-400 text-xs font-medium mb-1">Total Masuk</div>
-            <div className="text-xl md:text-2xl font-bold text-white">{formatCompactNumber(stats.masukTotal)}</div>
+            <div className="text-lg md:text-xl font-bold text-white break-words">{formatCurrency(stats.masukTotal)}</div>
           </div>
           <div className="bg-gradient-to-br from-emerald-900/40 to-emerald-800/20 border border-emerald-800/30 rounded-xl p-4">
             <div className="text-emerald-400 text-xs font-medium mb-1">Cash</div>
-            <div className="text-xl md:text-2xl font-bold text-white">{formatCompactNumber(stats.masukCash)}</div>
+            <div className="text-lg md:text-xl font-bold text-white break-words">{formatCurrency(stats.masukCash)}</div>
           </div>
           <div className="bg-gradient-to-br from-purple-900/40 to-purple-800/20 border border-purple-800/30 rounded-xl p-4">
             <div className="text-purple-400 text-xs font-medium mb-1">3 BLN</div>
-            <div className="text-xl md:text-2xl font-bold text-white">{formatCompactNumber(stats.masuk3Bln)}</div>
+            <div className="text-lg md:text-xl font-bold text-white break-words">{formatCurrency(stats.masuk3Bln)}</div>
           </div>
           <div className="bg-gradient-to-br from-blue-900/40 to-blue-800/20 border border-blue-800/30 rounded-xl p-4">
             <div className="text-blue-400 text-xs font-medium mb-1">2 BLN</div>
-            <div className="text-xl md:text-2xl font-bold text-white">{formatCompactNumber(stats.masuk2Bln)}</div>
+            <div className="text-lg md:text-xl font-bold text-white break-words">{formatCurrency(stats.masuk2Bln)}</div>
           </div>
           <div className="bg-gradient-to-br from-teal-900/40 to-teal-800/20 border border-teal-800/30 rounded-xl p-4">
             <div className="text-teal-400 text-xs font-medium mb-1">1 BLN</div>
-            <div className="text-xl md:text-2xl font-bold text-white">{formatCompactNumber(stats.masuk1Bln)}</div>
+            <div className="text-lg md:text-xl font-bold text-white break-words">{formatCurrency(stats.masuk1Bln)}</div>
           </div>
         </div>
       </div>
@@ -711,27 +859,65 @@ export const RekapBulananView: React.FC = () => {
           <span className="w-2 h-2 rounded-full bg-red-500"></span>
           Barang Keluar (Penjualan)
         </h3>
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-          <div className="bg-gradient-to-br from-red-900/40 to-red-800/20 border border-red-800/30 rounded-xl p-4">
-            <div className="text-red-400 text-xs font-medium mb-1">Total Keluar</div>
-            <div className="text-xl md:text-2xl font-bold text-white">{formatCompactNumber(stats.keluarTotal)}</div>
-          </div>
-          <div className="bg-gradient-to-br from-orange-900/40 to-orange-800/20 border border-orange-800/30 rounded-xl p-4">
-            <div className="text-orange-400 text-xs font-medium mb-1">Cash</div>
-            <div className="text-xl md:text-2xl font-bold text-white">{formatCompactNumber(stats.keluarCash)}</div>
-          </div>
-          <div className="bg-gradient-to-br from-purple-900/40 to-purple-800/20 border border-purple-800/30 rounded-xl p-4">
-            <div className="text-purple-400 text-xs font-medium mb-1">3 BLN</div>
-            <div className="text-xl md:text-2xl font-bold text-white">{formatCompactNumber(stats.keluar3Bln)}</div>
-          </div>
-          <div className="bg-gradient-to-br from-blue-900/40 to-blue-800/20 border border-blue-800/30 rounded-xl p-4">
-            <div className="text-blue-400 text-xs font-medium mb-1">2 BLN</div>
-            <div className="text-xl md:text-2xl font-bold text-white">{formatCompactNumber(stats.keluar2Bln)}</div>
-          </div>
-          <div className="bg-gradient-to-br from-pink-900/40 to-pink-800/20 border border-pink-800/30 rounded-xl p-4">
-            <div className="text-pink-400 text-xs font-medium mb-1">1 BLN</div>
-            <div className="text-xl md:text-2xl font-bold text-white">{formatCompactNumber(stats.keluar1Bln)}</div>
-          </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+          <SummaryBreakdownCard
+            title="Total Keluar"
+            value={stats.keluarTotal}
+            wrapperClassName="bg-gradient-to-br from-red-900/40 to-red-800/20 border border-red-800/30"
+            titleClassName="text-red-400"
+            onActionClick={() => openSummaryHistoryModal('Total Keluar', keluarHistoryRecords.all, 'Semua Ecommerce')}
+            rows={[
+              { label: 'Total Offline', value: keluarBreakdown.offline.total },
+              { label: 'Total TikTok', value: keluarBreakdown.tiktok.total },
+              { label: 'Total Shopee', value: keluarBreakdown.shopee.total },
+              { label: 'Total Reseller', value: keluarBreakdown.reseller.total },
+            ]}
+          />
+          <SummaryBreakdownCard
+            title="Offline"
+            value={keluarBreakdown.offline.total}
+            wrapperClassName="bg-gradient-to-br from-orange-900/40 to-orange-800/20 border border-orange-800/30"
+            titleClassName="text-orange-400"
+            onActionClick={() => openSummaryHistoryModal('Offline', keluarHistoryRecords.offline, 'Semua Offline')}
+            rows={[
+              { label: 'CASH', value: keluarBreakdown.offline.cash },
+              { label: 'TEMPO', value: keluarBreakdown.offline.tempo },
+              { label: '3 BLN', value: keluarBreakdown.offline.tempo3Bln },
+              { label: '2 BLN', value: keluarBreakdown.offline.tempo2Bln },
+              { label: '1 BLN', value: keluarBreakdown.offline.tempo1Bln },
+            ]}
+          />
+          <SummaryBreakdownCard
+            title="TikTok"
+            value={keluarBreakdown.tiktok.total}
+            wrapperClassName="bg-gradient-to-br from-pink-900/40 to-pink-800/20 border border-pink-800/30"
+            titleClassName="text-pink-400"
+            onActionClick={() => openSummaryHistoryModal('TikTok', keluarHistoryRecords.tiktok, 'Kode Toko MJM + LARIS')}
+            rows={[
+              { label: 'Kode Toko MJM', value: keluarBreakdown.tiktok.mjm },
+              { label: 'Kode Toko LARIS', value: keluarBreakdown.tiktok.laris },
+            ]}
+          />
+          <SummaryBreakdownCard
+            title="Shopee"
+            value={keluarBreakdown.shopee.total}
+            wrapperClassName="bg-gradient-to-br from-blue-900/40 to-blue-800/20 border border-blue-800/30"
+            titleClassName="text-blue-400"
+            onActionClick={() => openSummaryHistoryModal('Shopee', keluarHistoryRecords.shopee, 'MJM, LARIS, BJW, PRAKTIS PART')}
+            rows={[
+              { label: 'Kode Toko MJM', value: keluarBreakdown.shopee.mjm },
+              { label: 'Kode Toko LARIS', value: keluarBreakdown.shopee.laris },
+              { label: 'Kode Toko BJW', value: keluarBreakdown.shopee.bjw },
+              { label: 'Kode Toko PRAKTIS PART', value: keluarBreakdown.shopee.praktisPart },
+            ]}
+          />
+          <SummaryBreakdownCard
+            title="Reseller"
+            value={keluarBreakdown.reseller.total}
+            wrapperClassName="bg-gradient-to-br from-emerald-900/40 to-emerald-800/20 border border-emerald-800/30 lg:col-span-2"
+            titleClassName="text-emerald-400"
+            onActionClick={() => openSummaryHistoryModal('Reseller', keluarHistoryRecords.reseller, 'Semua Reseller')}
+          />
         </div>
       </div>
       
@@ -739,11 +925,11 @@ export const RekapBulananView: React.FC = () => {
       <div className="grid grid-cols-2 gap-4 mb-6">
         <div className="bg-gradient-to-br from-yellow-900/40 to-yellow-800/20 border border-yellow-800/30 rounded-xl p-4">
           <div className="text-yellow-400 text-xs font-medium mb-1">Penggunaan Petty Cash</div>
-          <div className="text-xl md:text-2xl font-bold text-white">Rp {stats.pettyCash.toLocaleString('id-ID')}</div>
+          <div className="text-xl md:text-2xl font-bold text-white">{formatCurrency(stats.pettyCash)}</div>
         </div>
         <div className="bg-gradient-to-br from-gray-900/40 to-gray-800/20 border border-gray-800/30 rounded-xl p-4">
           <div className="text-gray-400 text-xs font-medium mb-1">Saldo Akhir Petty Cash</div>
-          <div className="text-xl md:text-2xl font-bold text-white">Rp {stats.saldoAkhir.toLocaleString('id-ID')}</div>
+          <div className="text-xl md:text-2xl font-bold text-white">{formatCurrency(stats.saldoAkhir)}</div>
         </div>
       </div>
 
@@ -1150,6 +1336,13 @@ export const RekapBulananView: React.FC = () => {
                       <th className="px-3 py-2 text-left text-xs font-semibold uppercase">Tanggal</th>
                       <th className="px-3 py-2 text-left text-xs font-semibold uppercase">Part Number</th>
                       <th className="px-3 py-2 text-left text-xs font-semibold uppercase">Nama Barang</th>
+                      {historyType === 'keluar' && (
+                        <>
+                          <th className="px-3 py-2 text-left text-xs font-semibold uppercase">Customer</th>
+                          <th className="px-3 py-2 text-left text-xs font-semibold uppercase">Ecommerce</th>
+                          <th className="px-3 py-2 text-center text-xs font-semibold uppercase">Kode Toko</th>
+                        </>
+                      )}
                       <th className="px-3 py-2 text-center text-xs font-semibold uppercase">Qty</th>
                       <th className="px-3 py-2 text-right text-xs font-semibold uppercase">Harga Satuan</th>
                       <th className="px-3 py-2 text-right text-xs font-semibold uppercase">Total</th>
@@ -1169,6 +1362,19 @@ export const RekapBulananView: React.FC = () => {
                         <td className="px-3 py-2 text-gray-300 text-xs truncate max-w-[200px]" title={record.name}>
                           {record.name || '-'}
                         </td>
+                        {historyType === 'keluar' && (
+                          <>
+                            <td className="px-3 py-2 text-gray-200 text-xs whitespace-nowrap">
+                              {record.customer || '-'}
+                            </td>
+                            <td className="px-3 py-2 text-gray-200 text-xs whitespace-nowrap">
+                              {normalizeEcommerce(record.ecommerce)}
+                            </td>
+                            <td className="px-3 py-2 text-center text-xs text-gray-200 whitespace-nowrap">
+                              {record.kode_toko || '-'}
+                            </td>
+                          </>
+                        )}
                         <td className="px-3 py-2 text-center font-medium text-white">
                           {historyType === 'masuk' ? record.qty_masuk : record.qty_keluar}
                         </td>
@@ -1190,7 +1396,7 @@ export const RekapBulananView: React.FC = () => {
                   </tbody>
                   <tfoot className="bg-gray-900/70 sticky bottom-0">
                     <tr className="font-semibold">
-                      <td colSpan={3} className="px-3 py-3 text-white">Total</td>
+                      <td colSpan={historyType === 'keluar' ? 6 : 3} className="px-3 py-3 text-white">Total</td>
                       <td className="px-3 py-3 text-center text-white">
                         {historyData.reduce((sum, r) => sum + (historyType === 'masuk' ? (r.qty_masuk || 0) : (r.qty_keluar || 0)), 0)}
                       </td>

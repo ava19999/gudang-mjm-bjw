@@ -2045,6 +2045,38 @@ export const updateSoldItemQty = async (
   }
 };
 
+// 4.4 UPDATE SOLD ITEM KODE TOKO
+export const updateSoldItemKodeToko = async (
+  itemId: string,
+  newKodeToko: string,
+  store: string | null
+): Promise<{ success: boolean; msg: string }> => {
+  const table = store === 'mjm' ? 'barang_keluar_mjm' : (store === 'bjw' ? 'barang_keluar_bjw' : null);
+  if (!table) return { success: false, msg: 'Toko tidak valid' };
+
+  const normalizedKodeToko = (newKodeToko || '').trim().toUpperCase().replace(/\s+/g, ' ');
+  if (!normalizedKodeToko) {
+    return { success: false, msg: 'Kode toko tidak boleh kosong' };
+  }
+
+  try {
+    const { error } = await supabase
+      .from(table)
+      .update({ kode_toko: normalizedKodeToko })
+      .eq('id', itemId);
+
+    if (error) {
+      console.error('Update Sold Item Kode Toko Error:', error);
+      return { success: false, msg: 'Gagal update kode toko: ' + error.message };
+    }
+
+    return { success: true, msg: 'Kode toko berhasil diupdate' };
+  } catch (err: any) {
+    console.error('Update Sold Item Kode Toko Exception:', err);
+    return { success: false, msg: 'Error: ' + (err.message || 'Unknown error') };
+  }
+};
+
 // 5. FETCH RETUR
 export const fetchReturItems = async (store: string | null): Promise<ReturRow[]> => {
   const table = store === 'mjm' ? 'retur_mjm' : (store === 'bjw' ? 'retur_bjw' : null);
