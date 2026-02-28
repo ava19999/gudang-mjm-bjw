@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Calendar, BarChart2, PieChart, Download, User, Clock, ChevronDown, ChevronUp, X, Edit3, History, Save, Package, ShoppingBag, Store, Printer } from 'lucide-react';
+import { Calendar, BarChart2, PieChart, Download, User, Clock, ChevronDown, ChevronUp, X, Edit3, History, Save, Search, Package, ShoppingBag, Store, Printer } from 'lucide-react';
 import { supabase } from '../../services/supabaseClient';
 import { useStore } from '../../context/StoreContext';
 import html2canvas from 'html2canvas';
@@ -89,6 +89,9 @@ interface SummaryCardRow {
   value: number;
 }
 
+const HISTORY_ECOMMERCE_OPTIONS = ['OFFLINE', 'TIKTOK', 'SHOPEE', 'RESELLER', 'TOKOPEDIA', 'LAZADA'];
+const HISTORY_KODE_TOKO_OPTIONS = ['MJM', 'BJW', 'LARIS', 'PRAKTIS PART'];
+
 const SummaryBreakdownCard = ({
   title,
   value,
@@ -168,6 +171,28 @@ export const RekapBulananView: React.FC = () => {
   const [historyData, setHistoryData] = useState<BarangRecord[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [historyType, setHistoryType] = useState<'masuk' | 'keluar'>('masuk');
+  const [historySearchTerm, setHistorySearchTerm] = useState('');
+  const [editingHistoryKey, setEditingHistoryKey] = useState<string | null>(null);
+  const [savingHistoryRecord, setSavingHistoryRecord] = useState(false);
+  const [historyEditForm, setHistoryEditForm] = useState<{
+    created_at: string;
+    part_number: string;
+    name: string;
+    customer: string;
+    ecommerce: string;
+    kode_toko: string;
+    qty: string;
+    harga_satuan: string;
+  }>({
+    created_at: '',
+    part_number: '',
+    name: '',
+    customer: '',
+    ecommerce: 'OFFLINE',
+    kode_toko: 'MJM',
+    qty: '',
+    harga_satuan: '',
+  });
   
   // Toast state
   const [toast, setToast] = useState<{message: string, type: 'success' | 'error'} | null>(null);
@@ -527,6 +552,9 @@ export const RekapBulananView: React.FC = () => {
   const openHistoryModal = (customer: CustomerGroup, type: 'masuk' | 'keluar') => {
     setSelectedCustomerForHistory(customer);
     setHistoryType(type);
+    setHistorySearchTerm('');
+    setEditingHistoryKey(null);
+    setSavingHistoryRecord(false);
     setHistoryModal(true);
     loadHistoryData(customer.customer, customer.tempo, type);
   };
@@ -540,12 +568,166 @@ export const RekapBulananView: React.FC = () => {
     });
     setHistoryType('keluar');
     setLoadingHistory(false);
+    setHistorySearchTerm('');
+    setEditingHistoryKey(null);
+    setSavingHistoryRecord(false);
     setHistoryData(
       [...records].sort(
         (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
       )
     );
     setHistoryModal(true);
+  };
+
+  const closeHistoryModal = () => {
+    setHistoryModal(false);
+    setSelectedCustomerForHistory(null);
+    setHistoryData([]);
+    setHistorySearchTerm('');
+    setSavingHistoryRecord(false);
+    cancelEditHistoryRecord();
+  };
+
+  const startEditHistoryRecord = (record: BarangRecord) => {
+    if (historyType !== 'keluar') return;
+
+    const date = new Date(record.created_at);
+    const isoLocal = Number.isNaN(date.getTime())
+      ? ''
+      : new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+
+    setEditingHistoryKey(`${record.store || '-'}-${record.id}`);
+    setHistoryEditForm({
+      created_at: isoLocal,
+      part_number: record.part_number || '',
+      name: record.name || '',
+      customer: record.customer || '',
+      ecommerce: normalizeEcommerce(record.ecommerce),
+      kode_toko: normalizeSubToko(record.kode_toko) === '-' ? 'MJM' : normalizeSubToko(record.kode_toko),
+      qty: String(record.qty_keluar || 0),
+      harga_satuan: String(record.harga_satuan || 0),
+    });
+  };
+
+  const cancelEditHistoryRecord = () => {
+    setEditingHistoryKey(null);
+    setHistoryEditForm({
+      created_at: '',
+      part_number: '',
+      name: '',
+      customer: '',
+      ecommerce: 'OFFLINE',
+      kode_toko: 'MJM',
+      qty: '',
+      harga_satuan: '',
+    });
+  };
+
+  const saveEditHistoryRecord = async (record: BarangRecord) => {
+    if (historyType !== 'keluar' || savingHistoryRecord) return;
+
+    if (record.store !== 'mjm' && record.store !== 'bjw') {
+      showToast('Toko sumber riwayat tidak valid', 'error');
+      return;
+    }
+
+    const targetTable = record.store === 'mjm' ? 'barang_keluar_mjm' : 'barang_keluar_bjw';
+    const qty = parseInt(historyEditForm.qty, 10);
+    const hargaSatuan = parseFloat(historyEditForm.harga_satuan);
+    const normalizedKodeToko = normalizeSubToko(historyEditForm.kode_toko);
+    const partNumber = historyEditForm.part_number.trim().toUpperCase();
+    const customer = historyEditForm.customer.trim();
+    const itemName = historyEditForm.name.trim();
+
+    if (!historyEditForm.created_at || Number.isNaN(new Date(historyEditForm.created_at).getTime())) {
+      showToast('Tanggal tidak valid', 'error');
+      return;
+    }
+    if (!partNumber) {
+      showToast('Part number wajib diisi', 'error');
+      return;
+    }
+    if (!customer) {
+      showToast('Customer wajib diisi', 'error');
+      return;
+    }
+    if (!itemName) {
+      showToast('Nama barang wajib diisi', 'error');
+      return;
+    }
+    if (!Number.isInteger(qty) || qty <= 0) {
+      showToast('Qty harus lebih dari 0', 'error');
+      return;
+    }
+    if (!Number.isFinite(hargaSatuan) || hargaSatuan < 0) {
+      showToast('Harga satuan tidak valid', 'error');
+      return;
+    }
+    if (normalizedKodeToko === '-') {
+      showToast('Kode toko tidak valid', 'error');
+      return;
+    }
+
+    setSavingHistoryRecord(true);
+    try {
+      const nextCreatedAt = new Date(historyEditForm.created_at).toISOString();
+      const nextHargaTotal = qty * hargaSatuan;
+      const patch = {
+        created_at: nextCreatedAt,
+        part_number: partNumber,
+        name: itemName,
+        customer,
+        ecommerce: normalizeEcommerce(historyEditForm.ecommerce),
+        kode_toko: normalizedKodeToko,
+        qty_keluar: qty,
+        harga_satuan: hargaSatuan,
+        harga_total: nextHargaTotal,
+      };
+
+      const { error } = await supabase
+        .from(targetTable)
+        .update(patch)
+        .eq('id', record.id);
+
+      if (error) {
+        console.error('Error updating history record:', error);
+        showToast(`Gagal update riwayat: ${error.message}`, 'error');
+        return;
+      }
+
+      setHistoryData((prev) =>
+        prev.map((item) =>
+          item.id === record.id && item.store === record.store
+            ? {
+                ...item,
+                ...patch,
+                qty_keluar: qty,
+                harga_satuan: hargaSatuan,
+                harga_total: nextHargaTotal,
+              }
+            : item
+        )
+      );
+
+      setBarangKeluar((prev) =>
+        prev.map((item) =>
+          item.id === record.id && item.store === record.store
+            ? {
+                ...item,
+                ...patch,
+                qty_keluar: qty,
+                harga_satuan: hargaSatuan,
+                harga_total: nextHargaTotal,
+              }
+            : item
+        )
+      );
+
+      showToast('Riwayat penjualan berhasil diupdate', 'success');
+      cancelEditHistoryRecord();
+    } finally {
+      setSavingHistoryRecord(false);
+    }
   };
 
   // Helper function to check if record is RETUR (check both customer and tempo)
@@ -665,6 +847,41 @@ export const RekapBulananView: React.FC = () => {
       reseller: byEcommerce('RESELLER'),
     };
   }, [validKeluarRecords]);
+
+  const filteredHistoryData = useMemo(() => {
+    const search = historySearchTerm.trim().toLowerCase();
+    if (!search) return historyData;
+
+    return historyData.filter((record) => {
+      const dateLabel = new Date(record.created_at).toLocaleString('id-ID').toLowerCase();
+      const qtyValue = historyType === 'masuk' ? record.qty_masuk : record.qty_keluar;
+      return [
+        record.part_number,
+        record.name,
+        record.customer,
+        record.ecommerce,
+        record.kode_toko,
+        record.store,
+        dateLabel,
+        qtyValue,
+        record.harga_satuan,
+        record.harga_total,
+      ]
+        .map((value) => String(value || '').toLowerCase())
+        .some((value) => value.includes(search));
+    });
+  }, [historyData, historySearchTerm, historyType]);
+
+  const filteredHistoryTotals = useMemo(
+    () => ({
+      qty: filteredHistoryData.reduce(
+        (sum, record) => sum + (historyType === 'masuk' ? (record.qty_masuk || 0) : (record.qty_keluar || 0)),
+        0
+      ),
+      amount: filteredHistoryData.reduce((sum, record) => sum + (record.harga_total || 0), 0),
+    }),
+    [filteredHistoryData, historyType]
+  );
   
   // Group Barang Masuk by Customer and Tempo (excluding RETUR and 0 total)
   const groupedBarangMasuk = useMemo(() => {
@@ -1311,7 +1528,7 @@ export const RekapBulananView: React.FC = () => {
                 </div>
               </div>
               <button 
-                onClick={() => { setHistoryModal(false); setSelectedCustomerForHistory(null); setHistoryData([]); }}
+                onClick={closeHistoryModal}
                 className="p-2 hover:bg-gray-700 rounded-lg transition-colors"
               >
                 <X className="w-5 h-5 text-gray-400" />
@@ -1319,7 +1536,22 @@ export const RekapBulananView: React.FC = () => {
             </div>
             
             {/* Content */}
-            <div className="flex-1 overflow-auto p-4">
+            <div className="flex-1 overflow-auto p-4 space-y-4">
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <div className="relative w-full md:max-w-md">
+                  <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    value={historySearchTerm}
+                    onChange={(e) => setHistorySearchTerm(e.target.value)}
+                    placeholder="Cari tanggal, part number, customer, ecommerce..."
+                    className="w-full bg-gray-900 border border-gray-700 rounded-xl py-2.5 pl-10 pr-3 text-sm text-white placeholder:text-gray-500 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all"
+                  />
+                </div>
+                <div className="text-xs text-gray-400">
+                  Menampilkan {filteredHistoryData.length} dari {historyData.length} transaksi
+                </div>
+              </div>
+
               {loadingHistory ? (
                 <div className="flex items-center justify-center py-12">
                   <div className="w-8 h-8 border-3 border-gray-600 border-t-blue-500 rounded-full animate-spin" />
@@ -1328,6 +1560,11 @@ export const RekapBulananView: React.FC = () => {
                 <div className="text-center py-12 text-gray-500">
                   <Package className="w-12 h-12 mx-auto mb-3 opacity-50" />
                   <p>Tidak ada data transaksi</p>
+                </div>
+              ) : filteredHistoryData.length === 0 ? (
+                <div className="text-center py-12 text-gray-500">
+                  <Search className="w-12 h-12 mx-auto mb-3 opacity-50" />
+                  <p>Data tidak ditemukan untuk kata kunci: "{historySearchTerm}"</p>
                 </div>
               ) : (
                 <table className="w-full text-sm">
@@ -1347,66 +1584,243 @@ export const RekapBulananView: React.FC = () => {
                       <th className="px-3 py-2 text-right text-xs font-semibold uppercase">Harga Satuan</th>
                       <th className="px-3 py-2 text-right text-xs font-semibold uppercase">Total</th>
                       <th className="px-3 py-2 text-center text-xs font-semibold uppercase">Toko</th>
+                      {historyType === 'keluar' && (
+                        <th className="px-3 py-2 text-center text-xs font-semibold uppercase">Aksi</th>
+                      )}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-700">
-                    {historyData.map((record, i) => (
-                      <tr key={record.id || i} className="hover:bg-gray-700/30 transition-colors">
-                        <td className="px-3 py-2 text-gray-300 text-xs">
-                          {new Date(record.created_at).toLocaleDateString('id-ID', { 
-                            day: '2-digit', month: 'short', year: 'numeric',
-                            hour: '2-digit', minute: '2-digit'
-                          })}
-                        </td>
-                        <td className="px-3 py-2 font-mono text-white text-xs">{record.part_number}</td>
-                        <td className="px-3 py-2 text-gray-300 text-xs truncate max-w-[200px]" title={record.name}>
-                          {record.name || '-'}
-                        </td>
-                        {historyType === 'keluar' && (
-                          <>
-                            <td className="px-3 py-2 text-gray-200 text-xs whitespace-nowrap">
-                              {record.customer || '-'}
+                    {filteredHistoryData.map((record, i) => {
+                      const rowKey = `${record.store || '-'}-${record.id}`;
+                      const isEditing = editingHistoryKey === rowKey;
+                      const qtyPreview = parseInt(historyEditForm.qty, 10);
+                      const hargaPreview = parseFloat(historyEditForm.harga_satuan);
+                      const totalPreview =
+                        Number.isFinite(qtyPreview) && Number.isFinite(hargaPreview)
+                          ? qtyPreview * hargaPreview
+                          : 0;
+
+                      return (
+                        <tr
+                          key={`${rowKey}-${i}`}
+                          className={`transition-colors ${isEditing ? 'bg-blue-900/10' : 'hover:bg-gray-700/30'}`}
+                        >
+                          <td className="px-3 py-2 text-gray-300 text-xs">
+                            {isEditing ? (
+                              <input
+                                type="datetime-local"
+                                value={historyEditForm.created_at}
+                                onChange={(e) =>
+                                  setHistoryEditForm((prev) => ({ ...prev, created_at: e.target.value }))
+                                }
+                                className="bg-gray-900 border border-gray-600 rounded-lg px-2 py-1 text-xs text-white w-[180px]"
+                              />
+                            ) : (
+                              new Date(record.created_at).toLocaleString('id-ID', {
+                                day: '2-digit',
+                                month: 'short',
+                                year: 'numeric',
+                                hour: '2-digit',
+                                minute: '2-digit',
+                              })
+                            )}
+                          </td>
+                          <td className="px-3 py-2 font-mono text-white text-xs">
+                            {isEditing ? (
+                              <input
+                                value={historyEditForm.part_number}
+                                onChange={(e) =>
+                                  setHistoryEditForm((prev) => ({
+                                    ...prev,
+                                    part_number: e.target.value.toUpperCase(),
+                                  }))
+                                }
+                                className="bg-gray-900 border border-gray-600 rounded-lg px-2 py-1 text-xs text-white w-[140px]"
+                              />
+                            ) : (
+                              record.part_number
+                            )}
+                          </td>
+                          <td className="px-3 py-2 text-gray-300 text-xs">
+                            {isEditing ? (
+                              <input
+                                value={historyEditForm.name}
+                                onChange={(e) =>
+                                  setHistoryEditForm((prev) => ({ ...prev, name: e.target.value }))
+                                }
+                                className="bg-gray-900 border border-gray-600 rounded-lg px-2 py-1 text-xs text-white w-[190px]"
+                              />
+                            ) : (
+                              <span className="truncate block max-w-[200px]" title={record.name}>
+                                {record.name || '-'}
+                              </span>
+                            )}
+                          </td>
+                          {historyType === 'keluar' && (
+                            <>
+                              <td className="px-3 py-2 text-gray-200 text-xs whitespace-nowrap">
+                                {isEditing ? (
+                                  <input
+                                    value={historyEditForm.customer}
+                                    onChange={(e) =>
+                                      setHistoryEditForm((prev) => ({ ...prev, customer: e.target.value }))
+                                    }
+                                    className="bg-gray-900 border border-gray-600 rounded-lg px-2 py-1 text-xs text-white w-[150px]"
+                                  />
+                                ) : (
+                                  record.customer || '-'
+                                )}
+                              </td>
+                              <td className="px-3 py-2 text-gray-200 text-xs whitespace-nowrap">
+                                {isEditing ? (
+                                  <select
+                                    value={historyEditForm.ecommerce}
+                                    onChange={(e) =>
+                                      setHistoryEditForm((prev) => ({
+                                        ...prev,
+                                        ecommerce: normalizeEcommerce(e.target.value),
+                                      }))
+                                    }
+                                    className="bg-gray-900 border border-gray-600 rounded-lg px-2 py-1 text-xs text-white"
+                                  >
+                                    {HISTORY_ECOMMERCE_OPTIONS.map((option) => (
+                                      <option key={option} value={option}>
+                                        {option}
+                                      </option>
+                                    ))}
+                                  </select>
+                                ) : (
+                                  normalizeEcommerce(record.ecommerce)
+                                )}
+                              </td>
+                              <td className="px-3 py-2 text-center text-xs text-gray-200 whitespace-nowrap">
+                                {isEditing ? (
+                                  <select
+                                    value={historyEditForm.kode_toko}
+                                    onChange={(e) =>
+                                      setHistoryEditForm((prev) => ({
+                                        ...prev,
+                                        kode_toko: normalizeSubToko(e.target.value),
+                                      }))
+                                    }
+                                    className="bg-gray-900 border border-gray-600 rounded-lg px-2 py-1 text-xs text-white"
+                                  >
+                                    {HISTORY_KODE_TOKO_OPTIONS.map((option) => (
+                                      <option key={option} value={option}>
+                                        {option}
+                                      </option>
+                                    ))}
+                                  </select>
+                                ) : (
+                                  record.kode_toko || '-'
+                                )}
+                              </td>
+                            </>
+                          )}
+                          <td className="px-3 py-2 text-center font-medium text-white">
+                            {isEditing ? (
+                              <input
+                                type="number"
+                                min={1}
+                                step={1}
+                                value={historyEditForm.qty}
+                                onChange={(e) =>
+                                  setHistoryEditForm((prev) => ({ ...prev, qty: e.target.value }))
+                                }
+                                className="bg-gray-900 border border-gray-600 rounded-lg px-2 py-1 text-xs text-white w-16 text-center"
+                              />
+                            ) : historyType === 'masuk' ? (
+                              record.qty_masuk
+                            ) : (
+                              record.qty_keluar
+                            )}
+                          </td>
+                          <td className="px-3 py-2 text-right font-mono text-gray-300 text-xs">
+                            {isEditing ? (
+                              <input
+                                type="number"
+                                min={0}
+                                step={100}
+                                value={historyEditForm.harga_satuan}
+                                onChange={(e) =>
+                                  setHistoryEditForm((prev) => ({ ...prev, harga_satuan: e.target.value }))
+                                }
+                                className="bg-gray-900 border border-gray-600 rounded-lg px-2 py-1 text-xs text-white w-[120px] text-right"
+                              />
+                            ) : (
+                              formatCurrency(record.harga_satuan)
+                            )}
+                          </td>
+                          <td className="px-3 py-2 text-right font-mono text-white text-sm">
+                            {isEditing ? formatCurrency(totalPreview) : formatCurrency(record.harga_total)}
+                          </td>
+                          <td className="px-3 py-2 text-center">
+                            <span
+                              className={`px-2 py-0.5 rounded text-xs font-medium uppercase ${
+                                record.store === 'mjm'
+                                  ? 'bg-blue-900/40 text-blue-300'
+                                  : 'bg-orange-900/40 text-orange-300'
+                              }`}
+                            >
+                              {record.store}
+                            </span>
+                          </td>
+                          {historyType === 'keluar' && (
+                            <td className="px-3 py-2 text-center">
+                              {isEditing ? (
+                                <div className="inline-flex gap-2">
+                                  <button
+                                    onClick={() => saveEditHistoryRecord(record)}
+                                    disabled={savingHistoryRecord}
+                                    className="p-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
+                                    title="Simpan"
+                                  >
+                                    {savingHistoryRecord ? (
+                                      <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                                    ) : (
+                                      <Save className="w-3.5 h-3.5" />
+                                    )}
+                                  </button>
+                                  <button
+                                    onClick={cancelEditHistoryRecord}
+                                    disabled={savingHistoryRecord}
+                                    className="p-1.5 bg-gray-700 hover:bg-gray-600 disabled:opacity-50 text-white rounded-lg transition-colors"
+                                    title="Batal"
+                                  >
+                                    <X className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  onClick={() => startEditHistoryRecord(record)}
+                                  className="p-1.5 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-colors"
+                                  title="Edit transaksi"
+                                >
+                                  <Edit3 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
                             </td>
-                            <td className="px-3 py-2 text-gray-200 text-xs whitespace-nowrap">
-                              {normalizeEcommerce(record.ecommerce)}
-                            </td>
-                            <td className="px-3 py-2 text-center text-xs text-gray-200 whitespace-nowrap">
-                              {record.kode_toko || '-'}
-                            </td>
-                          </>
-                        )}
-                        <td className="px-3 py-2 text-center font-medium text-white">
-                          {historyType === 'masuk' ? record.qty_masuk : record.qty_keluar}
-                        </td>
-                        <td className="px-3 py-2 text-right font-mono text-gray-300 text-xs">
-                          {formatCurrency(record.harga_satuan)}
-                        </td>
-                        <td className="px-3 py-2 text-right font-mono text-white text-sm">
-                          {formatCurrency(record.harga_total)}
-                        </td>
-                        <td className="px-3 py-2 text-center">
-                          <span className={`px-2 py-0.5 rounded text-xs font-medium uppercase ${
-                            record.store === 'mjm' ? 'bg-blue-900/40 text-blue-300' : 'bg-orange-900/40 text-orange-300'
-                          }`}>
-                            {record.store}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
+                          )}
+                        </tr>
+                      );
+                    })}
                   </tbody>
                   <tfoot className="bg-gray-900/70 sticky bottom-0">
                     <tr className="font-semibold">
-                      <td colSpan={historyType === 'keluar' ? 6 : 3} className="px-3 py-3 text-white">Total</td>
-                      <td className="px-3 py-3 text-center text-white">
-                        {historyData.reduce((sum, r) => sum + (historyType === 'masuk' ? (r.qty_masuk || 0) : (r.qty_keluar || 0)), 0)}
+                      <td colSpan={historyType === 'keluar' ? 6 : 3} className="px-3 py-3 text-white">
+                        Total {historySearchTerm.trim() ? '(hasil pencarian)' : ''}
                       </td>
+                      <td className="px-3 py-3 text-center text-white">{filteredHistoryTotals.qty}</td>
                       <td className="px-3 py-3"></td>
-                      <td className={`px-3 py-3 text-right font-mono text-base ${
-                        historyType === 'masuk' ? 'text-green-400' : 'text-red-400'
-                      }`}>
-                        {formatCurrency(historyData.reduce((sum, r) => sum + (r.harga_total || 0), 0))}
+                      <td
+                        className={`px-3 py-3 text-right font-mono text-base ${
+                          historyType === 'masuk' ? 'text-green-400' : 'text-red-400'
+                        }`}
+                      >
+                        {formatCurrency(filteredHistoryTotals.amount)}
                       </td>
                       <td></td>
+                      {historyType === 'keluar' && <td></td>}
                     </tr>
                   </tfoot>
                 </table>
@@ -1416,7 +1830,7 @@ export const RekapBulananView: React.FC = () => {
             {/* Footer */}
             <div className="flex justify-end p-4 border-t border-gray-700 flex-shrink-0">
               <button
-                onClick={() => { setHistoryModal(false); setSelectedCustomerForHistory(null); setHistoryData([]); }}
+                onClick={closeHistoryModal}
                 className="px-6 py-2.5 bg-gray-700 hover:bg-gray-600 text-white rounded-xl font-medium transition-colors"
               >
                 Tutup
