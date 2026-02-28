@@ -5,6 +5,7 @@ export interface PettyCashEntry {
   id: string;
   tgl: string;
   keterangan: string;
+  kegunaan?: string | null;
   type: 'in' | 'out';
   akun: 'cash' | 'bank'; // Kas atau Rekening
   saldokeluarmasuk: number; // Jumlah transaksi (positif)
@@ -60,6 +61,7 @@ export const getPettyCashEntries = async (store: string | null): Promise<PettyCa
       id: String(item.id),
       tgl: item.tgl,
       keterangan: item.keterangan || '',
+      kegunaan: item.kegunaan || null,
       type: item.type as 'in' | 'out',
       akun: (item.akun || 'cash') as 'cash' | 'bank',
       saldokeluarmasuk: Number(item.saldokeluarmasuk) || 0,
@@ -123,6 +125,7 @@ export const addPettyCashEntry = async (
   entry: {
     tgl: string;
     keterangan: string;
+    kegunaan?: string | null;
     type: 'in' | 'out';
     akun: 'cash' | 'bank';
     amount: number;
@@ -149,6 +152,7 @@ export const addPettyCashEntry = async (
       .insert([{
         tgl: tglWithTime,
         keterangan: entry.keterangan,
+        kegunaan: entry.kegunaan || null,
         type: entry.type,
         akun: entry.akun,
         saldokeluarmasuk: entry.amount,
@@ -169,6 +173,7 @@ export const addPettyCashEntry = async (
         id: String(data.id),
         tgl: tglWithTime,
         keterangan: entry.keterangan,
+        kegunaan: entry.kegunaan || null,
         type: entry.type,
         akun: entry.akun,
         saldokeluarmasuk: entry.amount,
@@ -178,6 +183,33 @@ export const addPettyCashEntry = async (
   } catch (err: any) {
     console.error('addPettyCashEntry error:', err);
     return { success: false, message: err.message || 'Gagal menambah transaksi' };
+  }
+};
+
+/**
+ * Toggle kegunaan "PENGELUARAN LAIN LAIN" untuk transaksi petty cash
+ */
+export const updatePettyCashKegunaan = async (
+  store: string | null,
+  id: string,
+  enabled: boolean
+): Promise<{ success: boolean; message: string }> => {
+  const table = getTableName(store);
+  try {
+    const { error } = await supabase
+      .from(table)
+      .update({ kegunaan: enabled ? 'PENGELUARAN LAIN LAIN' : null })
+      .eq('id', id);
+
+    if (error) {
+      console.error('Error updating petty cash kegunaan:', error);
+      return { success: false, message: error.message };
+    }
+
+    return { success: true, message: 'Kegunaan berhasil diupdate' };
+  } catch (err: any) {
+    console.error('updatePettyCashKegunaan error:', err);
+    return { success: false, message: err.message || 'Gagal update kegunaan' };
   }
 };
 
@@ -275,6 +307,7 @@ export const getEntriesByAccount = async (store: string | null, akun: 'cash' | '
       id: String(item.id),
       tgl: item.tgl,
       keterangan: item.keterangan || '',
+      kegunaan: item.kegunaan || null,
       type: item.type as 'in' | 'out',
       akun: item.akun as 'cash' | 'bank',
       saldokeluarmasuk: Number(item.saldokeluarmasuk) || 0,

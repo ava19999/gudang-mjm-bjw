@@ -9,6 +9,7 @@ import {
   getPettyCashEntries,
   addPettyCashEntry,
   deletePettyCashEntry,
+  updatePettyCashKegunaan,
   getTotalBalance,
   formatIndonesianNumber,
   PettyCashEntry
@@ -38,6 +39,152 @@ interface PettyCashViewProps {
   refreshTrigger?: number;
 }
 
+const formatPettyDate = (dateStr: string) => {
+  try {
+    // Parse tanggal tanpa konversi timezone
+    // Format dari Supabase: "2026-02-03 17:58:00+00" atau "2026-02-03T17:58:00+00:00"
+    const datePart = dateStr.split(/[T\s]/)[0];
+    const [year, month, day] = datePart.split('-').map(Number);
+
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+    return `${String(day).padStart(2, '0')} ${months[month - 1]} ${year}`;
+  } catch {
+    return dateStr;
+  }
+};
+
+interface TransactionTableProps {
+  title: string;
+  icon: any;
+  iconColor: string;
+  entries: PettyCashEntry[];
+  updatingKegunaanId: string | null;
+  isOtherExpenseEntry: (entry: PettyCashEntry) => boolean;
+  onToggleOtherExpense: (entry: PettyCashEntry) => void;
+  onDeleteEntry: (id: string) => void;
+}
+
+const TransactionTable: React.FC<TransactionTableProps> = ({
+  title,
+  icon: Icon,
+  iconColor,
+  entries: tableEntries,
+  updatingKegunaanId,
+  isOtherExpenseEntry,
+  onToggleOtherExpense,
+  onDeleteEntry,
+}) => (
+  <div className="bg-gray-800 rounded-xl shadow-lg border border-gray-700 overflow-hidden">
+    <div className={`p-4 border-b border-gray-700 flex items-center justify-between ${iconColor}`}>
+      <div className="flex items-center gap-2">
+        <Icon size={20} />
+        <h2 className="text-lg font-semibold">{title}</h2>
+      </div>
+      <span className="text-sm text-gray-400">{tableEntries.length} transaksi</span>
+    </div>
+
+    <div className="overflow-x-auto max-h-96">
+      <table className="w-full">
+        <thead className="bg-gray-700 sticky top-0">
+          <tr>
+            <th className="px-4 py-3 text-left text-xs font-semibold">Tanggal</th>
+            <th className="px-4 py-3 text-left text-xs font-semibold">Keterangan</th>
+            <th className="px-4 py-3 text-right text-xs font-semibold">Masuk</th>
+            <th className="px-4 py-3 text-right text-xs font-semibold">Keluar</th>
+            <th className="px-4 py-3 text-right text-xs font-semibold">Saldo</th>
+            <th className="px-4 py-3 text-center text-xs font-semibold">Aksi</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-700">
+          {tableEntries.length === 0 ? (
+            <tr>
+              <td colSpan={6} className="px-4 py-8 text-center text-gray-400">
+                <Icon size={32} className="mx-auto mb-2 opacity-50" />
+                Belum ada transaksi
+              </td>
+            </tr>
+          ) : (
+            tableEntries.map((entry) => {
+              const isOtherExpense = isOtherExpenseEntry(entry);
+              const isUpdatingKegunaan = updatingKegunaanId === entry.id;
+
+              return (
+                <tr key={entry.id} className="hover:bg-gray-700/50 transition-colors">
+                  <td className="px-4 py-2 text-xs">{formatPettyDate(entry.tgl)}</td>
+                  <td className="px-4 py-2 text-xs">
+                    <div className="flex flex-col gap-1">
+                      <span>{entry.keterangan}</span>
+                      {entry.kegunaan && (
+                        <span className="inline-flex w-fit px-2 py-0.5 rounded bg-yellow-900/40 text-yellow-300 text-[10px] font-semibold uppercase">
+                          {entry.kegunaan}
+                        </span>
+                      )}
+                    </div>
+                  </td>
+                  <td className="px-4 py-2 text-xs text-right">
+                    {entry.type === 'in' ? (
+                      <span className="text-green-400 font-semibold">
+                        +Rp {formatIndonesianNumber(entry.saldokeluarmasuk)}
+                      </span>
+                    ) : (
+                      '-'
+                    )}
+                  </td>
+                  <td className="px-4 py-2 text-xs text-right">
+                    {entry.type === 'out' ? (
+                      <span className="text-red-400 font-semibold">
+                        -Rp {formatIndonesianNumber(entry.saldokeluarmasuk)}
+                      </span>
+                    ) : (
+                      '-'
+                    )}
+                  </td>
+                  <td className="px-4 py-2 text-xs text-right font-semibold">
+                    Rp {formatIndonesianNumber(entry.saldosaatini)}
+                  </td>
+                  <td className="px-4 py-2 text-center">
+                    <div className="flex items-center justify-center gap-2">
+                      <button
+                        onClick={() => onToggleOtherExpense(entry)}
+                        disabled={isUpdatingKegunaan || entry.type !== 'out'}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                          isOtherExpense ? 'bg-yellow-500/80' : 'bg-gray-600'
+                        } ${
+                          entry.type !== 'out'
+                            ? 'opacity-40 cursor-not-allowed'
+                            : 'hover:brightness-110'
+                        }`}
+                        title={
+                          entry.type !== 'out'
+                            ? 'Hanya untuk transaksi keluar'
+                            : 'Tandai Pengeluaran Lain Lain'
+                        }
+                      >
+                        <span
+                          className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                            isOtherExpense ? 'translate-x-6' : 'translate-x-1'
+                          }`}
+                        />
+                      </button>
+                      <button
+                        onClick={() => onDeleteEntry(entry.id)}
+                        className="p-1.5 text-red-400 hover:bg-red-600/20 rounded-lg transition-colors"
+                        title="Hapus"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })
+          )}
+        </tbody>
+      </table>
+    </div>
+  </div>
+);
+
 export const PettyCashView: React.FC<PettyCashViewProps> = ({ refreshTrigger }) => {
   const { selectedStore } = useStore();
   const [entries, setEntries] = useState<PettyCashEntry[]>([]);
@@ -52,6 +199,7 @@ export const PettyCashView: React.FC<PettyCashViewProps> = ({ refreshTrigger }) 
   const [formDescription, setFormDescription] = useState('');
   const [formAmount, setFormAmount] = useState('');
   const [formAmountDisplay, setFormAmountDisplay] = useState('');
+  const [formIsOtherExpense, setFormIsOtherExpense] = useState(false);
   const [filteredSuggestions, setFilteredSuggestions] = useState<string[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(-1);
@@ -61,6 +209,7 @@ export const PettyCashView: React.FC<PettyCashViewProps> = ({ refreshTrigger }) 
   const [filterAkun, setFilterAkun] = useState<'all' | 'cash' | 'bank'>('all');
   const [filterDateFrom, setFilterDateFrom] = useState('');
   const [filterDateTo, setFilterDateTo] = useState('');
+  const [updatingKegunaanId, setUpdatingKegunaanId] = useState<string | null>(null);
   
   // Toast
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
@@ -107,6 +256,7 @@ export const PettyCashView: React.FC<PettyCashViewProps> = ({ refreshTrigger }) 
       setFormDescription('');
       setFormAmount('');
       setFormAmountDisplay('');
+      setFormIsOtherExpense(false);
       setTimeout(() => dateInputRef.current?.focus(), 100);
     }
   }, [isAdding]);
@@ -171,6 +321,7 @@ export const PettyCashView: React.FC<PettyCashViewProps> = ({ refreshTrigger }) 
     const result = await addPettyCashEntry(selectedStore, {
       tgl: formDate,
       keterangan: formDescription.trim(),
+      kegunaan: formIsOtherExpense ? 'PENGELUARAN LAIN LAIN' : null,
       type: formType,
       akun: formAkun,
       amount: amount,
@@ -201,6 +352,39 @@ export const PettyCashView: React.FC<PettyCashViewProps> = ({ refreshTrigger }) 
     }
     
     setLoading(false);
+  };
+
+  const isOtherExpenseEntry = (entry: PettyCashEntry) =>
+    String(entry.kegunaan || '').toUpperCase().includes('PENGELUARAN LAIN');
+
+  const handleToggleOtherExpense = async (entry: PettyCashEntry) => {
+    if (entry.type !== 'out') {
+      showToast('Hanya transaksi keluar yang bisa ditandai pengeluaran lain lain', 'error');
+      return;
+    }
+
+    const nextEnabled = !isOtherExpenseEntry(entry);
+    setUpdatingKegunaanId(entry.id);
+
+    const result = await updatePettyCashKegunaan(selectedStore, entry.id, nextEnabled);
+    if (result.success) {
+      setEntries((prev) =>
+        prev.map((item) =>
+          item.id === entry.id
+            ? { ...item, kegunaan: nextEnabled ? 'PENGELUARAN LAIN LAIN' : null }
+            : item
+        )
+      );
+      showToast(
+        nextEnabled
+          ? 'Transaksi ditandai sebagai Pengeluaran Lain Lain'
+          : 'Penanda Pengeluaran Lain Lain dihapus'
+      );
+    } else {
+      showToast(result.message, 'error');
+    }
+
+    setUpdatingKegunaanId(null);
   };
   
   const handleKeyDown = (e: React.KeyboardEvent, field: 'date' | 'description' | 'amount') => {
@@ -244,11 +428,12 @@ export const PettyCashView: React.FC<PettyCashViewProps> = ({ refreshTrigger }) 
       }
     };
     
-    const headers = ['Tanggal', 'Akun', 'Keterangan', 'Tipe', 'Jumlah', 'Saldo'];
+    const headers = ['Tanggal', 'Akun', 'Keterangan', 'Kegunaan', 'Tipe', 'Jumlah', 'Saldo'];
     const rows = filteredEntries.map(entry => [
       formatDateCSV(entry.tgl),
       entry.akun === 'cash' ? 'Kas' : 'Rekening',
       entry.keterangan,
+      entry.kegunaan || '-',
       entry.type === 'in' ? 'Masuk' : 'Keluar',
       entry.saldokeluarmasuk,
       entry.saldosaatini,
@@ -265,103 +450,6 @@ export const PettyCashView: React.FC<PettyCashViewProps> = ({ refreshTrigger }) 
     link.download = `petty_cash_${new Date().toISOString().split('T')[0]}.csv`;
     link.click();
   };
-  
-  const formatDate = (dateStr: string) => {
-    try {
-      // Parse tanggal tanpa konversi timezone
-      // Format dari Supabase: "2026-02-03 17:58:00+00" atau "2026-02-03T17:58:00+00:00"
-      const datePart = dateStr.split(/[T\s]/)[0]; // Ambil bagian tanggal saja (YYYY-MM-DD)
-      const [year, month, day] = datePart.split('-').map(Number);
-      
-      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
-      return `${String(day).padStart(2, '0')} ${months[month - 1]} ${year}`;
-    } catch {
-      return dateStr;
-    }
-  };
-  
-  // Reusable Transaction Table Component
-  const TransactionTable = ({ 
-    title, 
-    icon: Icon, 
-    iconColor, 
-    entries: tableEntries, 
-    balance 
-  }: { 
-    title: string; 
-    icon: any; 
-    iconColor: string;
-    entries: PettyCashEntry[];
-    balance: number;
-  }) => (
-    <div className="bg-gray-800 rounded-xl shadow-lg border border-gray-700 overflow-hidden">
-      <div className={`p-4 border-b border-gray-700 flex items-center justify-between ${iconColor}`}>
-        <div className="flex items-center gap-2">
-          <Icon size={20} />
-          <h2 className="text-lg font-semibold">{title}</h2>
-        </div>
-        <span className="text-sm text-gray-400">{tableEntries.length} transaksi</span>
-      </div>
-      
-      <div className="overflow-x-auto max-h-96">
-        <table className="w-full">
-          <thead className="bg-gray-700 sticky top-0">
-            <tr>
-              <th className="px-4 py-3 text-left text-xs font-semibold">Tanggal</th>
-              <th className="px-4 py-3 text-left text-xs font-semibold">Keterangan</th>
-              <th className="px-4 py-3 text-right text-xs font-semibold">Masuk</th>
-              <th className="px-4 py-3 text-right text-xs font-semibold">Keluar</th>
-              <th className="px-4 py-3 text-right text-xs font-semibold">Saldo</th>
-              <th className="px-4 py-3 text-center text-xs font-semibold">Aksi</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-700">
-            {tableEntries.length === 0 ? (
-              <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-gray-400">
-                  <Icon size={32} className="mx-auto mb-2 opacity-50" />
-                  Belum ada transaksi
-                </td>
-              </tr>
-            ) : (
-              tableEntries.map((entry) => (
-                <tr key={entry.id} className="hover:bg-gray-700/50 transition-colors">
-                  <td className="px-4 py-2 text-xs">{formatDate(entry.tgl)}</td>
-                  <td className="px-4 py-2 text-xs">{entry.keterangan}</td>
-                  <td className="px-4 py-2 text-xs text-right">
-                    {entry.type === 'in' ? (
-                      <span className="text-green-400 font-semibold">
-                        +Rp {formatIndonesianNumber(entry.saldokeluarmasuk)}
-                      </span>
-                    ) : '-'}
-                  </td>
-                  <td className="px-4 py-2 text-xs text-right">
-                    {entry.type === 'out' ? (
-                      <span className="text-red-400 font-semibold">
-                        -Rp {formatIndonesianNumber(entry.saldokeluarmasuk)}
-                      </span>
-                    ) : '-'}
-                  </td>
-                  <td className="px-4 py-2 text-xs text-right font-semibold">
-                    Rp {formatIndonesianNumber(entry.saldosaatini)}
-                  </td>
-                  <td className="px-4 py-2 text-center">
-                    <button
-                      onClick={() => handleDeleteEntry(entry.id)}
-                      className="p-1.5 text-red-400 hover:bg-red-600/20 rounded-lg transition-colors"
-                      title="Hapus"
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
   
   return (
     <div className="min-h-screen bg-gray-900 text-gray-100 p-4 md:p-6">
@@ -526,7 +614,10 @@ export const PettyCashView: React.FC<PettyCashViewProps> = ({ refreshTrigger }) 
           icon={Banknote}
           iconColor="text-green-400"
           entries={cashEntries}
-          balance={balances.cash}
+          updatingKegunaanId={updatingKegunaanId}
+          isOtherExpenseEntry={isOtherExpenseEntry}
+          onToggleOtherExpense={handleToggleOtherExpense}
+          onDeleteEntry={handleDeleteEntry}
         />
         
         {/* Rekening (Bank) Table */}
@@ -535,7 +626,10 @@ export const PettyCashView: React.FC<PettyCashViewProps> = ({ refreshTrigger }) 
           icon={CreditCard}
           iconColor="text-blue-400"
           entries={bankEntries}
-          balance={balances.bank}
+          updatingKegunaanId={updatingKegunaanId}
+          isOtherExpenseEntry={isOtherExpenseEntry}
+          onToggleOtherExpense={handleToggleOtherExpense}
+          onDeleteEntry={handleDeleteEntry}
         />
       </div>
       
@@ -608,11 +702,12 @@ export const PettyCashView: React.FC<PettyCashViewProps> = ({ refreshTrigger }) 
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     onClick={() => setFormType('in')}
+                    disabled={formIsOtherExpense}
                     className={`py-3 rounded-lg font-semibold transition-colors flex items-center justify-center gap-2 ${
                       formType === 'in' 
                         ? 'bg-green-600 text-white' 
                         : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                    }`}
+                    } ${formIsOtherExpense ? 'opacity-50 cursor-not-allowed hover:bg-gray-700' : ''}`}
                   >
                     <ArrowUpRight size={18} />
                     Masuk
@@ -629,6 +724,42 @@ export const PettyCashView: React.FC<PettyCashViewProps> = ({ refreshTrigger }) 
                     Keluar
                   </button>
                 </div>
+              </div>
+
+              {/* Switch Pengeluaran Lain Lain */}
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-2">Kategori Tambahan</label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFormIsOtherExpense((prev) => {
+                      const next = !prev;
+                      if (next) setFormType('out');
+                      return next;
+                    });
+                  }}
+                  className={`w-full px-4 py-3 rounded-lg border transition-colors flex items-center justify-between ${
+                    formIsOtherExpense
+                      ? 'bg-yellow-900/30 border-yellow-700 text-yellow-300'
+                      : 'bg-gray-700 border-gray-600 text-gray-300 hover:bg-gray-600'
+                  }`}
+                >
+                  <span className="font-semibold">Pengeluaran Lain Lain</span>
+                  <span
+                    className={`inline-flex h-6 w-11 rounded-full p-1 transition-colors ${
+                      formIsOtherExpense ? 'bg-yellow-500/70' : 'bg-gray-500'
+                    }`}
+                  >
+                    <span
+                      className={`h-4 w-4 rounded-full bg-white transition-transform ${
+                        formIsOtherExpense ? 'translate-x-5' : 'translate-x-0'
+                      }`}
+                    />
+                  </span>
+                </button>
+                <p className="text-[11px] text-gray-500 mt-1">
+                  Jika aktif, transaksi disimpan dengan kegunaan: <strong>PENGELUARAN LAIN LAIN</strong>.
+                </p>
               </div>
               
               {/* Description */}

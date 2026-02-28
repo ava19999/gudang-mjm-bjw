@@ -303,21 +303,25 @@ export const RekapBulananView: React.FC = () => {
           .gte('created_at', startDateTime)
           .lte('created_at', endDateTime)).data || [];
         
-        // Petty Cash
-        const pettyMJM = storeFilter === 'bjw' ? [] : (await supabase
-          .from('petty_cash_mjm')
-          .select('*')
-          .gte('tgl', startDate)
-          .lte('tgl', endDateStr)).data || [];
-        const pettyBJW = storeFilter === 'mjm' ? [] : (await supabase
-          .from('petty_cash_bjw')
+        // Petty Cash: samakan sumber dengan halaman Petty Cash (selectedStore)
+        const pettyStore = selectedStore === 'bjw' ? 'bjw' : 'mjm';
+        const pettyTable = pettyStore === 'bjw' ? 'petty_cash_bjw' : 'petty_cash_mjm';
+        const pettyRows = (await supabase
+          .from(pettyTable)
           .select('*')
           .gte('tgl', startDate)
           .lte('tgl', endDateStr)).data || [];
 
         setBarangMasuk([...(masukMJM).map(r => ({...r, store: 'mjm'})), ...(masukBJW).map(r => ({...r, store: 'bjw'}))]);
         setBarangKeluar([...(keluarMJM).map(r => ({...r, store: 'mjm'})), ...(keluarBJW).map(r => ({...r, store: 'bjw'}))]);
-        setPettyCashData([...(pettyMJM), ...(pettyBJW)]);
+        const pettyCombined = [
+          ...(pettyRows).map(r => ({ ...r, store: pettyStore as 'mjm' | 'bjw' })),
+        ].sort((a, b) => {
+          const aTs = new Date((a as any).tgl || (a as any).created_at || (a as any).tanggal || 0).getTime();
+          const bTs = new Date((b as any).tgl || (b as any).created_at || (b as any).tanggal || 0).getTime();
+          return bTs - aTs;
+        });
+        setPettyCashData(pettyCombined);
       } catch (e) {
         console.error('Error fetching rekap data:', e);
       }
@@ -742,6 +746,14 @@ export const RekapBulananView: React.FC = () => {
     return isRetur(record) || (record.harga_total || 0) === 0;
   };
 
+  const pettyCashOnData = useMemo(
+    () =>
+      pettyCashData.filter((entry) =>
+        String((entry as any).kegunaan || '').toUpperCase().includes('PENGELUARAN LAIN')
+      ),
+    [pettyCashData]
+  );
+
   // Statistik dari data (excluding RETUR and 0 total)
   const stats = useMemo(() => {
     // Filter out RETUR records and 0 total first
@@ -770,12 +782,14 @@ export const RekapBulananView: React.FC = () => {
     const keluar1Bln = filteredKeluar.filter(b => (b.tempo || '').toUpperCase().includes('1') && !(b.tempo || '').toUpperCase().includes('2') && !(b.tempo || '').toUpperCase().includes('3')).reduce((a, b) => a + (b.harga_total || 0), 0);
     const keluarTotal = filteredKeluar.reduce((a, b) => a + (b.harga_total || 0), 0);
     
-    // Petty Cash
-    const pettyCash = pettyCashData.reduce((a, b) => a + (b.saldokeluarmasuk || b.jumlah || 0), 0);
-    // Saldo akhir petty cash (dummy, bisa diubah sesuai logika)
-    const saldoAkhir = 0;
-    return { masukCash, masuk3Bln, masuk2Bln, masuk1Bln, masukTotal, keluarCash, keluar3Bln, keluar2Bln, keluar1Bln, keluarTotal, pettyCash, saldoAkhir };
-  }, [barangMasuk, barangKeluar, pettyCashData]);
+    // Petty Cash: khusus "PENGELUARAN LAIN LAIN"
+    // Ambil total langsung dari kolom "Jumlah" pada tabel petty cash yang ditampilkan (data ON)
+    const pettyCash = pettyCashOnData.reduce(
+      (sum, entry) => sum + Number((entry as any).saldokeluarmasuk || (entry as any).jumlah || 0),
+      0
+    );
+    return { masukCash, masuk3Bln, masuk2Bln, masuk1Bln, masukTotal, keluarCash, keluar3Bln, keluar2Bln, keluar1Bln, keluarTotal, pettyCash };
+  }, [barangMasuk, barangKeluar, pettyCashOnData]);
 
   const validKeluarRecords = useMemo(
     () => barangKeluar.filter((record) => !shouldExclude(record)),
@@ -1139,14 +1153,10 @@ export const RekapBulananView: React.FC = () => {
       </div>
       
       {/* Petty Cash Summary */}
-      <div className="grid grid-cols-2 gap-4 mb-6">
+      <div className="grid grid-cols-1 gap-4 mb-6">
         <div className="bg-gradient-to-br from-yellow-900/40 to-yellow-800/20 border border-yellow-800/30 rounded-xl p-4">
           <div className="text-yellow-400 text-xs font-medium mb-1">Penggunaan Petty Cash</div>
           <div className="text-xl md:text-2xl font-bold text-white">{formatCurrency(stats.pettyCash)}</div>
-        </div>
-        <div className="bg-gradient-to-br from-gray-900/40 to-gray-800/20 border border-gray-800/30 rounded-xl p-4">
-          <div className="text-gray-400 text-xs font-medium mb-1">Saldo Akhir Petty Cash</div>
-          <div className="text-xl md:text-2xl font-bold text-white">{formatCurrency(stats.saldoAkhir)}</div>
         </div>
       </div>
 
@@ -1383,22 +1393,49 @@ export const RekapBulananView: React.FC = () => {
             <tr className="text-gray-400">
               <th>Tanggal</th>
               <th>Toko</th>
+              <th>Akun</th>
+              <th>Tipe</th>
               <th>Keterangan</th>
-              <th>Pengeluaran</th>
+              <th>Kegunaan</th>
+              <th>Jumlah</th>
               <th>Saldo Akhir</th>
             </tr>
           </thead>
           <tbody>
-              {pettyCashData.length === 0 ? (
-                <tr><td colSpan={5} className="text-center text-gray-500">Data belum tersedia</td></tr>
+              {pettyCashOnData.length === 0 ? (
+                <tr><td colSpan={8} className="text-center text-gray-500">Belum ada transaksi petty cash yang di-ON</td></tr>
               ) : (
-                pettyCashData.map((p, i) => (
+                pettyCashOnData.map((p, i) => (
                   <tr key={p.id || i}>
-                    <td>{p.tanggal}</td>
-                    <td>{p.toko || p.store || '-'}</td>
+                    <td>
+                      {(() => {
+                        const rawDate = p.tgl || p.tanggal || p.created_at;
+                        if (!rawDate) return '-';
+                        const dt = new Date(rawDate);
+                        if (Number.isNaN(dt.getTime())) return '-';
+                        return dt.toLocaleDateString('id-ID', {
+                          day: '2-digit',
+                          month: 'short',
+                          year: 'numeric',
+                        });
+                      })()}
+                    </td>
+                    <td>{String(p.store || p.toko || '-').toUpperCase()}</td>
+                    <td>{String(p.akun || '-').toUpperCase()}</td>
+                    <td>
+                      {String(p.type || '').toLowerCase() === 'in' ? (
+                        <span className="text-green-400 font-semibold">Masuk</span>
+                      ) : (
+                        <span className="text-red-400 font-semibold">Keluar</span>
+                      )}
+                    </td>
                     <td>{p.keterangan || '-'}</td>
-                    <td>Rp {(p.jumlah || 0).toLocaleString('id-ID')}</td>
-                    <td>-</td>
+                    <td>{p.kegunaan || '-'}</td>
+                    <td>
+                      {String(p.type || '').toLowerCase() === 'in' ? '+' : '-'}
+                      Rp {Number(p.saldokeluarmasuk || p.jumlah || 0).toLocaleString('id-ID')}
+                    </td>
+                    <td>Rp {Number(p.saldosaatini || 0).toLocaleString('id-ID')}</td>
                   </tr>
                 ))
               )}
