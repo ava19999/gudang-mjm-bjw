@@ -157,6 +157,7 @@ export const RekapBulananView: React.FC = () => {
   const [filterTempoKeluar, setFilterTempoKeluar] = useState<string>('all');
   const [filterEcommerceKeluar, setFilterEcommerceKeluar] = useState<string>('all');
   const [storeFilter, setStoreFilter] = useState<'all' | 'mjm' | 'bjw'>('all');
+  const [printTarget, setPrintTarget] = useState<'masuk' | 'keluar' | null>(null);
   
   // Modal states for tempo edit
   const [editTempoModal, setEditTempoModal] = useState(false);
@@ -221,8 +222,16 @@ export const RekapBulananView: React.FC = () => {
   };
 
   // Export / Print helpers
+  const handlePrintSection = (target: 'masuk' | 'keluar') => {
+    setPrintTarget(target);
+    // Pastikan state printTarget ter-render dulu sebelum dialog print dibuka
+    setTimeout(() => {
+      window.print();
+    }, 80);
+  };
+
   const handlePrintPdf = () => {
-    window.print();
+    handlePrintSection('keluar');
   };
 
   const handleExportImage = async () => {
@@ -239,6 +248,14 @@ export const RekapBulananView: React.FC = () => {
     link.download = `rekap-bulanan-${bulanMulai}-to-${bulanAkhir}.png`;
     link.click();
   };
+
+  useEffect(() => {
+    const handleAfterPrint = () => {
+      setPrintTarget(null);
+    };
+    window.addEventListener('afterprint', handleAfterPrint);
+    return () => window.removeEventListener('afterprint', handleAfterPrint);
+  }, []);
 
   // Helper: hitung rentang tanggal dari bulanMulai/bulanAkhir
   const getRangeDates = () => {
@@ -991,7 +1008,12 @@ export const RekapBulananView: React.FC = () => {
   const totalKeluarFiltered = useMemo(() => groupedBarangKeluar.reduce((sum, c) => sum + c.totalHarga, 0), [groupedBarangKeluar]);
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white p-4 md:p-6 print-container" ref={rekapRef}>
+    <div
+      className={`min-h-screen bg-gray-900 text-white p-4 md:p-6 print-container ${
+        printTarget === 'masuk' ? 'print-target-masuk' : printTarget === 'keluar' ? 'print-target-keluar' : ''
+      }`}
+      ref={rekapRef}
+    >
       <div className="screen-only">
       <div className="mb-6 flex items-center gap-3">
         <div className="p-2 bg-blue-900/30 rounded-xl">
@@ -1201,6 +1223,14 @@ export const RekapBulananView: React.FC = () => {
                 <option value="2 BLN">2 Bulan</option>
                 <option value="1 BLN">1 Bulan</option>
               </select>
+              <button
+                onClick={() => handlePrintSection('masuk')}
+                className="no-print inline-flex items-center gap-1.5 px-3 py-1.5 bg-green-700 hover:bg-green-600 text-white rounded-lg text-sm font-medium transition-colors"
+                title="Print tabel Barang Masuk"
+              >
+                <Printer className="w-4 h-4" />
+                Print
+              </button>
             </div>
           </div>
           
@@ -1302,6 +1332,14 @@ export const RekapBulananView: React.FC = () => {
                   <option value="2 BLN">2 Bulan</option>
                   <option value="1 BLN">1 Bulan</option>
                 </select>
+                <button
+                  onClick={() => handlePrintSection('keluar')}
+                  className="no-print inline-flex items-center gap-1.5 px-3 py-1.5 bg-red-700 hover:bg-red-600 text-white rounded-lg text-sm font-medium transition-colors"
+                  title="Print tabel Barang Keluar"
+                >
+                  <Printer className="w-4 h-4" />
+                  Print
+                </button>
               </div>
               <div className="flex items-center gap-2">
                 <ShoppingBag className="w-4 h-4 text-gray-400" />
@@ -1880,8 +1918,52 @@ export const RekapBulananView: React.FC = () => {
 
       </div> {/* end screen-only */}
 
+      {/* Print-only Barang Masuk */}
+      <div className="print-masuk" style={{ display: printTarget === 'masuk' ? 'block' : 'none' }}>
+        <div style={{ color: '#000', background: '#fff', padding: '8mm' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+            <div>
+              <div className="print-title" style={{ fontSize: '18pt', fontWeight: 700 }}>Rekap Barang Masuk</div>
+              <div style={{ fontSize: '11pt' }}>
+                Periode: {formatRangeLabel(bulanMulai, bulanAkhir)} | Toko: {getStoreLabel()} | Tempo: {filterTempoMasuk === 'all' ? 'Semua' : filterTempoMasuk}
+              </div>
+            </div>
+          </div>
+
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11pt' }}>
+            <thead>
+              <tr>
+                <th style={{ border: '1px solid #000', padding: '6px', textAlign: 'left', width: '45%' }}>Customer/Supplier</th>
+                <th style={{ border: '1px solid #000', padding: '6px', textAlign: 'center', width: '15%' }}>Tempo</th>
+                <th style={{ border: '1px solid #000', padding: '6px', textAlign: 'right', width: '25%' }}>Total Harga</th>
+                <th style={{ border: '1px solid #000', padding: '6px', textAlign: 'center', width: '15%' }}>Store</th>
+              </tr>
+            </thead>
+            <tbody>
+              {groupedBarangMasuk.map((item, idx) => (
+                <tr key={`print-masuk-${item.customer}-${item.tempo}-${idx}`}>
+                  <td style={{ border: '1px solid #000', padding: '6px' }}>{item.customer}</td>
+                  <td style={{ border: '1px solid #000', padding: '6px', textAlign: 'center' }}>{item.tempo}</td>
+                  <td style={{ border: '1px solid #000', padding: '6px', textAlign: 'right' }}>{formatCurrency(item.totalHarga)}</td>
+                  <td style={{ border: '1px solid #000', padding: '6px', textAlign: 'center' }}>{getStoreLabel()}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          <div className="print-total-summary" style={{ marginTop: '8px', fontSize: '11pt', borderTop: '1px solid #000', paddingTop: '6px', display: 'flex', justifyContent: 'space-between' }}>
+            <strong>TOTAL</strong>
+            <strong>Rp {totalMasukFiltered.toLocaleString('id-ID')}</strong>
+          </div>
+
+          <div style={{ marginTop: '10px', fontSize: '11pt' }}>
+            Ringkasan: Cash {formatCurrency(stats.masukCash)} - 3 BLN {formatCurrency(stats.masuk3Bln)} - 2 BLN {formatCurrency(stats.masuk2Bln)} - 1 BLN {formatCurrency(stats.masuk1Bln)}
+          </div>
+        </div>
+      </div>
+
       {/* Print-only Barang Keluar */}
-      <div className="print-keluar" style={{ display: 'none' }}>
+      <div className="print-keluar" style={{ display: printTarget === 'keluar' ? 'block' : 'none' }}>
         <div style={{ color: '#000', background: '#fff', padding: '8mm' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
             <div>
@@ -1889,9 +1971,6 @@ export const RekapBulananView: React.FC = () => {
               <div style={{ fontSize: '11pt' }}>
                 Periode: {formatRangeLabel(bulanMulai, bulanAkhir)} | Toko: {getStoreLabel()} | Tempo: {filterTempoKeluar === 'all' ? 'Semua' : filterTempoKeluar} | Ecommerce: {filterEcommerceKeluar === 'all' ? 'Semua' : filterEcommerceKeluar}
               </div>
-            </div>
-            <div style={{ textAlign: 'right', fontSize: '11pt' }}>
-              Total Semua: <strong>Rp {totalKeluarFiltered.toLocaleString('id-ID')}</strong>
             </div>
           </div>
 
@@ -1914,14 +1993,12 @@ export const RekapBulananView: React.FC = () => {
                 </tr>
               ))}
             </tbody>
-            <tfoot>
-              <tr>
-                <td colSpan={2} style={{ border: '1px solid #000', padding: '6px', fontWeight: 700 }}>TOTAL</td>
-                <td style={{ border: '1px solid #000', padding: '6px', textAlign: 'right', fontWeight: 700 }}>{formatCurrency(totalKeluarFiltered)}</td>
-                <td style={{ border: '1px solid #000', padding: '6px' }}></td>
-              </tr>
-            </tfoot>
           </table>
+
+          <div className="print-total-summary" style={{ marginTop: '8px', fontSize: '11pt', borderTop: '1px solid #000', paddingTop: '6px', display: 'flex', justifyContent: 'space-between' }}>
+            <strong>TOTAL</strong>
+            <strong>Rp {totalKeluarFiltered.toLocaleString('id-ID')}</strong>
+          </div>
 
           <div style={{ marginTop: '10px', fontSize: '11pt' }}>
             Ringkasan: Cash {formatCurrency(stats.keluarCash)} - 3 BLN {formatCurrency(stats.keluar3Bln)} - 2 BLN {formatCurrency(stats.keluar2Bln)} - 1 BLN {formatCurrency(stats.keluar1Bln)}
@@ -1934,10 +2011,35 @@ export const RekapBulananView: React.FC = () => {
         @media print {
           @page { size: A4; margin: 10mm; }
           body { background: #fff !important; color: #000 !important; }
+          body * { visibility: hidden !important; }
+
+          .print-target-masuk,
+          .print-target-keluar,
+          .print-target-masuk *,
+          .print-target-keluar * {
+            visibility: visible !important;
+          }
+
+          .print-target-masuk,
+          .print-target-keluar {
+            position: absolute !important;
+            left: 0 !important;
+            top: 0 !important;
+            width: 100% !important;
+            background: #fff !important;
+            color: #000 !important;
+          }
+
           .print-container { background: #fff !important; color: #000 !important; padding: 0 !important; }
           .no-print, .screen-only { display: none !important; }
-          .print-keluar { display: block !important; }
-          table { page-break-inside: avoid; }
+          .print-masuk, .print-keluar { display: none !important; }
+          .print-target-masuk .print-masuk { display: block !important; }
+          .print-target-keluar .print-keluar { display: block !important; }
+          .print-masuk table, .print-keluar table { page-break-inside: auto !important; }
+          .print-masuk thead, .print-keluar thead { display: table-header-group; }
+          .print-masuk tr, .print-keluar tr { page-break-inside: avoid !important; break-inside: avoid !important; }
+          .print-masuk td, .print-keluar td, .print-masuk th, .print-keluar th { page-break-inside: avoid !important; }
+          .print-total-summary { page-break-inside: avoid !important; break-inside: avoid !important; }
           .rounded-xl, .rounded-2xl { border-radius: 6px !important; }
         }
       `}</style>
