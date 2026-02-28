@@ -1462,9 +1462,10 @@ export const RekapBulananView: React.FC = () => {
                   className="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 text-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all"
                 >
                   <option value="CASH">CASH</option>
-                  <option value="1 BLN">1 BLN (1 Bulan)</option>
-                  <option value="2 BLN">2 BLN (2 Bulan)</option>
                   <option value="3 BLN">3 BLN (3 Bulan)</option>
+                  <option value="2 BLN">2 BLN (2 Bulan)</option>
+                  <option value="1 BLN">1 BLN (1 Bulan)</option>
+                  <option value="NADIR">NADIR</option>
                 </select>
               </div>
               

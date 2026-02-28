@@ -12,6 +12,18 @@ interface Props {
     onRefresh?: () => void;
 }
 
+const EDITABLE_TEMPO_OPTIONS = ['CASH', '3 BLN', '2 BLN', '1 BLN', 'NADIR'] as const;
+
+const normalizeEditableTempo = (tempo?: string): (typeof EDITABLE_TEMPO_OPTIONS)[number] => {
+    const normalized = (tempo || '').trim().toUpperCase();
+    if (!normalized || normalized.includes('CASH')) return 'CASH';
+    if (normalized.includes('NADIR')) return 'NADIR';
+    if (normalized.includes('3')) return '3 BLN';
+    if (normalized.includes('2')) return '2 BLN';
+    if (normalized.includes('1')) return '1 BLN';
+    return 'CASH';
+};
+
 // Helper to extract all photo URLs from foto row
 const extractPhotoUrls = (fotoRow: any): string[] => {
     if (!fotoRow) return [];
@@ -302,7 +314,7 @@ export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger, onRefres
             quantity: String(item.quantity || item.qty_masuk || 0),
             harga_satuan: String(item.harga_satuan || 0),
             customer: item.customer || '',
-            tempo: item.tempo || 'CASH',
+            tempo: normalizeEditableTempo(item.tempo),
         });
     };
 
@@ -315,6 +327,7 @@ export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger, onRefres
         const newQty = parseInt(editForm.quantity);
         const newHarga = parseFloat(editForm.harga_satuan) || 0;
         const newPartNumber = editForm.part_number.trim().toUpperCase();
+        const normalizedTempo = normalizeEditableTempo(editForm.tempo);
         const oldQty = item.quantity || item.qty_masuk || 0;
         const oldPartNumber = item.part_number;
         const partNumberChanged = newPartNumber !== oldPartNumber;
@@ -345,7 +358,7 @@ export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger, onRefres
                     harga_satuan: newHarga,
                     harga_total: newQty * newHarga,
                     customer: editForm.customer || null,
-                    tempo: editForm.tempo || 'CASH',
+                    tempo: normalizedTempo,
                 })
                 .eq('id', item.id);
 
@@ -427,7 +440,7 @@ export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger, onRefres
                         harga_satuan: newHarga, 
                         harga_total: newQty * newHarga,
                         customer: editForm.customer,
-                        tempo: editForm.tempo,
+                        tempo: normalizedTempo,
                         current_qty: resultingCurrentQty
                     } 
                     : d
@@ -685,8 +698,11 @@ export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger, onRefres
                                                 onChange={(e) => setEditForm({ ...editForm, tempo: e.target.value })}
                                                 className="w-20 px-2 py-1 text-xs bg-gray-900 border border-gray-500 rounded text-gray-300 focus:outline-none"
                                             >
-                                                <option value="CASH">CASH</option>
-                                                <option value="TEMPO">TEMPO</option>
+                                                {EDITABLE_TEMPO_OPTIONS.map((tempoOption) => (
+                                                    <option key={tempoOption} value={tempoOption}>
+                                                        {tempoOption}
+                                                    </option>
+                                                ))}
                                             </select>
                                         ) : (
                                             <span className="text-gray-500">{item.tempo || '-'}</span>
