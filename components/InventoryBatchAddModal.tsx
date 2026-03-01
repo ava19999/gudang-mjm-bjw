@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { X, Plus, Trash2, Save, Table2, Loader2 } from 'lucide-react';
 import { useStore } from '../context/StoreContext';
 import {
@@ -28,6 +28,7 @@ const COLUMN_KEYS: Array<keyof Omit<BatchRow, 'id'>> = [
   'application',
   'shelf'
 ];
+const COLUMN_COUNT = COLUMN_KEYS.length;
 
 const createEmptyRow = (id: number): BatchRow => ({
   id,
@@ -49,6 +50,7 @@ export const InventoryBatchAddModal: React.FC<InventoryBatchAddModalProps> = ({
   const [rows, setRows] = useState<BatchRow[]>(() => createRows(1, 20));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
 
   const nextId = useMemo(() => (rows.length ? Math.max(...rows.map((row) => row.id)) + 1 : 1), [rows]);
 
@@ -116,6 +118,45 @@ export const InventoryBatchAddModal: React.FC<InventoryBatchAddModalProps> = ({
 
       return draft;
     });
+  };
+
+  const focusCell = (rowIndex: number, colIndex: number) => {
+    const target = inputRefs.current[rowIndex * COLUMN_COUNT + colIndex];
+    if (!target) return;
+    target.focus();
+    setTimeout(() => target.select?.(), 0);
+  };
+
+  const handleCellKeyDown = (
+    e: React.KeyboardEvent<HTMLInputElement>,
+    rowIndex: number,
+    colIndex: number
+  ) => {
+    if (e.ctrlKey || e.altKey || e.metaKey) return;
+
+    let nextRow = rowIndex;
+    let nextCol = colIndex;
+
+    switch (e.key) {
+      case 'ArrowLeft':
+        nextCol = Math.max(0, colIndex - 1);
+        break;
+      case 'ArrowRight':
+        nextCol = Math.min(COLUMN_COUNT - 1, colIndex + 1);
+        break;
+      case 'ArrowUp':
+        nextRow = Math.max(0, rowIndex - 1);
+        break;
+      case 'ArrowDown':
+        nextRow = Math.min(rows.length - 1, rowIndex + 1);
+        break;
+      default:
+        return;
+    }
+
+    if (nextRow === rowIndex && nextCol === colIndex) return;
+    e.preventDefault();
+    focusCell(nextRow, nextCol);
   };
 
   const handleSave = async () => {
@@ -201,8 +242,12 @@ export const InventoryBatchAddModal: React.FC<InventoryBatchAddModalProps> = ({
                     <td className="px-2 py-1 text-center text-gray-500 font-mono">{rowIndex + 1}</td>
                     <td className="px-2 py-1">
                       <input
+                        ref={(el) => {
+                          inputRefs.current[rowIndex * COLUMN_COUNT + 0] = el;
+                        }}
                         value={row.partNumber}
                         onChange={(e) => updateCell(row.id, 'partNumber', e.target.value)}
+                        onKeyDown={(e) => handleCellKeyDown(e, rowIndex, 0)}
                         onPaste={(e) => handlePaste(e, rowIndex, 0)}
                         className="w-full bg-gray-900 border border-gray-700 rounded-md px-2 py-1.5 text-gray-100 outline-none focus:border-cyan-500"
                         placeholder="PART NUMBER"
@@ -211,8 +256,12 @@ export const InventoryBatchAddModal: React.FC<InventoryBatchAddModalProps> = ({
                     </td>
                     <td className="px-2 py-1">
                       <input
+                        ref={(el) => {
+                          inputRefs.current[rowIndex * COLUMN_COUNT + 1] = el;
+                        }}
                         value={row.name}
                         onChange={(e) => updateCell(row.id, 'name', e.target.value)}
+                        onKeyDown={(e) => handleCellKeyDown(e, rowIndex, 1)}
                         onPaste={(e) => handlePaste(e, rowIndex, 1)}
                         className="w-full bg-gray-900 border border-gray-700 rounded-md px-2 py-1.5 text-gray-100 outline-none focus:border-cyan-500"
                         placeholder="NAMA BARANG"
@@ -221,8 +270,12 @@ export const InventoryBatchAddModal: React.FC<InventoryBatchAddModalProps> = ({
                     </td>
                     <td className="px-2 py-1">
                       <input
+                        ref={(el) => {
+                          inputRefs.current[rowIndex * COLUMN_COUNT + 2] = el;
+                        }}
                         value={row.brand}
                         onChange={(e) => updateCell(row.id, 'brand', e.target.value)}
+                        onKeyDown={(e) => handleCellKeyDown(e, rowIndex, 2)}
                         onPaste={(e) => handlePaste(e, rowIndex, 2)}
                         className="w-full bg-gray-900 border border-gray-700 rounded-md px-2 py-1.5 text-gray-100 outline-none focus:border-cyan-500"
                         placeholder="BRAND"
@@ -231,8 +284,12 @@ export const InventoryBatchAddModal: React.FC<InventoryBatchAddModalProps> = ({
                     </td>
                     <td className="px-2 py-1">
                       <input
+                        ref={(el) => {
+                          inputRefs.current[rowIndex * COLUMN_COUNT + 3] = el;
+                        }}
                         value={row.application}
                         onChange={(e) => updateCell(row.id, 'application', e.target.value)}
+                        onKeyDown={(e) => handleCellKeyDown(e, rowIndex, 3)}
                         onPaste={(e) => handlePaste(e, rowIndex, 3)}
                         className="w-full bg-gray-900 border border-gray-700 rounded-md px-2 py-1.5 text-gray-100 outline-none focus:border-cyan-500"
                         placeholder="APLIKASI"
@@ -241,8 +298,12 @@ export const InventoryBatchAddModal: React.FC<InventoryBatchAddModalProps> = ({
                     </td>
                     <td className="px-2 py-1">
                       <input
+                        ref={(el) => {
+                          inputRefs.current[rowIndex * COLUMN_COUNT + 4] = el;
+                        }}
                         value={row.shelf}
                         onChange={(e) => updateCell(row.id, 'shelf', e.target.value)}
+                        onKeyDown={(e) => handleCellKeyDown(e, rowIndex, 4)}
                         onPaste={(e) => handlePaste(e, rowIndex, 4)}
                         className="w-full bg-gray-900 border border-gray-700 rounded-md px-2 py-1.5 text-gray-100 outline-none focus:border-cyan-500"
                         placeholder="RAK"
