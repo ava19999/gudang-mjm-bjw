@@ -2,8 +2,15 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { InventoryItem, Order, StockHistory } from '../types';
 // Pastikan import ini sesuai
-import { fetchInventoryPaginated, fetchInventoryStats, fetchInventoryAllFiltered, fetchSearchSuggestions } from '../services/supabaseService';
+import {
+  fetchInventoryPaginated,
+  fetchInventoryStats,
+  fetchInventoryAllFiltered,
+  fetchSearchSuggestions,
+  InventoryBatchInsertResult
+} from '../services/supabaseService';
 import { ItemForm } from './ItemForm';
+import { InventoryBatchAddModal } from './InventoryBatchAddModal';
 import { DashboardStats } from './DashboardStats';
 import { DashboardFilterBar } from './DashboardFilterBar';
 import { InventoryList } from './InventoryList';
@@ -59,6 +66,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   // Form States
   const [showItemForm, setShowItemForm] = useState(false);
   const [editingItem, setEditingItem] = useState<InventoryItem | undefined>(undefined);
+  const [showBatchForm, setShowBatchForm] = useState(false);
 
   // --- EFFECTS ---
   useEffect(() => {
@@ -181,6 +189,24 @@ export const Dashboard: React.FC<DashboardProps> = ({
       }
   };
 
+  const handleBatchSaveSuccess = (result: InventoryBatchInsertResult) => {
+    const lines = [
+      `Simpan batch selesai.`,
+      `Berhasil: ${result.inserted}`,
+      `Sudah ada (skip): ${result.skippedExisting}`,
+      `Duplikat di input (skip): ${result.skippedDuplicateInput}`,
+      `Baris invalid (skip): ${result.skippedInvalid}`,
+      `Baris kosong (skip): ${result.skippedEmpty}`
+    ];
+    if (result.errors.length > 0) {
+      lines.push(`Error: ${result.errors.slice(0, 3).join(' | ')}`);
+    }
+    alert(lines.join('\n'));
+    setShowBatchForm(false);
+    loadData();
+    loadStats();
+  };
+
   // --- Search Suggestions from Database ---
   const [partNumberOptions, setPartNumberOptions] = useState<string[]>([]);
   const [nameOptions, setNameOptions] = useState<string[]>([]);
@@ -246,6 +272,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
       {showItemForm && ( 
         <ItemForm initialData={editingItem} onCancel={() => setShowItemForm(false)} onSuccess={handleFormSuccess} /> 
       )}
+      {showBatchForm && (
+        <InventoryBatchAddModal
+          onClose={() => setShowBatchForm(false)}
+          onSaved={handleBatchSaveSuccess}
+        />
+      )}
 
       {/* 1. STATS SECTION */}
       <DashboardStats stats={stats} onShowDetail={setShowHistoryDetail} />
@@ -260,6 +292,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
         viewMode={viewMode} setViewMode={setViewMode}
         priceSort={priceSort} setPriceSort={setPriceSort}
         onAddNew={handleAddNewClick}
+        onAddBatch={() => setShowBatchForm(true)}
       />
 
       {/* 3. INVENTORY LIST */}

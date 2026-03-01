@@ -1,6 +1,6 @@
 // FILE: src/components/DashboardFilterBar.tsx
 import React, { useState, useRef, useEffect } from 'react';
-import { Search, Plus, Tag, PenTool, AlertTriangle, AlertCircle, LayoutGrid, List, ArrowUpDown, Hash, Package } from 'lucide-react';
+import { Search, Plus, Tag, PenTool, AlertTriangle, AlertCircle, LayoutGrid, List, ArrowUpDown, Hash, Package, Table2 } from 'lucide-react';
 
 interface DashboardFilterBarProps {
   partNumber: string;
@@ -22,6 +22,7 @@ interface DashboardFilterBarProps {
   priceSort: 'none' | 'asc' | 'desc';
   setPriceSort: (val: 'none' | 'asc' | 'desc') => void;
   onAddNew: () => void;
+  onAddBatch: () => void;
 }
 
 // Autocomplete Input Component
@@ -147,7 +148,8 @@ export const DashboardFilterBar: React.FC<DashboardFilterBarProps> = ({
   filterType, setFilterType,
   viewMode, setViewMode,
   priceSort, setPriceSort,
-  onAddNew
+  onAddNew,
+  onAddBatch
 }) => {
   return (
     <div className="sticky top-0 z-20 bg-gray-800 border-b border-gray-700 shadow-md">
@@ -170,6 +172,13 @@ export const DashboardFilterBar: React.FC<DashboardFilterBarProps> = ({
                 icon={<Package size={16} />}
                 className="flex-1"
               />
+              <button
+                onClick={onAddBatch}
+                className="bg-cyan-600 text-white p-2.5 rounded-xl shadow-md hover:bg-cyan-700 active:scale-95 transition-all flex-shrink-0"
+                title="Tambah Barang Batch"
+              >
+                <Table2 size={18} />
+              </button>
               <button onClick={onAddNew} className="bg-blue-600 text-white p-2.5 rounded-xl shadow-md hover:bg-blue-700 active:scale-95 transition-all flex-shrink-0">
                 <Plus size={20} />
               </button>

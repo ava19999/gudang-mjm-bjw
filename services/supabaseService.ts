@@ -1473,6 +1473,156 @@ export const addInventory = async (data: InventoryFormData, store?: string | nul
   return data.partNumber;
 };
 
+export interface InventoryBatchRowInput {
+  partNumber: string;
+  name: string;
+  brand?: string;
+  application?: string;
+  shelf?: string;
+}
+
+export interface InventoryBatchInsertResult {
+  inserted: number;
+  skippedExisting: number;
+  skippedInvalid: number;
+  skippedDuplicateInput: number;
+  skippedEmpty: number;
+  errors: string[];
+}
+
+const chunkArray = <T,>(arr: T[], chunkSize: number): T[][] => {
+  if (chunkSize <= 0) return [arr];
+  const chunks: T[][] = [];
+  for (let i = 0; i < arr.length; i += chunkSize) {
+    chunks.push(arr.slice(i, i + chunkSize));
+  }
+  return chunks;
+};
+
+export const addInventoryBatch = async (
+  rows: InventoryBatchRowInput[],
+  store?: string | null
+): Promise<InventoryBatchInsertResult> => {
+  const result: InventoryBatchInsertResult = {
+    inserted: 0,
+    skippedExisting: 0,
+    skippedInvalid: 0,
+    skippedDuplicateInput: 0,
+    skippedEmpty: 0,
+    errors: []
+  };
+
+  if (!Array.isArray(rows) || rows.length === 0) return result;
+
+  const table = getTableName(store);
+  const seenPartNumbers = new Set<string>();
+  const normalizedRows: InventoryBatchRowInput[] = [];
+
+  rows.forEach((row) => {
+    const partNumber = normalizePart(row.partNumber);
+    const name = (row.name || '').trim();
+    const brand = (row.brand || '').trim();
+    const application = (row.application || '').trim();
+    const shelf = (row.shelf || '').trim();
+
+    const isEmptyRow = !partNumber && !name && !brand && !application && !shelf;
+    if (isEmptyRow) {
+      result.skippedEmpty += 1;
+      return;
+    }
+
+    if (!partNumber || !name) {
+      result.skippedInvalid += 1;
+      return;
+    }
+
+    if (seenPartNumbers.has(partNumber)) {
+      result.skippedDuplicateInput += 1;
+      return;
+    }
+
+    seenPartNumbers.add(partNumber);
+    normalizedRows.push({
+      partNumber,
+      name,
+      brand,
+      application,
+      shelf
+    });
+  });
+
+  if (normalizedRows.length === 0) return result;
+
+  const existingPartNumbers = new Set<string>();
+  const partNumberChunks = chunkArray(
+    normalizedRows.map((row) => row.partNumber),
+    500
+  );
+
+  for (const chunk of partNumberChunks) {
+    const { data, error } = await supabase
+      .from(table)
+      .select('part_number')
+      .in('part_number', chunk);
+
+    if (error) {
+      result.errors.push(`Gagal cek data existing: ${error.message}`);
+      continue;
+    }
+
+    (data || []).forEach((row: any) => {
+      const part = normalizePart(row.part_number);
+      if (part) existingPartNumbers.add(part);
+    });
+  }
+
+  const rowsToInsert = normalizedRows.filter((row) => !existingPartNumbers.has(row.partNumber));
+  result.skippedExisting = normalizedRows.length - rowsToInsert.length;
+
+  if (rowsToInsert.length === 0) return result;
+
+  const payloads = rowsToInsert.map((row) =>
+    mapItemToDB({
+      partNumber: row.partNumber,
+      name: row.name,
+      brand: row.brand || '',
+      application: row.application || '',
+      shelf: row.shelf || '',
+      quantity: 0
+    })
+  );
+
+  const payloadChunks = chunkArray(payloads, 300);
+
+  for (const payloadChunk of payloadChunks) {
+    const { error } = await supabase.from(table).insert(payloadChunk);
+    if (!error) {
+      result.inserted += payloadChunk.length;
+      continue;
+    }
+
+    // Fallback ke insert per baris agar tetap simpan sebagian jika ada konflik sebagian.
+    for (const payload of payloadChunk as any[]) {
+      const { error: singleError } = await supabase.from(table).insert([payload]);
+      if (!singleError) {
+        result.inserted += 1;
+        continue;
+      }
+
+      const message = singleError.message || 'Unknown error';
+      const isDuplicate = singleError.code === '23505' || message.toLowerCase().includes('duplicate');
+      if (isDuplicate) {
+        result.skippedExisting += 1;
+      } else {
+        const partNumber = normalizePart(payload.part_number || payload.partNumber);
+        result.errors.push(`${partNumber || '-'}: ${message}`);
+      }
+    }
+  }
+
+  return result;
+};
+
 // --- UPDATE INVENTORY (LOGIC BARANG MASUK/KELUAR) ---
 export const updateInventory = async (arg1: any, arg2?: any, arg3?: any): Promise<InventoryItem | null> => {
   let item: InventoryItem = arg1;
