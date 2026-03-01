@@ -53,7 +53,11 @@ const normalizeText = (value: string | null | undefined): string => {
 
 const INVENTORY_SELECT_COLUMNS = 'part_number,name,brand,application,shelf,quantity,created_at';
 const FOTO_SELECT_COLUMNS = 'part_number,foto_1,foto_2,foto_3,foto_4,foto_5,foto_6,foto_7,foto_8,foto_9,foto_10';
-const BARANG_MASUK_LOG_SELECT_COLUMNS = 'id,created_at,part_number,nama_barang,qty_masuk,stok_akhir,harga_satuan,harga_total,customer,tempo,resi,ecommerce,kode_toko';
+// NOTE:
+// Table barang_masuk_mjm/barang_masuk_bjw does not have columns `resi` and `kode_toko`.
+// Keep this select list aligned with actual schema, otherwise Supabase returns 42703
+// and riwayat/detail barang masuk becomes empty.
+const BARANG_MASUK_LOG_SELECT_COLUMNS = 'id,created_at,part_number,nama_barang,qty_masuk,stok_akhir,harga_satuan,harga_total,customer,tempo,ecommerce';
 const BARANG_KELUAR_LOG_SELECT_COLUMNS = 'id,created_at,part_number,name,qty_keluar,stock_ahir,harga_satuan,harga_total,customer,tempo,resi,ecommerce,kode_toko';
 const SOLD_ITEM_SELECT_COLUMNS = 'id,created_at,kode_toko,tempo,ecommerce,customer,part_number,name,qty_keluar,harga_satuan,harga_total,resi';
 
