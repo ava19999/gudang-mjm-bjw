@@ -16,6 +16,18 @@ const getBarangKeluarTable = (store: string | null) =>
 const getStockTable = (store: string | null) => 
   store === 'mjm' ? 'base_mjm' : 'base_bjw';
 
+const normalizeResiKey = (value: string | null | undefined): string =>
+  String(value || '').trim().toUpperCase();
+
+const normalizePartKey = (value: string | null | undefined): string =>
+  normalizeResiKey(value).replace(/\s+/g, ' ');
+
+const buildScanKeyVariants = (value: string | null | undefined): string[] => {
+  const trimmed = String(value || '').trim();
+  if (!trimmed) return [];
+  return [...new Set([trimmed, trimmed.toUpperCase(), trimmed.toLowerCase()])];
+};
+
 // Helper: Konversi Database (String) ke App (Boolean)
 const mapToBoolean = (data: any[]) => {
   return data.map(item => ({
@@ -723,14 +735,19 @@ export const fetchPendingCSVItems = async (store: string | null) => {
   
   // ===== SYNC STATUS PER-ITEM (resi + part_number), BUKAN PER-RESI =====
   const logTable = getBarangKeluarTable(store);
-  const allResis = [...new Set(data.map((d: any) => d.resi).filter(Boolean))];
+  const allResis = [...new Set(data.map((d: any) => String(d.resi || '').trim()).filter(Boolean))];
   if (allResis.length === 0) return data;
+  const allResiVariants = [...new Set(allResis.flatMap((resi) => {
+    const trimmed = String(resi || '').trim();
+    if (!trimmed) return [];
+    return [trimmed, trimmed.toUpperCase(), trimmed.toLowerCase()];
+  }))];
 
   // Ambil log barang_keluar untuk resi-resi yang sedang pending
   const { data: soldLogs, error: soldErr } = await supabase
     .from(logTable)
     .select('resi, part_number')
-    .in('resi', allResis)
+    .in('resi', allResiVariants)
     .not('part_number', 'is', null)
     .limit(5000);
 
@@ -742,8 +759,8 @@ export const fetchPendingCSVItems = async (store: string | null) => {
   // Hitung jumlah terjual per key (support duplicate key di satu resi)
   const soldCountMap = new Map<string, number>();
   (soldLogs || []).forEach((log: any) => {
-    const resiKey = (log.resi || '').trim().toUpperCase();
-    const partKey = (log.part_number || '').trim().toUpperCase();
+    const resiKey = normalizeResiKey(log.resi);
+    const partKey = normalizePartKey(log.part_number);
     if (!resiKey || !partKey) return;
     const key = `${resiKey}||${partKey}`;
     soldCountMap.set(key, (soldCountMap.get(key) || 0) + 1);
@@ -766,8 +783,8 @@ export const fetchPendingCSVItems = async (store: string | null) => {
 
   // Alokasikan sold count ke processed rows dulu (yang valid tetap processed)
   (processedRows || []).forEach((row: any) => {
-    const resiKey = (row.resi || '').trim().toUpperCase();
-    const partKey = (row.part_number || '').trim().toUpperCase();
+    const resiKey = normalizeResiKey(row.resi);
+    const partKey = normalizePartKey(row.part_number);
     if (!resiKey || !partKey) return;
     const key = `${resiKey}||${partKey}`;
     const current = soldCountMap.get(key) || 0;
@@ -797,8 +814,8 @@ export const fetchPendingCSVItems = async (store: string | null) => {
   // Sinkron pending -> processed jika memang sudah ada log barang_keluar
   const pendingSoldIds: Array<string | number> = [];
   const filteredPending = data.filter((row: any) => {
-    const resiKey = (row.resi || '').trim().toUpperCase();
-    const partKey = (row.part_number || '').trim().toUpperCase();
+    const resiKey = normalizeResiKey(row.resi);
+    const partKey = normalizePartKey(row.part_number);
     if (!resiKey || !partKey) return true;
 
     const key = `${resiKey}||${partKey}`;
@@ -966,14 +983,18 @@ export const processBarangKeluarBatch = async (items: any[], store: string | nul
         }
       }
 
+      const normalizedResi = String(item.resi || '').trim();
+      const normalizedPart = normalizePartKey(item.part_number);
+      const normalizedOrderId = String(item.order_id || item.no_pesanan || '').trim();
+
       // 2. Simpan Log Barang Keluar
       const logPayload = {
         tanggal: item.tanggal, 
         kode_toko: item.sub_toko, 
         ecommerce: item.ecommerce,
         customer: item.customer,
-        resi: item.resi,
-        part_number: item.part_number,
+        resi: normalizedResi,
+        part_number: normalizedPart,
         name: item.nama_pesanan,
         brand: item.brand,
         application: item.application,
@@ -993,17 +1014,55 @@ export const processBarangKeluarBatch = async (items: any[], store: string | nul
       }
 
       // 3. Update Status di Tabel SCAN RESI
-      const { data: pendingRows } = await supabase
-        .from(scanTable)
-        .select('id')
-        .eq('resi', item.resi)
-        .neq('status', 'completed')
-        .limit(1); 
-      
-      if (pendingRows && pendingRows.length > 0) {
+      const resiVariants = buildScanKeyVariants(normalizedResi);
+      const orderVariants = buildScanKeyVariants(normalizedOrderId);
+
+      const matchedIds = new Set<any>();
+
+      if (resiVariants.length > 0) {
+        const { data: byResi } = await supabase
+          .from(scanTable)
+          .select('id')
+          .neq('status', 'completed')
+          .in('resi', resiVariants)
+          .limit(100);
+        (byResi || []).forEach((r: any) => matchedIds.add(r.id));
+      }
+
+      if (orderVariants.length > 0) {
+        const { data: byOrder } = await supabase
+          .from(scanTable)
+          .select('id')
+          .neq('status', 'completed')
+          .in('no_pesanan', orderVariants)
+          .limit(100);
+        (byOrder || []).forEach((r: any) => matchedIds.add(r.id));
+      }
+
+      // Fallback: jika belum ketemu, scan pending rows dan match manual (case-insensitive).
+      if (matchedIds.size === 0) {
+        const { data: fallbackRows } = await supabase
+          .from(scanTable)
+          .select('id, resi, no_pesanan')
+          .neq('status', 'completed')
+          .limit(1000);
+
+        (fallbackRows || []).forEach((r: any) => {
+          const resiKey = normalizeResiKey(r.resi);
+          const orderKey = normalizeResiKey(r.no_pesanan);
+          if (
+            (resiVariants.length > 0 && resiVariants.some(v => normalizeResiKey(v) === resiKey || normalizeResiKey(v) === orderKey)) ||
+            (orderVariants.length > 0 && orderVariants.some(v => normalizeResiKey(v) === resiKey || normalizeResiKey(v) === orderKey))
+          ) {
+            matchedIds.add(r.id);
+          }
+        });
+      }
+
+      if (matchedIds.size > 0) {
         const updateData: any = {
             status: 'completed',
-            part_number: item.part_number,
+            part_number: normalizedPart,
             barang: item.nama_pesanan,
             qty_out: item.qty_keluar,
             total_harga: item.harga_total,
@@ -1016,7 +1075,7 @@ export const processBarangKeluarBatch = async (items: any[], store: string | nul
         await supabase
           .from(scanTable)
           .update(updateData)
-          .eq('id', pendingRows[0].id);
+          .in('id', Array.from(matchedIds) as any[]);
       }
 
       // 4. Update Status di Tabel CSV
@@ -1024,8 +1083,8 @@ export const processBarangKeluarBatch = async (items: any[], store: string | nul
          await supabase
            .from(csvTable)
            .update({ status: 'processed' })
-           .eq('resi', item.resi)
-           .eq('part_number', item.part_number);
+           .eq('resi', normalizedResi)
+           .eq('part_number', normalizedPart);
       }
 
       successCount++;
@@ -1416,7 +1475,7 @@ export const insertProductAlias = async (
  */
 export const deleteProcessedResiItems = async (
   store: string | null,
-  items: Array<{ resi: string; part_number: string }>
+  items: Array<{ id?: string | number; resi: string; part_number: string }>
 ): Promise<{ success: boolean; deleted: number }> => {
   const table = store === 'mjm' ? 'resi_items_mjm' : (store === 'bjw' ? 'resi_items_bjw' : null);
   if (!table || items.length === 0) return { success: false, deleted: 0 };
@@ -1425,13 +1484,70 @@ export const deleteProcessedResiItems = async (
 
   for (const item of items) {
     try {
-      const { error } = await supabase
+      const rawId = item.id == null ? '' : String(item.id);
+      const dbId = rawId.startsWith('db-') ? rawId.replace('db-', '') : rawId;
+
+      // Prioritaskan delete by ID jika tersedia agar tidak gagal karena mismatch format part/resi.
+      if (dbId) {
+        const { data: deletedById, error: deleteByIdErr } = await supabase
+          .from(table)
+          .delete()
+          .eq('id', dbId as any)
+          .select('id');
+
+        if (!deleteByIdErr && (deletedById?.length || 0) > 0) {
+          deletedCount += deletedById!.length;
+          continue;
+        }
+      }
+
+      const normalizedResi = String(item.resi || '').trim();
+      const normalizedPart = normalizePartKey(item.part_number);
+
+      // Coba exact delete dulu (paling cepat).
+      const { data: deletedExact, error: deleteExactErr } = await supabase
         .from(table)
         .delete()
-        .eq('resi', item.resi)
-        .eq('part_number', item.part_number);
+        .eq('resi', normalizedResi)
+        .eq('part_number', item.part_number)
+        .select('id');
 
-      if (!error) deletedCount++;
+      if (!deleteExactErr && (deletedExact?.length || 0) > 0) {
+        deletedCount += deletedExact!.length;
+        continue;
+      }
+
+      // Fallback: cari kandidat dengan variasi case pada resi, lalu match part_number ter-normalize.
+      const resiVariants = [...new Set(
+        [normalizedResi, normalizedResi.toUpperCase(), normalizedResi.toLowerCase()].filter(Boolean)
+      )];
+
+      if (resiVariants.length === 0) continue;
+
+      const { data: candidates, error: candidateErr } = await supabase
+        .from(table)
+        .select('id, resi, part_number')
+        .in('resi', resiVariants)
+        .limit(200);
+
+      if (candidateErr || !candidates || candidates.length === 0) continue;
+
+      const matchingIds = candidates
+        .filter((row: any) => normalizePartKey(row.part_number) === normalizedPart)
+        .map((row: any) => row.id)
+        .filter(Boolean);
+
+      if (matchingIds.length === 0) continue;
+
+      const { data: deletedFallback, error: deleteFallbackErr } = await supabase
+        .from(table)
+        .delete()
+        .in('id', matchingIds as any[])
+        .select('id');
+
+      if (!deleteFallbackErr && deletedFallback) {
+        deletedCount += deletedFallback.length;
+      }
     } catch (err) {
       console.warn('Delete resi item gagal:', err);
     }
@@ -1514,10 +1630,15 @@ export const deleteProcessedScanResi = async (
   if (!resiList || resiList.length === 0) return { success: true, deleted: 0 };
 
   try {
+    const variants = [...new Set(
+      resiList.flatMap((resi) => buildScanKeyVariants(resi))
+    )];
+    if (variants.length === 0) return { success: true, deleted: 0 };
+
     const { data, error } = await supabase
       .from(table)
       .delete()
-      .in('resi', resiList)
+      .in('resi', variants)
       .select('id');
 
     if (error) {

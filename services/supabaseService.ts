@@ -2245,6 +2245,66 @@ export const fetchReturItems = async (store: string | null): Promise<ReturRow[]>
   return data || [];
 };
 
+const normalizePartForSync = (value: string | null | undefined): string =>
+  (value || '').trim().toUpperCase().replace(/\s+/g, ' ');
+
+const getResiSyncTables = (store: string | null) => {
+  if (store === 'mjm') return { scanTable: 'scan_resi_mjm', resiItemsTable: 'resi_items_mjm' };
+  if (store === 'bjw') return { scanTable: 'scan_resi_bjw', resiItemsTable: 'resi_items_bjw' };
+  return null;
+};
+
+const syncResiToProcessed = async (
+  store: string | null,
+  resiValue: string | null | undefined,
+  partNumber: string | null | undefined
+): Promise<void> => {
+  const tables = getResiSyncTables(store);
+  const normalizedResi = String(resiValue || '').trim();
+  if (!tables || !normalizedResi || normalizedResi === '-') return;
+
+  const resiVariants = [...new Set([normalizedResi, normalizedResi.toUpperCase(), normalizedResi.toLowerCase()])];
+  const normalizedPart = normalizePartForSync(partNumber);
+
+  try {
+    await supabase
+      .from(tables.scanTable)
+      .update({ status: 'completed' })
+      .in('resi', resiVariants)
+      .neq('status', 'completed');
+  } catch (err) {
+    console.warn('syncResiToProcessed scan_resi warning:', err);
+  }
+
+  try {
+    const { data: pendingItems, error: fetchPendingErr } = await supabase
+      .from(tables.resiItemsTable)
+      .select('id, part_number')
+      .eq('status', 'pending')
+      .in('resi', resiVariants)
+      .limit(2000);
+
+    if (fetchPendingErr || !pendingItems || pendingItems.length === 0) return;
+
+    let idsToProcess = pendingItems.map((row: any) => row.id).filter(Boolean);
+    if (normalizedPart) {
+      idsToProcess = pendingItems
+        .filter((row: any) => normalizePartForSync(row.part_number) === normalizedPart)
+        .map((row: any) => row.id)
+        .filter(Boolean);
+    }
+
+    if (idsToProcess.length === 0) return;
+
+    await supabase
+      .from(tables.resiItemsTable)
+      .update({ status: 'processed' })
+      .in('id', idsToProcess as any[]);
+  } catch (err) {
+    console.warn('syncResiToProcessed resi_items warning:', err);
+  }
+};
+
 // --- PROCESSING LOGIC (ACC / TOLAK) ---
 
 export const processOfflineOrderItem = async (
@@ -2295,6 +2355,8 @@ export const processOfflineOrderItem = async (
     if (updateError) throw updateError;
 
     // 3. Masukkan ke Barang Keluar (Agar muncul di Tab Terjual)
+    const resiFromOrder = String((item as any).resi || (item as any).no_pesanan || '').trim();
+    const finalResi = resiFromOrder && resiFromOrder !== '-' ? resiFromOrder : '-';
     const logPayload = {
       tempo: item.tempo || 'CASH',
       ecommerce: 'OFFLINE',
@@ -2308,7 +2370,7 @@ export const processOfflineOrderItem = async (
       qty_keluar: item.quantity,
       harga_satuan: item.harga_satuan,
       harga_total: item.harga_total,
-      resi: '-',
+      resi: finalResi,
       created_at: getWIBDate().toISOString()
     };
     await supabase.from(outTable).insert([logPayload]);
@@ -2317,6 +2379,9 @@ export const processOfflineOrderItem = async (
     let updateQuery = supabase.from(orderTable).update({ status: 'Proses' });
     updateQuery = buildWhereQuery(updateQuery);
     await updateQuery;
+
+    // Sinkronkan scan_resi + resi_items jika order menyertakan resi/no_pesanan.
+    await syncResiToProcessed(store, finalResi, item.part_number);
 
     return { success: true, msg: 'Pesanan diproses & stok dipotong.' };
   } catch (error: any) {
@@ -2411,6 +2476,8 @@ export const processSalesOrderItem = async (
       .maybeSingle();
 
     const currentQty = Number(stockItem?.quantity || 0);
+    const resiFromOrder = String((item as any).resi || (item as any).no_pesanan || '').trim();
+    const finalResi = resiFromOrder && resiFromOrder !== '-' ? resiFromOrder : '-';
     const logPayload = {
       tempo: 'CASH', // terjual & dibayar
       ecommerce: 'SALES',
@@ -2424,7 +2491,7 @@ export const processSalesOrderItem = async (
       qty_keluar: processQty,
       harga_satuan: unitPrice,
       harga_total: processedTotal,
-      resi: '-',
+      resi: finalResi,
       created_at: getWIBDate().toISOString()
     };
 
@@ -2441,6 +2508,9 @@ export const processSalesOrderItem = async (
     updateQuery = buildWhereQuery(updateQuery);
     const { error: updateOrderError } = await updateQuery;
     if (updateOrderError) throw updateOrderError;
+
+    // Sinkronkan scan_resi + resi_items jika order menyertakan resi/no_pesanan.
+    await syncResiToProcessed(store, finalResi, item.part_number);
 
     return { success: true, msg: `Barang Sales ditandai terjual (${processQty}).` };
   } catch (error: any) {

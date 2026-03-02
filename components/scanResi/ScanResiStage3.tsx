@@ -1222,6 +1222,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
   const [userCursors, setUserCursors] = useState<Record<string, {x: number, y: number, userName: string, color: string}>>({});
   const presenceChannelRef = useRef<RealtimeChannel | null>(null);
   const resiItemsChannelRef = useRef<RealtimeChannel | null>(null);
+  const scanResiChannelRef = useRef<RealtimeChannel | null>(null);
   const broadcastChannelRef = useRef<RealtimeChannel | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   
@@ -1297,6 +1298,103 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
     rowsRef.current = rows;
   }, [rows]);
 
+  // Auto-sync: jika Stage 2 diverifikasi oleh user lain, ubah Pending S2 -> status lanjutan.
+  const syncPendingS2Rows = useCallback(async () => {
+    const currentRows = rowsRef.current;
+    const pendingRows = currentRows.filter(r => r.status_message === 'Pending S2');
+    if (pendingRows.length === 0) return;
+
+    const allResiOrOrders = [...new Set(
+      pendingRows
+        .flatMap(r => [String(r.resi || '').trim(), String(r.no_pesanan || '').trim()])
+        .filter(Boolean)
+    )];
+    if (allResiOrOrders.length === 0) return;
+
+    try {
+      const dbStatus = await checkResiOrOrderStatus(allResiOrOrders, selectedStore);
+      if (!dbStatus || dbStatus.length === 0) return;
+
+      const statusMapByResi = new Map<string, any>();
+      const statusMapByOrder = new Map<string, any>();
+      dbStatus.forEach((d: any) => {
+        if (d.resi) statusMapByResi.set(String(d.resi).trim().toUpperCase(), d);
+        if (d.no_pesanan) statusMapByOrder.set(String(d.no_pesanan).trim().toUpperCase(), d);
+      });
+
+      const stage2VerifiedSet = new Set<string>();
+
+      setRows(prevRows => prevRows.map(row => {
+        if (row.status_message !== 'Pending S2') return row;
+
+        const resiUpper = String(row.resi || '').trim().toUpperCase();
+        const orderUpper = String(row.no_pesanan || '').trim().toUpperCase();
+        const dbRow = statusMapByResi.get(resiUpper) || statusMapByOrder.get(orderUpper);
+        if (!dbRow) return row;
+
+        const isS2Verified = dbRow.stage2_verified === true ||
+          dbRow.stage2_verified === 'true' ||
+          String(dbRow.stage2_verified).toLowerCase() === 'true';
+        if (!isS2Verified) return row;
+
+        // Tandai untuk update badge dropdown Stage 1.
+        if (dbRow.resi) stage2VerifiedSet.add(String(dbRow.resi).trim().toUpperCase());
+        if (dbRow.no_pesanan) stage2VerifiedSet.add(String(dbRow.no_pesanan).trim().toUpperCase());
+        if (resiUpper) stage2VerifiedSet.add(resiUpper);
+        if (orderUpper) stage2VerifiedSet.add(orderUpper);
+
+        const hasPartNumber = Boolean(String(row.part_number || '').trim());
+        const hargaKosong = (row.qty_keluar || 0) > 0 && (row.harga_total || 0) <= 0;
+        const stockValid = (row.qty_keluar || 0) > 0 ? (row.stock_saat_ini || 0) >= row.qty_keluar : true;
+        const hasBaseName = Boolean(String(row.nama_barang_base || '').trim());
+
+        let statusMsg = 'Butuh Input';
+        let isDbVerified = false;
+        let isStockValid = stockValid;
+
+        if (hasPartNumber) {
+          if (hargaKosong) {
+            statusMsg = 'Harga Kosong';
+            isDbVerified = false;
+            isStockValid = false;
+          } else if (!hasBaseName) {
+            statusMsg = 'Base Kosong';
+            isDbVerified = false;
+            isStockValid = stockValid;
+          } else if (!stockValid) {
+            statusMsg = 'Stok Kurang';
+            isDbVerified = false;
+            isStockValid = false;
+          } else {
+            statusMsg = 'Ready';
+            isDbVerified = true;
+            isStockValid = true;
+          }
+        }
+
+        return {
+          ...row,
+          status_message: statusMsg,
+          is_db_verified: isDbVerified,
+          is_stock_valid: isStockValid
+        };
+      }));
+
+      if (stage2VerifiedSet.size > 0) {
+        setStage1ResiList(prev => prev.map(item => {
+          const resiUpper = String(item.resi || '').trim().toUpperCase();
+          const orderUpper = String(item.no_pesanan || '').trim().toUpperCase();
+          if (stage2VerifiedSet.has(resiUpper) || stage2VerifiedSet.has(orderUpper)) {
+            return { ...item, stage2_verified: true };
+          }
+          return item;
+        }));
+      }
+    } catch (err) {
+      console.error('[Stage3] syncPendingS2Rows error:', err);
+    }
+  }, [selectedStore]);
+
   useEffect(() => {
     isMountedRef.current = true;
     return () => {
@@ -1358,6 +1456,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
   // REALTIME SUBSCRIPTION untuk kolaborasi multi-user
   useEffect(() => {
     const tableName = selectedStore === 'bjw' ? 'resi_items_bjw' : 'resi_items_mjm';
+    const scanTableName = selectedStore === 'bjw' ? 'scan_resi_bjw' : 'scan_resi_mjm';
     const userId = userIdRef.current;
     const userName = userNameRef.current;
     const userColor = getUserColor(userId);
@@ -1638,6 +1737,36 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
         console.log(`[Realtime] ${tableName} subscription status:`, status);
       });
 
+    // Channel scan_resi: saat Stage 2 diverifikasi, update otomatis status baris Pending S2.
+    scanResiChannelRef.current = supabase
+      .channel(`${scanTableName}-stage3-sync`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: scanTableName
+        },
+        async (payload) => {
+          const nextData = payload.new as any;
+          const prevData = payload.old as any;
+          const nextVerified = nextData?.stage2_verified === true ||
+            nextData?.stage2_verified === 'true' ||
+            String(nextData?.stage2_verified).toLowerCase() === 'true';
+          const prevVerified = prevData?.stage2_verified === true ||
+            prevData?.stage2_verified === 'true' ||
+            String(prevData?.stage2_verified).toLowerCase() === 'true';
+
+          // Hanya sync saat transisi false -> true untuk mengurangi query.
+          if (nextVerified && !prevVerified) {
+            await syncPendingS2Rows();
+          }
+        }
+      )
+      .subscribe((status) => {
+        console.log(`[Realtime] ${scanTableName} subscription status:`, status);
+      });
+
     // Channel untuk INSTANT broadcast perubahan data (tanpa menunggu database)
     broadcastChannelRef.current = supabase
       .channel(`stage3-broadcast-${selectedStore}`)
@@ -1784,8 +1913,20 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
       if (broadcastChannelRef.current) {
         supabase.removeChannel(broadcastChannelRef.current);
       }
+      if (scanResiChannelRef.current) {
+        supabase.removeChannel(scanResiChannelRef.current);
+      }
     };
-  }, [selectedStore, getUserColor, flashCell]);
+  }, [selectedStore, getUserColor, flashCell, syncPendingS2Rows]);
+
+  // Polling fallback kalau event realtime terlewat (network unstable).
+  useEffect(() => {
+    const intervalId = setInterval(() => {
+      void syncPendingS2Rows();
+    }, 7000);
+
+    return () => clearInterval(intervalId);
+  }, [syncPendingS2Rows]);
 
   // Function untuk broadcast cell yang sedang diedit
   const broadcastEditingCell = useCallback(async (cellKey: string | null) => {
@@ -3210,7 +3351,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
           }
           
           // Delete from resi_items
-          await deleteProcessedResiItems(selectedStore, [{ resi: row.resi, part_number: row.part_number }]);
+          await deleteProcessedResiItems(selectedStore, [{ id: row.id, resi: row.resi, part_number: row.part_number }]);
           
           // Update item status to success
           setProcessingItems(prev => prev.map(item => 
@@ -3485,7 +3626,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
           }
           
           // Delete from resi_items
-          await deleteProcessedResiItems(selectedStore, [{ resi: row.resi, part_number: row.part_number }]);
+          await deleteProcessedResiItems(selectedStore, [{ id: row.id, resi: row.resi, part_number: row.part_number }]);
           
           // Update item status to success
           setProcessingItems(prev => prev.map(item => 
