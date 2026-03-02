@@ -4,7 +4,7 @@ import {
   PackageX, Search, RefreshCw, ChevronDown, ChevronUp,
   Plus, Minus, ShoppingCart, X, Truck, Package,
   Clock, CreditCard, User, Layers, History, Loader2,
-  FileText, Printer, Download, ClipboardList, CheckCircle, Eye, Share2, Image
+  FileText, Printer, Download, ClipboardList, CheckCircle, Eye, MessageCircle
 } from 'lucide-react';
 import { useStore } from '../../context/StoreContext';
 import { supabase } from '../../services/supabaseClient';
@@ -119,6 +119,423 @@ const formatDate = (dateStr: string) => {
   if (!dateStr) return '-';
   const date = new Date(dateStr);
   return date.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' });
+};
+
+const escapeHtml = (value: string) =>
+  (value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+
+const normalizeMultiline = (value: string | null | undefined) => (value || '').trim();
+
+const composeSupplierOrderNotes = (notes: string, complaint: string): string => {
+  const cleanNotes = normalizeMultiline(notes);
+  const cleanComplaint = normalizeMultiline(complaint);
+  const chunks: string[] = [];
+
+  if (cleanNotes) chunks.push(`CATATAN INTERNAL:\n${cleanNotes}`);
+  if (cleanComplaint) chunks.push(`KOMPLAIN CUSTOMER:\n${cleanComplaint}`);
+
+  return chunks.join('\n\n');
+};
+
+const parseSupplierOrderNotes = (rawNotes: string | null | undefined): { notes: string; complaint: string } => {
+  const source = (rawNotes || '').trim();
+  if (!source) return { notes: '', complaint: '' };
+
+  const notesMatch = source.match(/CATATAN INTERNAL:\s*([\s\S]*?)(?:\n\s*KOMPLAIN CUSTOMER:|$)/i);
+  const complaintMatch = source.match(/KOMPLAIN CUSTOMER:\s*([\s\S]*)/i);
+
+  if (!notesMatch && !complaintMatch) {
+    return { notes: source, complaint: '' };
+  }
+
+  return {
+    notes: (notesMatch?.[1] || '').trim(),
+    complaint: (complaintMatch?.[1] || '').trim()
+  };
+};
+
+const buildPOWhatsappText = (params: {
+  storeName: string;
+  poNumber: string;
+  supplier: string;
+  totalItems: number;
+  totalQty: number;
+  notes?: string;
+  complaint?: string;
+}) => {
+  const { storeName, poNumber, supplier, totalItems, totalQty, notes, complaint } = params;
+  const lines: string[] = [
+    `${storeName} - PURCHASE ORDER`,
+    `PO: ${poNumber}`,
+    `Supplier: ${supplier}`,
+    `Total Item: ${totalItems} | Total Qty: ${totalQty}`
+  ];
+
+  const cleanComplaint = normalizeMultiline(complaint);
+  const cleanNotes = normalizeMultiline(notes);
+
+  if (cleanComplaint) {
+    lines.push('', `Komplain Customer:`, cleanComplaint);
+  }
+  if (cleanNotes) {
+    lines.push('', `Catatan PO:`, cleanNotes);
+  }
+  lines.push('', 'Lampiran: gambar PO');
+
+  return lines.join('\n');
+};
+
+interface POHtmlItem {
+  part_number: string;
+  nama_barang: string;
+  qty: number;
+  brand?: string;
+  application?: string;
+}
+
+const renderPurchaseOrderHTML = (params: {
+  poNumber: string;
+  storeName: string;
+  supplier: string;
+  dateLabel: string;
+  notesText?: string;
+  items: POHtmlItem[];
+}) => {
+  const {
+    poNumber,
+    storeName,
+    supplier,
+    dateLabel,
+    notesText = '',
+    items
+  } = params;
+
+  const sortedItems = [...items].sort((a, b) => Number(b.qty || 0) - Number(a.qty || 0));
+  const safeNotes = escapeHtml(notesText).replace(/\n/g, '<br/>');
+  const itemCount = sortedItems.length;
+  const isDense = itemCount > 18;
+  const isUltraDense = itemCount > 26;
+  const rowPad = isUltraDense ? 4 : isDense ? 5 : 6;
+  const pnFont = isUltraDense ? 13 : isDense ? 14 : 15;
+  const nameFont = isUltraDense ? 10 : 11;
+  const qtyFont = isUltraDense ? 18 : isDense ? 19 : 20;
+  const notesMinHeight = isUltraDense ? 44 : 56;
+
+  return `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8" />
+      <title>Purchase Order - ${escapeHtml(poNumber)}</title>
+      <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        @page { size: A4 portrait; margin: 0; }
+        body {
+          font-family: Arial, sans-serif;
+          margin: 0;
+          background: #eef1f5;
+          color: #111827;
+        }
+        .po-page {
+          width: 700px;
+          height: 990px;
+          margin: 0 auto;
+          background: #ffffff;
+          padding: 18px 18px 14px;
+          display: flex;
+          flex-direction: column;
+          overflow: hidden;
+        }
+        .po-container {
+          width: 100%;
+          height: 100%;
+          display: flex;
+          flex-direction: column;
+        }
+        .header {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          column-gap: 10px;
+          align-items: start;
+          margin-bottom: 10px;
+        }
+        .header-right {
+          justify-self: start;
+          text-align: left;
+          margin-left: 6px;
+        }
+        .company-name {
+          font-size: 34px;
+          font-weight: 800;
+          color: #111827;
+          letter-spacing: 0.2px;
+          line-height: 1;
+        }
+        .po-title {
+          color: #1e40af;
+          font-size: 30px;
+          font-weight: 800;
+          text-align: left;
+          line-height: 1;
+        }
+        .po-info {
+          text-align: left;
+          font-size: 12px;
+          color: #111827;
+          margin-top: 8px;
+        }
+        .po-info-row {
+          display: flex;
+          justify-content: flex-start;
+          gap: 8px;
+          margin: 2px 0;
+        }
+        .po-info-label {
+          color: #6b7280;
+          font-weight: 700;
+          min-width: 42px;
+        }
+        .po-info-value {
+          font-weight: 800;
+          color: #111827;
+        }
+        .vendor-section {
+          background: #1e3a8a;
+          color: #fff;
+          padding: 7px 10px;
+          font-weight: 700;
+          font-size: 11px;
+          margin-top: 6px;
+        }
+        .vendor-name {
+          padding: 8px 10px;
+          font-weight: 700;
+          color: #111827;
+          font-size: 15px;
+          border: 1px solid #d1d5db;
+          border-top: none;
+          margin-bottom: 8px;
+          background: #f3f4f6;
+        }
+        .table-wrap {
+          flex: 1;
+          min-height: 0;
+          overflow: hidden;
+          border: 1px solid #cfd5df;
+        }
+        .items-table {
+          width: 100%;
+          border-collapse: collapse;
+          table-layout: fixed;
+        }
+        .items-table th {
+          background: #1e3a8a;
+          color: #fff;
+          padding: 7px 10px;
+          text-align: left;
+          font-size: 10px;
+          font-weight: 800;
+          text-transform: uppercase;
+          letter-spacing: 0.2px;
+        }
+        .items-table th .head-row {
+          display: flex;
+          align-items: center;
+          justify-content: flex-start;
+          gap: 120px;
+        }
+        .items-table td {
+          padding: ${rowPad}px 9px;
+          border-bottom: 1px solid #e5e7eb;
+          font-size: 11px;
+          vertical-align: top;
+        }
+        .items-table tr:nth-child(odd) td { background: #f3f4f6; }
+        .items-table tr:nth-child(even) td { background: #ffffff; }
+        .line-qty {
+          display: flex;
+          align-items: baseline;
+          gap: 7px;
+          width: 100%;
+        }
+        .items-table .pn {
+          font-weight: 800;
+          color: #0f172a;
+          font-size: ${pnFont}px;
+          line-height: 1.1;
+          white-space: nowrap;
+          min-width: 50%;
+          letter-spacing: 0.15px;
+        }
+        .leader {
+          flex: 0 0 78px;
+          min-width: 56px;
+          max-width: 100px;
+          border-bottom: 1px dotted #6b7280;
+          transform: translateY(-2px);
+          opacity: 0.9;
+        }
+        .qty-inline {
+          font-weight: 900;
+          font-size: ${qtyFont}px;
+          color: #0f172a;
+          line-height: 1;
+          min-width: 24px;
+          text-align: left;
+        }
+        .items-table .name {
+          color: #1f2937;
+          font-size: ${nameFont}px;
+          margin-top: 1px;
+          line-height: 1.18;
+        }
+        .items-table .brand {
+          color: #6b7280;
+          font-size: 9px;
+          margin-top: 1px;
+          line-height: 1.15;
+        }
+        .notes-section {
+          margin-top: 8px;
+          border: 1px solid #cfd5df;
+        }
+        .notes-title {
+          background: #1e3a8a;
+          color: #fff;
+          padding: 6px 10px;
+          font-size: 10px;
+          font-weight: 800;
+        }
+        .notes-content {
+          padding: 8px 10px;
+          font-size: 10px;
+          color: #1f2937;
+          min-height: ${notesMinHeight}px;
+          white-space: pre-wrap;
+          line-height: 1.25;
+          background: #f3f4f6;
+        }
+      </style>
+    </head>
+    <body>
+      <div class="po-page">
+        <div class="po-container">
+          <div class="header">
+            <div class="company-name">${escapeHtml(storeName)}</div>
+            <div class="header-right">
+              <div class="po-title">PURCHASE ORDER</div>
+              <div class="po-info">
+                <div class="po-info-row"><span class="po-info-label">DATE</span><span class="po-info-value">${escapeHtml(dateLabel)}</span></div>
+                <div class="po-info-row"><span class="po-info-label">PO#</span><span class="po-info-value">${escapeHtml(poNumber)}</span></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="vendor-section">VENDOR</div>
+          <div class="vendor-name">${escapeHtml(supplier)}</div>
+
+          <div class="table-wrap">
+            <table class="items-table">
+              <thead>
+                <tr>
+                  <th>
+                    <div class="head-row">
+                      <span>PART NUMBER / NAMA BARANG / APLIKASI</span>
+                      <span>QTY</span>
+                    </div>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                ${sortedItems.map(item => {
+                  const safePart = escapeHtml(item.part_number || '-');
+                  const safeName = escapeHtml(item.nama_barang || '-');
+                  const safeQty = Number(item.qty || 0);
+                  const brand = (item.brand || '').trim();
+                  const app = (item.application || '').trim();
+                  const extra = brand || app
+                    ? `<div class="brand">${brand ? `Brand: ${escapeHtml(brand)}` : ''}${brand && app ? ' | ' : ''}${app ? `App: ${escapeHtml(app)}` : ''}</div>`
+                    : '';
+                  return `
+                    <tr>
+                      <td>
+                        <div class="line-qty">
+                          <span class="pn">${safePart}</span>
+                          <span class="leader"></span>
+                          <span class="qty-inline">${safeQty}</span>
+                        </div>
+                        <div class="name">${safeName}</div>
+                        ${extra}
+                      </td>
+                    </tr>
+                  `;
+                }).join('')}
+              </tbody>
+            </table>
+          </div>
+
+          <div class="notes-section">
+            <div class="notes-title">CATATAN / KOMPLAIN CUSTOMER</div>
+            <div class="notes-content">${safeNotes}</div>
+          </div>
+        </div>
+      </div>
+    </body>
+    </html>
+  `;
+};
+
+const createPOImageBlobFromHtml = async (html: string): Promise<Blob> => {
+  const iframe = document.createElement('iframe');
+  iframe.style.position = 'absolute';
+  iframe.style.left = '-9999px';
+  iframe.style.top = '-9999px';
+  iframe.style.width = '740px';
+  iframe.style.height = '1040px';
+  document.body.appendChild(iframe);
+
+  try {
+    const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+    if (!iframeDoc) throw new Error('Cannot access iframe');
+
+    iframeDoc.open();
+    iframeDoc.write(html);
+    iframeDoc.close();
+
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    const html2canvas = (await import('html2canvas')).default;
+    const target = (iframeDoc.querySelector('.po-page') as HTMLElement) || iframeDoc.body;
+    const canvas = await html2canvas(target, {
+      backgroundColor: '#ffffff',
+      scale: Math.max(2.1, (window.devicePixelRatio || 1) * 1.7),
+      useCORS: true,
+      logging: false,
+      removeContainer: true
+    });
+
+    const blob = await new Promise<Blob | null>((resolve) => {
+      canvas.toBlob((result) => resolve(result), 'image/png');
+    });
+    if (!blob) throw new Error('Failed to create image');
+    return blob;
+  } finally {
+    document.body.removeChild(iframe);
+  }
+};
+
+const downloadBlob = (blob: Blob, fileName: string) => {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = fileName;
+  a.click();
+  URL.revokeObjectURL(url);
 };
 
 const isUnknownSupplierLabel = (supplier: string) => {
@@ -447,229 +864,103 @@ const PurchaseOrderPreview: React.FC<{
   onConfirm: (notes: string) => void;
   saving: boolean;
 }> = ({ supplier, items, poNumber, store, onClose, onConfirm, saving }) => {
-  const printRef = useRef<HTMLDivElement>(null);
   const [notes, setNotes] = useState('');
+  const [customerComplaint, setCustomerComplaint] = useState('');
   const [saving2, setSaving2] = useState(false);
-  const today = new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
+  const today = new Date().toLocaleDateString('id-ID', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric'
+  });
   const storeName = store === 'bjw' ? 'BJW AUTOPART' : 'MJMAUTOPART 86';
-  
-  // Generate the PO HTML for print/save
-  const generatePOHTML = () => {
-    const sortedItemsLocal = [...items].sort((a, b) => b.qty - a.qty);
-    return `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>Purchase Order - ${poNumber}</title>
-        <style>
-          * { margin: 0; padding: 0; box-sizing: border-box; }
-          body { font-family: Arial, sans-serif; padding: 30px; background: white; color: #000; }
-          .po-container { max-width: 700px; margin: 0 auto; }
-          .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 30px; }
-          .company-name { font-size: 26px; font-weight: bold; color: #1a365d; }
-          .po-title { color: #2563eb; font-size: 22px; font-weight: bold; text-align: right; }
-          .po-info { text-align: right; font-size: 13px; color: #000; margin-top: 8px; }
-          .po-info-row { display: flex; justify-content: flex-end; gap: 10px; margin: 3px 0; }
-          .po-info-label { color: #666; font-weight: 500; }
-          .po-info-value { font-weight: bold; color: #1a365d; }
-          .vendor-section { background: linear-gradient(135deg, #1e40af, #3b82f6); color: white; padding: 10px 15px; font-weight: bold; font-size: 13px; margin: 25px 0 0; border-radius: 4px 4px 0 0; }
-          .vendor-name { padding: 12px 15px; font-weight: bold; color: #1a365d; font-size: 16px; background: #f8fafc; border: 1px solid #e2e8f0; border-top: none; }
-          .items-table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-          .items-table th { background: linear-gradient(135deg, #1e40af, #3b82f6); color: white; padding: 12px 15px; text-align: left; font-size: 12px; font-weight: bold; text-transform: uppercase; }
-          .items-table th.qty { text-align: center; width: 80px; }
-          .items-table td { padding: 10px 15px; border-bottom: 1px solid #e2e8f0; font-size: 12px; color: #000; background: white; }
-          .items-table tr:nth-child(even) td { background: #f8fafc; }
-          .items-table .pn { font-weight: bold; color: #1e40af; font-size: 13px; }
-          .items-table .name { color: #374151; margin-top: 2px; }
-          .items-table .brand { color: #6b7280; font-size: 11px; font-style: italic; margin-top: 2px; }
-          .items-table .qty-cell { text-align: center; font-weight: bold; font-size: 15px; color: #1a365d; }
-          .notes-section { margin-top: 30px; border: 2px solid #3b82f6; border-radius: 8px; overflow: hidden; }
-          .notes-title { background: linear-gradient(135deg, #1e40af, #3b82f6); color: white; padding: 8px 15px; font-size: 12px; font-weight: bold; font-style: italic; }
-          .notes-content { padding: 15px; font-size: 13px; color: #374151; min-height: 60px; white-space: pre-wrap; background: #f8fafc; }
-        </style>
-      </head>
-      <body>
-        <div class="po-container">
-          <div class="header">
-            <div class="company-name">${storeName}</div>
-            <div>
-              <div class="po-title">PURCHASE ORDER</div>
-              <div class="po-info">
-                <div class="po-info-row"><span class="po-info-label">DATE</span><span class="po-info-value">${today}</span></div>
-                <div class="po-info-row"><span class="po-info-label">P.O. #</span><span class="po-info-value">(${poNumber})</span></div>
-              </div>
-            </div>
-          </div>
-          
-          <div class="vendor-section">VENDOR</div>
-          <div class="vendor-name">${supplier}</div>
-          
-          <table class="items-table">
-            <thead>
-              <tr>
-                <th>PART NUMBER / NAMA BARANG / APLIKASI</th>
-                <th class="qty">QTY</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${sortedItemsLocal.map(item => `
-                <tr>
-                  <td>
-                    <div class="pn">${item.part_number}</div>
-                    <div class="name">${item.nama_barang}</div>
-                    ${item.brand || item.application ? `<div class="brand">${item.brand && item.brand !== '-' ? `Brand: ${item.brand}` : ''}${item.brand && item.brand !== '-' && item.application && item.application !== '-' ? ' | ' : ''}${item.application && item.application !== '-' ? `App: ${item.application}` : ''}</div>` : ''}
-                  </td>
-                  <td class="qty-cell">${item.qty}</td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
-          
-          <div class="notes-section">
-            <div class="notes-title">Other Comments or Special Instructions</div>
-            <div class="notes-content">${notes || ''}</div>
-          </div>
-        </div>
-      </body>
-      </html>
-    `;
-  };
-  
+
+  const sortedItems = [...items].sort((a, b) => b.qty - a.qty);
+  const totalQty = items.reduce((sum, i) => sum + Number(i.qty || 0), 0);
+  const mergedNotes = composeSupplierOrderNotes(notes, customerComplaint);
+
+  const buildPoHtml = () =>
+    renderPurchaseOrderHTML({
+      poNumber,
+      storeName,
+      supplier,
+      dateLabel: today,
+      notesText: mergedNotes,
+      items: items.map((item) => ({
+        part_number: item.part_number,
+        nama_barang: item.nama_barang,
+        qty: item.qty,
+        brand: item.brand,
+        application: item.application
+      }))
+    });
+
+  const buildWaMessage = () =>
+    buildPOWhatsappText({
+      storeName,
+      poNumber,
+      supplier,
+      totalItems: items.length,
+      totalQty,
+      notes,
+      complaint: customerComplaint
+    });
+
+  const createPoImageBlob = async () => createPOImageBlobFromHtml(buildPoHtml());
+
   const handlePrint = () => {
     const printWindow = window.open('', '_blank');
     if (!printWindow) return;
-    
-    printWindow.document.write(generatePOHTML());
+    printWindow.document.write(buildPoHtml());
     printWindow.document.close();
     printWindow.print();
   };
-  
-  // Save as Image function
+
   const handleSaveImage = async () => {
     setSaving2(true);
     try {
-      // Create a hidden iframe to render the PO
-      const iframe = document.createElement('iframe');
-      iframe.style.position = 'absolute';
-      iframe.style.left = '-9999px';
-      iframe.style.width = '800px';
-      iframe.style.height = '1200px';
-      document.body.appendChild(iframe);
-      
-      const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
-      if (!iframeDoc) throw new Error('Cannot access iframe');
-      
-      iframeDoc.open();
-      iframeDoc.write(generatePOHTML());
-      iframeDoc.close();
-      
-      // Wait for content to render
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
-      // Use html2canvas via dynamic import
-      const html2canvas = (await import('html2canvas')).default;
-      const canvas = await html2canvas(iframeDoc.body, {
-        backgroundColor: '#ffffff',
-        scale: 2,
-        useCORS: true,
-        logging: false
-      });
-      
-      // Remove iframe
-      document.body.removeChild(iframe);
-      
-      // Convert to blob and download
-      canvas.toBlob((blob) => {
-        if (!blob) return;
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `${poNumber}.png`;
-        a.click();
-        URL.revokeObjectURL(url);
-      }, 'image/png');
-      
+      const blob = await createPoImageBlob();
+      downloadBlob(blob, `${poNumber}.png`);
     } catch (error) {
       console.error('Error saving image:', error);
-      alert('Gagal menyimpan gambar. Silakan gunakan Print dan save as PDF.');
+      alert('Gagal menyimpan gambar PO.');
     } finally {
       setSaving2(false);
     }
   };
-  
-  // Share function
-  const handleShare = async () => {
+
+  const handleShareToWA = async () => {
     setSaving2(true);
     try {
-      // Create a hidden iframe to render the PO
-      const iframe = document.createElement('iframe');
-      iframe.style.position = 'absolute';
-      iframe.style.left = '-9999px';
-      iframe.style.width = '800px';
-      iframe.style.height = '1200px';
-      document.body.appendChild(iframe);
-      
-      const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
-      if (!iframeDoc) throw new Error('Cannot access iframe');
-      
-      iframeDoc.open();
-      iframeDoc.write(generatePOHTML());
-      iframeDoc.close();
-      
-      // Wait for content to render
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
-      // Use html2canvas via dynamic import
-      const html2canvas = (await import('html2canvas')).default;
-      const canvas = await html2canvas(iframeDoc.body, {
-        backgroundColor: '#ffffff',
-        scale: 2,
-        useCORS: true,
-        logging: false
-      });
-      
-      // Remove iframe
-      document.body.removeChild(iframe);
-      
-      // Convert to blob for sharing
-      const blob = await new Promise<Blob | null>((resolve) => {
-        canvas.toBlob((b) => resolve(b), 'image/png');
-      });
-      
-      if (!blob) throw new Error('Failed to create image');
-      
+      const blob = await createPoImageBlob();
       const file = new File([blob], `${poNumber}.png`, { type: 'image/png' });
-      
-      // Check if Web Share API is supported
-      if (navigator.share && navigator.canShare({ files: [file] })) {
+      const waText = buildWaMessage();
+
+      if (navigator.share && navigator.canShare?.({ files: [file] })) {
         await navigator.share({
-          title: `Purchase Order - ${poNumber}`,
-          text: `PO ${poNumber} untuk ${supplier}`,
+          title: `PO ${poNumber}`,
+          text: waText,
           files: [file]
         });
-      } else {
-        // Fallback: download the image
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `${poNumber}.png`;
-        a.click();
-        URL.revokeObjectURL(url);
-        alert('Share tidak didukung di browser ini. Gambar telah diunduh.');
+        return;
       }
-      
+
+      downloadBlob(blob, `${poNumber}.png`);
+      window.open(
+        `https://wa.me/?text=${encodeURIComponent(
+          `${waText}\n\nGambar PO sudah di-download otomatis (${poNumber}.png). Silakan lampirkan file tersebut ke chat WA ini.`
+        )}`,
+        '_blank'
+      );
+      alert('Browser ini belum support kirim file langsung ke WA. File PO sudah di-download dan chat WA sudah dibuka.');
     } catch (error: any) {
-      if (error.name !== 'AbortError') {
-        console.error('Error sharing:', error);
-        alert('Gagal share gambar.');
+      if (error?.name !== 'AbortError') {
+        console.error('Error sharing to WhatsApp:', error);
+        alert('Gagal kirim ke WhatsApp.');
       }
     } finally {
       setSaving2(false);
     }
   };
-  
-  // Group items by part_number first part (brand identifier if any)
-  const sortedItems = [...items].sort((a, b) => a.qty - b.qty).reverse();
   
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm animate-in fade-in">
@@ -690,12 +981,12 @@ const PurchaseOrderPreview: React.FC<{
               {saving2 ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />} Simpan
             </button>
             <button 
-              onClick={handleShare}
+              onClick={handleShareToWA}
               disabled={saving2}
-              className="flex items-center gap-1 px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white text-sm font-bold rounded transition-colors disabled:opacity-50"
-              title="Share gambar"
+              className="flex items-center gap-1 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold rounded transition-colors disabled:opacity-50"
+              title="Kirim ke WhatsApp"
             >
-              {saving2 ? <Loader2 size={16} className="animate-spin" /> : <Share2 size={16} />} Share
+              {saving2 ? <Loader2 size={16} className="animate-spin" /> : <MessageCircle size={16} />} WA
             </button>
             <button 
               onClick={handlePrint}
@@ -710,21 +1001,21 @@ const PurchaseOrderPreview: React.FC<{
         </div>
         
         {/* PO Preview Content */}
-        <div ref={printRef} className="flex-1 overflow-auto p-6 bg-white">
+        <div className="flex-1 overflow-auto p-6 bg-white">
           {/* Header */}
-          <div className="flex justify-between items-start mb-6">
+          <div className="grid grid-cols-2 gap-2 items-start mb-6">
             <div className="text-2xl font-bold text-gray-800">{storeName}</div>
-            <div className="text-right">
-              <div className="text-xl font-bold text-blue-700">PURCHASE ORDER</div>
+            <div className="text-left ml-2">
+              <div className="text-xl font-bold text-blue-700 text-left">PURCHASE ORDER</div>
               <table className="text-sm mt-2">
                 <tbody>
                   <tr>
-                    <td className="pr-4 text-gray-500 font-medium">DATE</td>
+                    <td className="pr-3 text-gray-500 font-medium">DATE</td>
                     <td className="font-bold text-gray-800">{today}</td>
                   </tr>
                   <tr>
-                    <td className="pr-4 text-gray-500 font-medium">P.O. #</td>
-                    <td className="font-bold text-gray-800">({poNumber})</td>
+                    <td className="pr-3 text-gray-500 font-medium">P.O. #</td>
+                    <td className="font-bold text-gray-800">{poNumber}</td>
                   </tr>
                 </tbody>
               </table>
@@ -739,25 +1030,34 @@ const PurchaseOrderPreview: React.FC<{
           <table className="w-full mt-4 text-sm">
             <thead>
               <tr className="bg-blue-800 text-white">
-                <th className="px-3 py-2 text-left">PART NUMBER / NAMA BARANG / APLIKASI</th>
-                <th className="px-3 py-2 text-center w-20">QTY</th>
+                <th className="px-3 py-2 text-left">
+                  <div className="flex items-center justify-start gap-28 text-[11px] uppercase tracking-wide">
+                    <span>Part Number / Nama Barang / Aplikasi</span>
+                    <span>QTY</span>
+                  </div>
+                </th>
               </tr>
             </thead>
             <tbody>
               {sortedItems.map((item, idx) => (
-                <tr key={idx} className="border-b border-gray-200">
+                <tr key={idx} className={`border-b border-gray-200 ${idx % 2 === 0 ? 'bg-gray-100' : 'bg-white'}`}>
                   <td className="px-3 py-2">
-                    <div className="font-bold text-gray-900">{item.part_number}</div>
-                    <div className="text-gray-700">{item.nama_barang}</div>
+                    <div className="flex items-baseline gap-2">
+                      <span className="font-extrabold text-[17px] text-gray-900 min-w-[50%] tracking-[0.2px]">
+                        {item.part_number}
+                      </span>
+                      <span className="w-20 min-w-[56px] max-w-[100px] border-b border-dotted border-gray-400 -translate-y-[2px]" />
+                      <span className="font-extrabold text-xl text-gray-900 leading-none min-w-[24px] text-left">{item.qty}</span>
+                    </div>
+                    <div className="text-gray-700 text-[13px]">{item.nama_barang}</div>
                     {(item.brand || item.application) && (
-                      <div className="text-xs text-gray-500 italic">
+                      <div className="text-[11px] text-gray-500 italic">
                         {item.brand && item.brand !== '-' ? `Brand: ${item.brand}` : ''}
                         {item.brand && item.brand !== '-' && item.application && item.application !== '-' ? ' | ' : ''}
                         {item.application && item.application !== '-' ? `App: ${item.application}` : ''}
                       </div>
                     )}
                   </td>
-                  <td className="px-3 py-2 text-center font-bold text-lg text-gray-900">{item.qty}</td>
                 </tr>
               ))}
             </tbody>
@@ -765,13 +1065,30 @@ const PurchaseOrderPreview: React.FC<{
           
           {/* Notes */}
           <div className="mt-8 border border-gray-300">
-            <div className="bg-blue-800 text-white px-3 py-1 text-xs font-bold">Other Comments or Special Instructions</div>
-            <textarea
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="Tulis catatan tambahan disini..."
-              className="w-full p-3 min-h-[60px] text-sm text-gray-700 border-0 focus:outline-none focus:ring-2 focus:ring-blue-300 resize-none"
-            />
+            <div className="bg-blue-800 text-white px-3 py-1 text-xs font-bold">Catatan / Komplain Customer</div>
+            <div className="p-3 space-y-3">
+              <div>
+                <label className="block text-xs text-gray-600 font-semibold mb-1">Catatan Internal PO</label>
+                <textarea
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder="Contoh: Tolong kirim batch 1 dulu..."
+                  className="w-full p-3 min-h-[70px] text-sm text-gray-700 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-300 resize-none"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-red-700 font-semibold mb-1">Komplain Customer (ditampilkan di WA)</label>
+                <textarea
+                  value={customerComplaint}
+                  onChange={(e) => setCustomerComplaint(e.target.value)}
+                  placeholder="Contoh: Customer komplain ukuran tidak sesuai, mohon dicek kualitas."
+                  className="w-full p-3 min-h-[80px] text-sm text-gray-700 border border-red-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-300 resize-none"
+                />
+              </div>
+              <p className="text-[11px] text-gray-500">
+                Komplain customer akan ikut di gambar PO dan pesan WhatsApp.
+              </p>
+            </div>
           </div>
         </div>
         
@@ -788,7 +1105,7 @@ const PurchaseOrderPreview: React.FC<{
               Batal
             </button>
             <button
-              onClick={() => onConfirm(notes)}
+              onClick={() => onConfirm(mergedNotes)}
               disabled={saving}
               className="px-4 py-2 bg-green-600 hover:bg-green-500 text-white font-bold rounded-lg transition-colors flex items-center gap-2 disabled:opacity-50"
             >
@@ -810,6 +1127,7 @@ const OrderHistoryModal: React.FC<{
   const [loading, setLoading] = useState(true);
   const [orders, setOrders] = useState<SupplierOrder[]>([]);
   const [selectedOrder, setSelectedOrder] = useState<SupplierOrder | null>(null);
+  const [actionLoading, setActionLoading] = useState<'save' | 'wa' | null>(null);
   
   useEffect(() => {
     const fetchOrders = async () => {
@@ -905,6 +1223,92 @@ const OrderHistoryModal: React.FC<{
       default: return 'bg-yellow-900/30 text-yellow-400';
     }
   };
+
+  const getStoreLabel = () => (store === 'bjw' ? 'BJW AUTOPART' : 'MJMAUTOPART 86');
+
+  const getOrderHtml = (order: SupplierOrder) =>
+    renderPurchaseOrderHTML({
+      poNumber: order.po_number,
+      storeName: getStoreLabel(),
+      supplier: order.supplier,
+      dateLabel: formatDate(order.created_at),
+      notesText: order.notes || '',
+      items: (order.items || []).map((item) => ({
+        part_number: item.part_number,
+        nama_barang: item.nama_barang,
+        qty: item.qty
+      }))
+    });
+
+  const handlePrintSelectedOrder = (order: SupplierOrder) => {
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) return;
+    printWindow.document.write(getOrderHtml(order));
+    printWindow.document.close();
+    printWindow.print();
+  };
+
+  const handleSaveSelectedOrderImage = async (order: SupplierOrder) => {
+    setActionLoading('save');
+    try {
+      const blob = await createPOImageBlobFromHtml(getOrderHtml(order));
+      downloadBlob(blob, `${order.po_number}.png`);
+    } catch (error) {
+      console.error('Error saving PO image:', error);
+      alert('Gagal menyimpan gambar PO.');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleShareSelectedOrderWA = async (order: SupplierOrder) => {
+    setActionLoading('wa');
+    try {
+      const parsed = parseSupplierOrderNotes(order.notes);
+      const totalQty = (order.items || []).reduce((sum, item) => sum + Number(item.qty || 0), 0);
+      const waText = buildPOWhatsappText({
+        storeName: getStoreLabel(),
+        poNumber: order.po_number,
+        supplier: order.supplier,
+        totalItems: order.items?.length || 0,
+        totalQty,
+        notes: parsed.notes,
+        complaint: parsed.complaint
+      });
+
+      const blob = await createPOImageBlobFromHtml(getOrderHtml(order));
+      const file = new File([blob], `${order.po_number}.png`, { type: 'image/png' });
+
+      if (navigator.share && navigator.canShare?.({ files: [file] })) {
+        await navigator.share({
+          title: `PO ${order.po_number}`,
+          text: waText,
+          files: [file]
+        });
+      } else {
+        downloadBlob(blob, `${order.po_number}.png`);
+        window.open(
+          `https://wa.me/?text=${encodeURIComponent(
+            `${waText}\n\nGambar PO sudah di-download otomatis (${order.po_number}.png). Silakan lampirkan file tersebut ke chat WA ini.`
+          )}`,
+          '_blank'
+        );
+        alert('Browser ini belum support kirim file langsung ke WA. File PO sudah di-download dan chat WA dibuka.');
+      }
+    } catch (error: any) {
+      if (error?.name !== 'AbortError') {
+        console.error('Error sharing PO to WA:', error);
+        alert('Gagal share PO ke WhatsApp.');
+      }
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const selectedOrderNotes = useMemo(
+    () => parseSupplierOrderNotes(selectedOrder?.notes),
+    [selectedOrder?.notes]
+  );
   
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm animate-in fade-in">
@@ -1012,85 +1416,21 @@ const OrderHistoryModal: React.FC<{
               </div>
               <div className="flex items-center gap-2">
                 <button 
-                  onClick={() => {
-                    const storeName = store === 'bjw' ? 'BJW AUTOPART' : 'MJMAUTOPART 86';
-                    const printWindow = window.open('', '_blank');
-                    if (!printWindow) return;
-                    printWindow.document.write(`
-                      <!DOCTYPE html>
-                      <html>
-                      <head>
-                        <title>Purchase Order - ${selectedOrder.po_number}</title>
-                        <style>
-                          * { margin: 0; padding: 0; box-sizing: border-box; }
-                          body { font-family: Arial, sans-serif; padding: 20px; background: white; color: #000; }
-                          .po-container { max-width: 800px; margin: 0 auto; }
-                          .header { display: flex; justify-content: space-between; margin-bottom: 20px; }
-                          .company-name { font-size: 24px; font-weight: bold; color: #000; }
-                          .po-title { color: #1a365d; font-size: 20px; font-weight: bold; }
-                          .po-info { text-align: right; font-size: 12px; color: #000; }
-                          .po-info td { padding: 2px 8px; }
-                          .vendor-section { background: #1a365d; color: white; padding: 8px 12px; font-weight: bold; margin: 20px 0 10px; }
-                          .vendor-name { padding: 8px 12px; font-weight: bold; color: #000; font-size: 14px; border-bottom: 2px solid #1a365d; }
-                          .items-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-                          .items-table th { background: #1a365d; color: white; padding: 10px; text-align: left; font-size: 12px; font-weight: bold; }
-                          .items-table td { padding: 8px 10px; border-bottom: 1px solid #ccc; font-size: 11px; color: #000; }
-                          .items-table .pn { font-weight: bold; color: #000; }
-                          .items-table .name { color: #333; }
-                          .items-table .qty { text-align: center; font-weight: bold; font-size: 13px; color: #000; }
-                          .notes-section { margin-top: 30px; border: 2px solid #1a365d; padding: 10px; min-height: 80px; }
-                          .notes-title { background: #1a365d; color: white; padding: 5px 10px; font-size: 11px; font-weight: bold; margin: -10px -10px 10px; }
-                          .notes-content { padding: 10px 0; font-size: 12px; color: #000; white-space: pre-wrap; }
-                          @media print { body { padding: 0; } }
-                        </style>
-                      </head>
-                      <body>
-                        <div class="po-container">
-                          <div class="header">
-                            <div class="company-name">${storeName}</div>
-                            <div>
-                              <div class="po-title">PURCHASE ORDER</div>
-                              <table class="po-info">
-                                <tr><td style="color:#333;">DATE</td><td style="font-weight:bold;color:#000;">${formatDate(selectedOrder.created_at)}</td></tr>
-                                <tr><td style="color:#333;">P.O. #</td><td style="font-weight:bold;color:#000;">(${selectedOrder.po_number})</td></tr>
-                              </table>
-                            </div>
-                          </div>
-                          
-                          <div class="vendor-section">VENDOR</div>
-                          <div class="vendor-name">${selectedOrder.supplier}</div>
-                          
-                          <table class="items-table">
-                            <thead>
-                              <tr>
-                                <th style="width: 65%;">PART NUMBER / NAMA BARANG</th>
-                                <th class="qty" style="width: 15%;">QTY</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              ${(selectedOrder.items || []).map(item => `
-                                <tr>
-                                  <td>
-                                    <div class="pn">${item.part_number}</div>
-                                    <div class="name">${item.nama_barang}</div>
-                                  </td>
-                                  <td class="qty">${item.qty}</td>
-                                </tr>
-                              `).join('')}
-                            </tbody>
-                          </table>
-                          
-                          <div class="notes-section">
-                            <div class="notes-title">Other Comments or Special Instructions</div>
-                            <div class="notes-content">${selectedOrder.notes || ''}</div>
-                          </div>
-                        </div>
-                      </body>
-                      </html>
-                    `);
-                    printWindow.document.close();
-                    printWindow.print();
-                  }}
+                  onClick={() => handleSaveSelectedOrderImage(selectedOrder)}
+                  disabled={actionLoading !== null}
+                  className="flex items-center gap-1 px-3 py-1.5 bg-green-600 hover:bg-green-500 text-white text-sm font-bold rounded transition-colors disabled:opacity-50"
+                >
+                  {actionLoading === 'save' ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />} Simpan
+                </button>
+                <button
+                  onClick={() => handleShareSelectedOrderWA(selectedOrder)}
+                  disabled={actionLoading !== null}
+                  className="flex items-center gap-1 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold rounded transition-colors disabled:opacity-50"
+                >
+                  {actionLoading === 'wa' ? <Loader2 size={14} className="animate-spin" /> : <MessageCircle size={14} />} WA
+                </button>
+                <button 
+                  onClick={() => handlePrintSelectedOrder(selectedOrder)}
                   className="flex items-center gap-1 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold rounded transition-colors"
                 >
                   <Printer size={14} /> Print
@@ -1131,10 +1471,20 @@ const OrderHistoryModal: React.FC<{
               </table>
               
               {/* Notes Section */}
-              {selectedOrder.notes && (
-                <div className="mt-4 p-3 bg-gray-900/50 rounded-lg border border-gray-700">
-                  <div className="text-xs text-gray-400 mb-1">Catatan:</div>
-                  <div className="text-sm text-gray-200 whitespace-pre-wrap">{selectedOrder.notes}</div>
+              {(selectedOrderNotes.notes || selectedOrderNotes.complaint) && (
+                <div className="mt-4 p-3 bg-gray-900/50 rounded-lg border border-gray-700 space-y-3">
+                  {selectedOrderNotes.notes && (
+                    <div>
+                      <div className="text-xs text-gray-400 mb-1">Catatan Internal:</div>
+                      <div className="text-sm text-gray-200 whitespace-pre-wrap">{selectedOrderNotes.notes}</div>
+                    </div>
+                  )}
+                  {selectedOrderNotes.complaint && (
+                    <div>
+                      <div className="text-xs text-red-300 mb-1">Komplain Customer:</div>
+                      <div className="text-sm text-red-200 whitespace-pre-wrap">{selectedOrderNotes.complaint}</div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

@@ -21,6 +21,11 @@ interface BatchRow {
   shelf: string;
 }
 
+interface ActiveCell {
+  row: number;
+  col: number;
+}
+
 const COLUMN_KEYS: Array<keyof Omit<BatchRow, 'id'>> = [
   'partNumber',
   'name',
@@ -51,6 +56,7 @@ export const InventoryBatchAddModal: React.FC<InventoryBatchAddModalProps> = ({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
+  const [activeCell, setActiveCell] = useState<ActiveCell>({ row: 0, col: 0 });
 
   const nextId = useMemo(() => (rows.length ? Math.max(...rows.map((row) => row.id)) + 1 : 1), [rows]);
 
@@ -83,14 +89,29 @@ export const InventoryBatchAddModal: React.FC<InventoryBatchAddModalProps> = ({
     startColIndex: number
   ) => {
     const text = e.clipboardData.getData('text/plain');
-    if (!text.includes('\n') && !text.includes('\t')) return;
-
     e.preventDefault();
-    const matrix = text
+    applyPastedText(text, startRowIndex, startColIndex);
+  };
+
+  const focusCell = (rowIndex: number, colIndex: number) => {
+    const safeRow = Math.max(0, Math.min(rows.length - 1, rowIndex));
+    const safeCol = Math.max(0, Math.min(COLUMN_COUNT - 1, colIndex));
+    const target = inputRefs.current[safeRow * COLUMN_COUNT + safeCol];
+    if (!target) return;
+    target.focus();
+    setTimeout(() => target.select?.(), 0);
+    setActiveCell({ row: safeRow, col: safeCol });
+  };
+
+  const applyPastedText = (rawText: string, startRowIndex: number, startColIndex: number) => {
+    const matrix = rawText
       .replace(/\r/g, '')
       .split('\n')
-      .map((line) => line.split('\t'))
-      .filter((cells) => cells.some((cell) => cell.trim() !== ''));
+      .map((line) => line.split('\t'));
+
+    while (matrix.length > 0 && matrix[matrix.length - 1].every((cell) => cell === '')) {
+      matrix.pop();
+    }
 
     if (matrix.length === 0) return;
 
@@ -109,7 +130,7 @@ export const InventoryBatchAddModal: React.FC<InventoryBatchAddModalProps> = ({
 
         cells.forEach((rawValue, colOffset) => {
           const targetCol = startColIndex + colOffset;
-          if (targetCol >= COLUMN_KEYS.length) return;
+          if (targetCol >= COLUMN_COUNT) return;
           const key = COLUMN_KEYS[targetCol];
           const value = rawValue.trim();
           (targetRow as any)[key] = key === 'partNumber' ? value.toUpperCase() : value;
@@ -118,13 +139,49 @@ export const InventoryBatchAddModal: React.FC<InventoryBatchAddModalProps> = ({
 
       return draft;
     });
+
+    const lastColWidth = matrix.reduce((max, cells) => Math.max(max, cells.length), 1);
+    const nextRow = startRowIndex + matrix.length - 1;
+    const nextCol = Math.min(COLUMN_COUNT - 1, startColIndex + Math.max(0, lastColWidth - 1));
+    setActiveCell({ row: nextRow, col: nextCol });
   };
 
-  const focusCell = (rowIndex: number, colIndex: number) => {
-    const target = inputRefs.current[rowIndex * COLUMN_COUNT + colIndex];
-    if (!target) return;
-    target.focus();
-    setTimeout(() => target.select?.(), 0);
+  const handleTablePaste = (e: React.ClipboardEvent<HTMLDivElement>) => {
+    const target = e.target as HTMLElement | null;
+    if (target instanceof HTMLInputElement) return;
+
+    const text = e.clipboardData.getData('text/plain');
+    if (!text) return;
+    e.preventDefault();
+    applyPastedText(text, activeCell.row, activeCell.col);
+    focusCell(activeCell.row, activeCell.col);
+  };
+
+  const buildCopyText = () => {
+    let lastFilledIndex = -1;
+    rows.forEach((row, idx) => {
+      const hasValue = COLUMN_KEYS.some((key) => ((row as any)[key] || '').toString().trim() !== '');
+      if (hasValue) lastFilledIndex = idx;
+    });
+    if (lastFilledIndex < 0) return '';
+
+    return rows
+      .slice(0, lastFilledIndex + 1)
+      .map((row) => COLUMN_KEYS.map((key) => (((row as any)[key] || '') as string)).join('\t'))
+      .join('\n');
+  };
+
+  const handleTableCopy = (e: React.ClipboardEvent<HTMLDivElement>) => {
+    const target = e.target as HTMLInputElement | null;
+    if (target && target.selectionStart !== null && target.selectionEnd !== null && target.selectionStart !== target.selectionEnd) {
+      return;
+    }
+
+    const text = buildCopyText();
+    if (!text) return;
+
+    e.preventDefault();
+    e.clipboardData.setData('text/plain', text);
   };
 
   const handleCellKeyDown = (
@@ -223,7 +280,11 @@ export const InventoryBatchAddModal: React.FC<InventoryBatchAddModalProps> = ({
         </div>
 
         <div className="p-3 md:p-4">
-          <div className="overflow-auto border border-gray-700 rounded-xl max-h-[60vh]">
+          <div
+            className="overflow-auto border border-gray-700 rounded-xl max-h-[60vh]"
+            onPasteCapture={handleTablePaste}
+            onCopyCapture={handleTableCopy}
+          >
             <table className="w-full min-w-[980px] text-xs">
               <thead className="sticky top-0 z-10 bg-gray-900">
                 <tr className="text-gray-300 uppercase text-[10px] tracking-wide">
@@ -247,6 +308,7 @@ export const InventoryBatchAddModal: React.FC<InventoryBatchAddModalProps> = ({
                         }}
                         value={row.partNumber}
                         onChange={(e) => updateCell(row.id, 'partNumber', e.target.value)}
+                        onFocus={() => setActiveCell({ row: rowIndex, col: 0 })}
                         onKeyDown={(e) => handleCellKeyDown(e, rowIndex, 0)}
                         onPaste={(e) => handlePaste(e, rowIndex, 0)}
                         className="w-full bg-gray-900 border border-gray-700 rounded-md px-2 py-1.5 text-gray-100 outline-none focus:border-cyan-500"
@@ -261,6 +323,7 @@ export const InventoryBatchAddModal: React.FC<InventoryBatchAddModalProps> = ({
                         }}
                         value={row.name}
                         onChange={(e) => updateCell(row.id, 'name', e.target.value)}
+                        onFocus={() => setActiveCell({ row: rowIndex, col: 1 })}
                         onKeyDown={(e) => handleCellKeyDown(e, rowIndex, 1)}
                         onPaste={(e) => handlePaste(e, rowIndex, 1)}
                         className="w-full bg-gray-900 border border-gray-700 rounded-md px-2 py-1.5 text-gray-100 outline-none focus:border-cyan-500"
@@ -275,6 +338,7 @@ export const InventoryBatchAddModal: React.FC<InventoryBatchAddModalProps> = ({
                         }}
                         value={row.brand}
                         onChange={(e) => updateCell(row.id, 'brand', e.target.value)}
+                        onFocus={() => setActiveCell({ row: rowIndex, col: 2 })}
                         onKeyDown={(e) => handleCellKeyDown(e, rowIndex, 2)}
                         onPaste={(e) => handlePaste(e, rowIndex, 2)}
                         className="w-full bg-gray-900 border border-gray-700 rounded-md px-2 py-1.5 text-gray-100 outline-none focus:border-cyan-500"
@@ -289,6 +353,7 @@ export const InventoryBatchAddModal: React.FC<InventoryBatchAddModalProps> = ({
                         }}
                         value={row.application}
                         onChange={(e) => updateCell(row.id, 'application', e.target.value)}
+                        onFocus={() => setActiveCell({ row: rowIndex, col: 3 })}
                         onKeyDown={(e) => handleCellKeyDown(e, rowIndex, 3)}
                         onPaste={(e) => handlePaste(e, rowIndex, 3)}
                         className="w-full bg-gray-900 border border-gray-700 rounded-md px-2 py-1.5 text-gray-100 outline-none focus:border-cyan-500"
@@ -303,6 +368,7 @@ export const InventoryBatchAddModal: React.FC<InventoryBatchAddModalProps> = ({
                         }}
                         value={row.shelf}
                         onChange={(e) => updateCell(row.id, 'shelf', e.target.value)}
+                        onFocus={() => setActiveCell({ row: rowIndex, col: 4 })}
                         onKeyDown={(e) => handleCellKeyDown(e, rowIndex, 4)}
                         onPaste={(e) => handlePaste(e, rowIndex, 4)}
                         className="w-full bg-gray-900 border border-gray-700 rounded-md px-2 py-1.5 text-gray-100 outline-none focus:border-cyan-500"
