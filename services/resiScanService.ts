@@ -269,16 +269,9 @@ export const scanResiStage1Bulk = async (
 };
 
 export const getResiStage1List = async (store: string | null) => {
-  const table = getTableName(store);
-  const { data, error } = await supabase
-    .from(table)
-    .select('*')
-    .eq('stage1_scanned', 'true') 
-    .order('stage1_scanned_at', { ascending: false })
-    .limit(500);
-
-  if (error) return [];
-  return mapToBoolean(data || []);
+  // Samakan sumber data Stage 1 dengan Stage 3:
+  // hanya tampilkan resi yang masih pending (belum completed/sudah terjual).
+  return getAllPendingStage1Resi(store);
 };
 
 // Ambil semua resi Stage 1 yang belum completed (untuk Stage 3)

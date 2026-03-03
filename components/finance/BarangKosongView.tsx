@@ -243,17 +243,18 @@ const renderPurchaseOrderHTML = (params: {
         }
         .po-page {
           width: 700px;
-          height: 990px;
+          min-height: 990px;
+          height: auto;
           margin: 0 auto;
           background: #ffffff;
           padding: 18px 18px 14px;
           display: flex;
           flex-direction: column;
-          overflow: hidden;
+          overflow: visible;
         }
         .po-container {
           width: 100%;
-          height: 100%;
+          height: auto;
           display: flex;
           flex-direction: column;
         }
@@ -323,9 +324,9 @@ const renderPurchaseOrderHTML = (params: {
           background: #f3f4f6;
         }
         .table-wrap {
-          flex: 1;
-          min-height: 0;
-          overflow: hidden;
+          flex: 0 0 auto;
+          min-height: auto;
+          overflow: visible;
           border: 1px solid #cfd5df;
         }
         .items-table {
@@ -495,8 +496,8 @@ const createPOImageBlobFromHtml = async (html: string): Promise<Blob> => {
   iframe.style.position = 'absolute';
   iframe.style.left = '-9999px';
   iframe.style.top = '-9999px';
-  iframe.style.width = '740px';
-  iframe.style.height = '1040px';
+  iframe.style.width = '760px';
+  iframe.style.height = '1200px';
   document.body.appendChild(iframe);
 
   try {
@@ -511,12 +512,34 @@ const createPOImageBlobFromHtml = async (html: string): Promise<Blob> => {
 
     const html2canvas = (await import('html2canvas')).default;
     const target = (iframeDoc.querySelector('.po-page') as HTMLElement) || iframeDoc.body;
+    const targetWidth = Math.max(
+      Math.ceil(target.scrollWidth || 0),
+      Math.ceil(target.offsetWidth || 0),
+      700
+    );
+    const targetHeight = Math.max(
+      Math.ceil(target.scrollHeight || 0),
+      Math.ceil(target.offsetHeight || 0),
+      990
+    );
+
+    // Pastikan viewport iframe cukup besar agar elemen panjang tidak terpotong saat dirender.
+    iframe.style.width = `${targetWidth + 40}px`;
+    iframe.style.height = `${targetHeight + 40}px`;
+    await new Promise((resolve) => setTimeout(resolve, 60));
+
     const canvas = await html2canvas(target, {
       backgroundColor: '#ffffff',
       scale: Math.max(2.1, (window.devicePixelRatio || 1) * 1.7),
       useCORS: true,
       logging: false,
-      removeContainer: true
+      removeContainer: true,
+      width: targetWidth,
+      height: targetHeight,
+      windowWidth: targetWidth,
+      windowHeight: targetHeight,
+      scrollX: 0,
+      scrollY: 0
     });
 
     const blob = await new Promise<Blob | null>((resolve) => {

@@ -627,9 +627,12 @@ export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh, refre
 
   const validBulkCount = bulkResiList.filter(r => r.resi.trim() && !r.isDuplicate).length;
   const duplicateBulkCount = bulkResiList.filter(r => r.isDuplicate).length;
+
+  const isCompletedResi = (resi: ResiScanStage) =>
+    resi.stage3_completed || String(resi.status || '').toLowerCase() === 'completed';
   
   const getStatusBadge = (resi: ResiScanStage) => {
-    if (resi.stage3_completed) {
+    if (isCompletedResi(resi)) {
       return <span className="px-2 py-1 text-xs bg-green-600 text-white rounded-full">Selesai</span>;
     }
     if (resi.stage2_verified) {
@@ -788,7 +791,7 @@ export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh, refre
       <div className="bg-gray-800 rounded-t-xl shadow-lg border border-gray-700 border-b-0">
         <div className="p-4 md:p-6">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold">Daftar Resi Stage 1</h2>
+            <h2 className="text-lg font-semibold">Daftar Resi Stage 1 (Pending)</h2>
             <div className="text-sm text-gray-400">
               Total: <span className="font-semibold text-blue-400">{filteredResiList.length}</span>
             </div>
@@ -934,11 +937,11 @@ export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh, refre
                           <Edit2 size={16} />
                         </button>
                         <button
-                          onClick={() => handleDeleteResi(resi.id, resi.stage2_verified, resi.stage3_completed)}
+                          onClick={() => handleDeleteResi(resi.id, resi.stage2_verified, isCompletedResi(resi))}
                           className={`p-2 hover:bg-red-600/20 rounded-lg transition-colors ${
-                            resi.stage3_completed ? 'text-green-400' : resi.stage2_verified ? 'text-orange-400' : 'text-red-400'
+                            isCompletedResi(resi) ? 'text-green-400' : resi.stage2_verified ? 'text-orange-400' : 'text-red-400'
                           }`}
-                          title={resi.stage3_completed ? 'Hapus (Stage 3)' : resi.stage2_verified ? 'Hapus (Stage 2)' : 'Hapus'}
+                          title={isCompletedResi(resi) ? 'Hapus (Completed)' : resi.stage2_verified ? 'Hapus (Stage 2)' : 'Hapus'}
                         >
                           <Trash2 size={16} />
                         </button>
@@ -1308,7 +1311,7 @@ export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh, refre
               {/* Status Info */}
               <div className="p-3 bg-gray-700/50 rounded-lg">
                 <p className="text-sm text-gray-400">
-                  Status: {editingResi.stage3_completed ? 'Stage 3 (Completed)' : editingResi.stage2_verified ? 'Stage 2' : 'Stage 1'}
+                  Status: {isCompletedResi(editingResi) ? 'Completed' : editingResi.stage2_verified ? 'Stage 2' : 'Stage 1'}
                 </p>
               </div>
             </div>
