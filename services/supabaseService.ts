@@ -1385,14 +1385,17 @@ export const fetchInventoryPaginated = async (store: string | null, page: number
 
 export const fetchInventoryStats = async (store: string | null): Promise<any> => {
   const table = getTableName(store);
-  
-  // 1. Get total items and total stock from inventory
-  const { data: items, error } = await supabase.from(table).select('quantity, part_number');
-  if (error || !items) return { totalItems: 0, totalStock: 0, totalAsset: 0, todayIn: 0, todayOut: 0 };
-  
+
+  // Ambil semua inventory secara batch agar tidak mentok default 1000 rows.
+  const items = await fetchAllRowsForModal<ModalBaseItemRow>(
+    table,
+    'part_number,name,quantity',
+    'part_number'
+  );
+
   const totalItems = items.length;
   const totalStock = items.reduce((acc, item) => acc + (Number(item.quantity) || 0), 0);
-  
+
   // 2. Get today's start timestamp (WIB timezone)
   const now = new Date();
   const wibOffset = 7 * 60; // WIB = UTC+7
@@ -1402,26 +1405,49 @@ export const fetchInventoryStats = async (store: string | null): Promise<any> =>
   // Convert back to UTC for database query
   const startOfDayUTC = new Date(startOfDayWIB.getTime() - (localOffset + wibOffset) * 60000);
   const todayStart = startOfDayUTC.toISOString();
-  
+
+  const sumLogQtySince = async (
+    tableName: string,
+    qtyColumn: 'qty_masuk' | 'qty_keluar'
+  ): Promise<number> => {
+    const pageSize = 1000;
+    let from = 0;
+    let total = 0;
+
+    while (true) {
+      const { data, error } = await supabase
+        .from(tableName)
+        .select(qtyColumn)
+        .gte('created_at', todayStart)
+        .order('created_at', { ascending: true })
+        .range(from, from + pageSize - 1);
+
+      if (error) {
+        console.error(`Gagal mengambil ${qtyColumn} dari ${tableName}:`, error);
+        break;
+      }
+
+      const page = (data || []) as Array<Record<string, number | null>>;
+      total += page.reduce((acc, row) => acc + (Number(row[qtyColumn]) || 0), 0);
+
+      if (page.length < pageSize) break;
+      from += pageSize;
+    }
+
+    return total;
+  };
+
   // 3. Get today's incoming qty from barang_masuk
   const inTable = getLogTableName('barang_masuk', store);
-  const { data: inData } = await supabase
-    .from(inTable)
-    .select('qty_masuk')
-    .gte('created_at', todayStart);
-  const todayIn = (inData || []).reduce((acc, row) => acc + (Number(row.qty_masuk) || 0), 0);
-  
+  const todayIn = await sumLogQtySince(inTable, 'qty_masuk');
+
   // 4. Get today's outgoing qty from barang_keluar
   const outTable = getLogTableName('barang_keluar', store);
-  const { data: outData } = await supabase
-    .from(outTable)
-    .select('qty_keluar')
-    .gte('created_at', todayStart);
-  const todayOut = (outData || []).reduce((acc, row) => acc + (Number(row.qty_keluar) || 0), 0);
-  
+  const todayOut = await sumLogQtySince(outTable, 'qty_keluar');
+
   // 5. Calculate total asset as total modal stock (same basis as Zakat Tahunan modal)
   const totalAsset = await calculateModalStockTotal(items);
-  
+
   return { totalItems, totalStock, totalAsset, todayIn, todayOut };
 };
 
