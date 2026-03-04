@@ -4,7 +4,7 @@ import Autocomplete from '@mui/material/Autocomplete';
 import TextField from '@mui/material/TextField';
 import { useStore } from '../context/StoreContext';
 import { 
-  fetchOfflineOrders, fetchSoldItems, fetchReturItems,
+  fetchOfflineOrders, fetchReturItems, fetchSoldItemsProgressive,
   processOfflineOrderItem, updateOfflineOrder, fetchInventory, createReturFromSold, updateReturStatus,
   fetchDistinctEcommerce, deleteBarangLog, updateSoldItemPrice, updateSoldItemDate, updateSoldItemQty, updateSoldItemKodeToko, updateSoldItemTempo,
   fetchSalesOrders, processSalesOrderItem, fetchSalesPaidItems
@@ -391,6 +391,7 @@ export const OrderManagement: React.FC = () => {
   // Pagination for TERJUAL
   const [soldPage, setSoldPage] = useState(1);
   const ITEMS_PER_PAGE = 50;
+  const loadRequestRef = useRef(0);
 
   // Sort options for stock and date
   const [stockSortOrder, setStockSortOrder] = useState<'none' | 'asc' | 'desc'>('none');
@@ -557,48 +558,90 @@ export const OrderManagement: React.FC = () => {
   };
 
   const loadData = async () => {
+    const requestId = ++loadRequestRef.current;
     setLoading(true);
     setLoadingProgress(0);
-    
-    // Start progress animation
-    const progressInterval = setInterval(() => {
-      setLoadingProgress(prev => {
-        if (prev >= 90) return prev; // Stop at 90% until data loads
-        return prev + Math.random() * 15;
-      });
-    }, 200);
+
+    const isSoldTab = activeTab === 'TERJUAL';
+    let progressInterval: ReturnType<typeof setInterval> | null = null;
+
+    // Progress dummy untuk tab selain TERJUAL.
+    if (!isSoldTab) {
+      progressInterval = setInterval(() => {
+        setLoadingProgress(prev => {
+          if (prev >= 90) return prev; // Stop at 90% until data loads
+          return prev + Math.random() * 15;
+        });
+      }, 200);
+    }
     
     try {
-      if (activeTab === 'OFFLINE') setOfflineData(await fetchOfflineOrders(selectedStore));
+      if (activeTab === 'OFFLINE') {
+        const rows = await fetchOfflineOrders(selectedStore);
+        if (requestId !== loadRequestRef.current) return;
+        setOfflineData(rows);
+      }
       if (activeTab === 'SALES') {
         const [pendingSales, paidSales] = await Promise.all([
           fetchSalesOrders(selectedStore),
           fetchSalesPaidItems(selectedStore)
         ]);
+        if (requestId !== loadRequestRef.current) return;
         setSalesData(pendingSales);
         setSalesPaidData(paidSales);
       }
-      if (activeTab === 'TERJUAL') setSoldData(await fetchSoldItems(selectedStore));
-      if (activeTab === 'RETUR') setReturData(await fetchReturItems(selectedStore));
+      if (activeTab === 'TERJUAL') {
+        setSoldData([]);
+        setLoadingProgress(1);
+
+        await fetchSoldItemsProgressive(selectedStore, ({ chunk, loaded, total }) => {
+          if (requestId !== loadRequestRef.current) return;
+
+          setSoldData(prev => [...prev, ...chunk]);
+
+          if (total > 0) {
+            const percent = Math.floor((loaded / total) * 100);
+            setLoadingProgress(Math.min(99, Math.max(1, percent)));
+          } else {
+            setLoadingProgress(prev => Math.min(95, prev + 6));
+          }
+        });
+
+        if (requestId !== loadRequestRef.current) return;
+      }
+      if (activeTab === 'RETUR') {
+        const rows = await fetchReturItems(selectedStore);
+        if (requestId !== loadRequestRef.current) return;
+        setReturData(rows);
+      }
       
       // Complete the progress
-      clearInterval(progressInterval);
+      if (progressInterval) clearInterval(progressInterval);
+      if (requestId !== loadRequestRef.current) return;
       setLoadingProgress(100);
       
       // Reset after animation completes
       setTimeout(() => {
+        if (requestId !== loadRequestRef.current) return;
         setLoading(false);
         setLoadingProgress(0);
-      }, 300);
+      }, 150);
     } catch (e) {
       console.error("Gagal load data:", e);
-      clearInterval(progressInterval);
+      if (progressInterval) clearInterval(progressInterval);
+      if (requestId !== loadRequestRef.current) return;
       setLoading(false);
       setLoadingProgress(0);
     }
   };
 
-  useEffect(() => { loadData(); }, [selectedStore, activeTab]);
+  useEffect(() => {
+    loadData();
+    return () => {
+      // Batalkan commit state dari request lama saat tab/store berubah.
+      loadRequestRef.current += 1;
+    };
+  }, [selectedStore, activeTab]);
 
   // SAFEGUARD: SALES hanya untuk toko BJW
   useEffect(() => {
@@ -810,6 +853,30 @@ export const OrderManagement: React.FC = () => {
   );
 
   const soldTotalPages = Math.ceil(groupedSoldData.length / ITEMS_PER_PAGE);
+
+  // Keep TERJUAL pagination stable:
+  // - search/filter/sort should always start from page 1
+  // - data source remains full soldData, only rendered view is paginated
+  useEffect(() => {
+    if (activeTab !== 'TERJUAL') return;
+    setSoldPage(1);
+  }, [
+    activeTab,
+    selectedStore,
+    searchTerm,
+    customerFilter,
+    partNumberFilter,
+    ecommerceFilter,
+    stockSortOrder,
+    dateSortOrder
+  ]);
+
+  // Clamp current page when filtered result shrinks.
+  useEffect(() => {
+    if (activeTab !== 'TERJUAL') return;
+    const maxPage = Math.max(1, Math.ceil(groupedSoldData.length / ITEMS_PER_PAGE));
+    setSoldPage(prev => Math.min(prev, maxPage));
+  }, [activeTab, groupedSoldData.length]);
 
   useEffect(() => {
     setSelectedSoldGroups(prev => {

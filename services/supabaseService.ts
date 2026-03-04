@@ -65,6 +65,149 @@ const normalizePartForLookup = (pn: string | null | undefined): string =>
   (pn || '').trim().toUpperCase().replace(/\s+/g, ' ');
 
 const photoRowCache = new Map<string, any | null>();
+const PHOTO_ROW_CACHE_STORAGE_KEY = 'mjm_bjw_photo_row_cache_v1';
+const PHOTO_ROW_CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 jam
+const PHOTO_ROW_CACHE_MAX_ENTRIES = 1200;
+
+interface PersistedPhotoCacheEntry {
+  value: any | null;
+  expiresAt: number;
+  updatedAt: number;
+}
+
+let persistedPhotoCacheLoaded = false;
+let persistedPhotoCache: Record<string, PersistedPhotoCacheEntry> = {};
+let persistPhotoCacheTimer: ReturnType<typeof setTimeout> | null = null;
+
+const normalizePhotoCacheKey = (partNumber: string | null | undefined): string =>
+  String(partNumber || '').trim().toUpperCase();
+
+const canUseLocalStorage = (): boolean => {
+  if (typeof window === 'undefined') return false;
+  try {
+    return typeof window.localStorage !== 'undefined';
+  } catch {
+    return false;
+  }
+};
+
+const prunePersistedPhotoCache = () => {
+  const now = Date.now();
+  const validEntries = Object.entries(persistedPhotoCache).filter(([, entry]) => entry.expiresAt > now);
+
+  if (validEntries.length <= PHOTO_ROW_CACHE_MAX_ENTRIES) {
+    persistedPhotoCache = Object.fromEntries(validEntries);
+    return;
+  }
+
+  validEntries.sort((a, b) => (b[1].updatedAt || 0) - (a[1].updatedAt || 0));
+  persistedPhotoCache = Object.fromEntries(validEntries.slice(0, PHOTO_ROW_CACHE_MAX_ENTRIES));
+};
+
+const loadPersistedPhotoCache = () => {
+  if (persistedPhotoCacheLoaded) return;
+  persistedPhotoCacheLoaded = true;
+
+  if (!canUseLocalStorage()) return;
+
+  try {
+    const raw = window.localStorage.getItem(PHOTO_ROW_CACHE_STORAGE_KEY);
+    if (!raw) return;
+
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return;
+
+    const now = Date.now();
+    const valid: Record<string, PersistedPhotoCacheEntry> = {};
+
+    Object.entries(parsed).forEach(([key, value]) => {
+      if (!key || !value || typeof value !== 'object') return;
+      const entry = value as PersistedPhotoCacheEntry;
+      if (!entry.expiresAt || entry.expiresAt <= now) return;
+      valid[key] = entry;
+      photoRowCache.set(key, entry.value ?? null);
+    });
+
+    persistedPhotoCache = valid;
+  } catch (error) {
+    console.warn('Gagal load cache foto produk:', error);
+  }
+};
+
+const writePersistedPhotoCache = () => {
+  if (!canUseLocalStorage()) return;
+
+  prunePersistedPhotoCache();
+
+  try {
+    window.localStorage.setItem(PHOTO_ROW_CACHE_STORAGE_KEY, JSON.stringify(persistedPhotoCache));
+  } catch (error) {
+    // Jika quota penuh, kurangi cache jadi separuh lalu coba lagi.
+    try {
+      const entries = Object.entries(persistedPhotoCache)
+        .sort((a, b) => (b[1].updatedAt || 0) - (a[1].updatedAt || 0))
+        .slice(0, Math.max(100, Math.floor(PHOTO_ROW_CACHE_MAX_ENTRIES / 2)));
+      persistedPhotoCache = Object.fromEntries(entries);
+      window.localStorage.setItem(PHOTO_ROW_CACHE_STORAGE_KEY, JSON.stringify(persistedPhotoCache));
+    } catch (retryError) {
+      console.warn('Gagal simpan cache foto produk:', retryError);
+    }
+  }
+};
+
+const schedulePersistedPhotoCacheWrite = () => {
+  if (!canUseLocalStorage()) return;
+  if (persistPhotoCacheTimer) return;
+  persistPhotoCacheTimer = setTimeout(() => {
+    persistPhotoCacheTimer = null;
+    writePersistedPhotoCache();
+  }, 250);
+};
+
+const hasPhotoRowCacheEntry = (partNumber: string | null | undefined): boolean => {
+  const key = normalizePhotoCacheKey(partNumber);
+  if (!key) return false;
+
+  loadPersistedPhotoCache();
+
+  if (photoRowCache.has(key)) return true;
+
+  const entry = persistedPhotoCache[key];
+  if (!entry) return false;
+
+  if (entry.expiresAt <= Date.now()) {
+    delete persistedPhotoCache[key];
+    schedulePersistedPhotoCacheWrite();
+    return false;
+  }
+
+  photoRowCache.set(key, entry.value ?? null);
+  return true;
+};
+
+const getPhotoRowCacheEntry = (partNumber: string | null | undefined): any | null | undefined => {
+  const key = normalizePhotoCacheKey(partNumber);
+  if (!key) return undefined;
+
+  if (!hasPhotoRowCacheEntry(key)) return undefined;
+  return photoRowCache.get(key);
+};
+
+const setPhotoRowCacheEntry = (partNumber: string | null | undefined, value: any | null) => {
+  const key = normalizePhotoCacheKey(partNumber);
+  if (!key) return;
+
+  loadPersistedPhotoCache();
+
+  photoRowCache.set(key, value ?? null);
+  persistedPhotoCache[key] = {
+    value: value ?? null,
+    expiresAt: Date.now() + PHOTO_ROW_CACHE_TTL_MS,
+    updatedAt: Date.now()
+  };
+
+  schedulePersistedPhotoCacheWrite();
+};
 
 const fetchStockQtyMapByPartNumbers = async (
   stockTable: string,
@@ -596,13 +739,20 @@ export const fetchInventoryByPartNumber = async (
       data = nameData;
     }
 
-    // Fetch photo if exists
+    // Fetch photo (pakai cache jika ada)
     const partNumber = data.part_number;
+    const cachedPhoto = getPhotoRowCacheEntry(partNumber);
+    if (cachedPhoto !== undefined) {
+      return mapItemFromDB(data, cachedPhoto || undefined);
+    }
+
     const { data: photoData } = await supabase
       .from('foto')
       .select(FOTO_SELECT_COLUMNS)
       .eq('part_number', partNumber)
       .maybeSingle();
+
+    setPhotoRowCacheEntry(partNumber, photoData || null);
 
     return mapItemFromDB(data, photoData);
   } catch (err) {
@@ -780,11 +930,15 @@ const fetchLatestPricesForItems = async (items: any[], store?: string | null): P
 
 const fetchPhotosForItems = async (items: any[]) => {
   if (!items || items.length === 0) return {};
-  const partNumbers = [...new Set(items.map(i => i.part_number || i.partNumber).filter(Boolean))];
+  const partNumbers = [...new Set(
+    items
+      .map(i => String(i.part_number || i.partNumber || '').trim())
+      .filter(Boolean)
+  )];
   if (partNumbers.length === 0) return {};
   try {
     const photoMap: Record<string, any> = {};
-    const missingPartNumbers = partNumbers.filter((pn) => !photoRowCache.has(pn));
+    const missingPartNumbers = partNumbers.filter((pn) => !hasPhotoRowCacheEntry(pn));
 
     if (missingPartNumbers.length > 0) {
       const { data } = await supabase
@@ -795,25 +949,25 @@ const fetchPhotosForItems = async (items: any[]) => {
       const fetchedRows = data || [];
       fetchedRows.forEach((row: any) => {
         if (row?.part_number) {
-          photoRowCache.set(row.part_number, row);
+          setPhotoRowCacheEntry(row.part_number, row);
         }
       });
 
       const fetchedSet = new Set(
         fetchedRows
-          .map((row: any) => row?.part_number)
+          .map((row: any) => normalizePhotoCacheKey(row?.part_number))
           .filter(Boolean)
       );
 
       missingPartNumbers.forEach((pn) => {
-        if (!fetchedSet.has(pn)) {
-          photoRowCache.set(pn, null);
+        if (!fetchedSet.has(normalizePhotoCacheKey(pn))) {
+          setPhotoRowCacheEntry(pn, null);
         }
       });
     }
 
     partNumbers.forEach((pn) => {
-      const cached = photoRowCache.get(pn);
+      const cached = getPhotoRowCacheEntry(pn);
       if (cached) {
         photoMap[pn] = cached;
       }
@@ -828,12 +982,12 @@ const savePhotosToTable = async (partNumber: string, images: string[]) => {
   try {
     if (!images || images.length === 0) {
       await supabase.from('foto').delete().eq('part_number', partNumber);
-      photoRowCache.set(partNumber, null);
+      setPhotoRowCacheEntry(partNumber, null);
       return;
     }
     const photoPayload = mapImagesToPhotoRow(partNumber, images);
     await supabase.from('foto').upsert(photoPayload, { onConflict: 'part_number' });
-    photoRowCache.set(partNumber, photoPayload);
+    setPhotoRowCacheEntry(partNumber, photoPayload);
   } catch (e) { console.error('Error saving photos:', e); }
 };
 
@@ -1008,6 +1162,12 @@ export const insertFotoBatch = async (
       console.error('insertFotoBatch Error:', error);
       return { success: false, error: error.message };
     }
+
+    // Sync cache foto agar Dashboard/Beranda bisa langsung pakai data terbaru.
+    rows.forEach((row) => {
+      if (!row?.part_number) return;
+      setPhotoRowCacheEntry(row.part_number, row);
+    });
 
     return { success: true, inserted: data?.length || 0 };
   } catch (err: any) {
@@ -1221,6 +1381,8 @@ export const updateFotoLinkSku = async (
       } else {
         console.log('Successfully upserted foto for:', sku);
       }
+
+      setPhotoRowCacheEntry(sku, fotoPayload);
 
       // Update image_url in base_mjm/base_bjw
       if (firstFoto) {
@@ -2005,6 +2167,65 @@ export const fetchSoldItems = async (store: string | null): Promise<SoldItemRow[
     (q) => q,
     false
   );
+};
+
+export interface SoldItemsChunkPayload {
+  chunk: SoldItemRow[];
+  loaded: number;
+  total: number;
+}
+
+// Fetch sold items bertahap agar UI bisa render progresif (chunk per chunk).
+export const fetchSoldItemsProgressive = async (
+  store: string | null,
+  onChunk?: (payload: SoldItemsChunkPayload) => void
+): Promise<SoldItemRow[]> => {
+  const table = store === 'mjm' ? 'barang_keluar_mjm' : (store === 'bjw' ? 'barang_keluar_bjw' : null);
+  if (!table) return [];
+
+  const pageSize = 400;
+  let from = 0;
+  const rows: SoldItemRow[] = [];
+  let totalCount = 0;
+
+  try {
+    const { count } = await supabase
+      .from(table)
+      .select('id', { count: 'exact', head: true });
+    totalCount = Number(count || 0);
+  } catch (error) {
+    console.warn('fetchSoldItemsProgressive: gagal ambil total count, lanjut progressive tanpa count.');
+  }
+
+  while (true) {
+    const { data, error } = await supabase
+      .from(table)
+      .select(SOLD_ITEM_SELECT_COLUMNS)
+      .order('created_at', { ascending: false })
+      .range(from, from + pageSize - 1);
+
+    if (error) {
+      console.error('Fetch Sold Progressive Error:', error);
+      return rows;
+    }
+
+    const page = (data || []) as SoldItemRow[];
+    if (page.length === 0) break;
+
+    rows.push(...page);
+
+    const safeTotal = totalCount > 0 ? Math.max(totalCount, rows.length) : 0;
+    onChunk?.({
+      chunk: page,
+      loaded: rows.length,
+      total: safeTotal
+    });
+
+    if (page.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return rows;
 };
 
 // 4.1 FETCH SALES PAID ITEMS (KHUSUS BJW)

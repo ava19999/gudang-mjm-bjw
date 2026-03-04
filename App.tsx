@@ -81,6 +81,9 @@ const AppContent: React.FC = () => {
 
   const isKingFano = useMemo(() => loginName.trim().toLowerCase() === 'king fano', [loginName]);
 
+  // Helper untuk cache key (PERBAIKAN: Definisi fungsi yang hilang)
+  const getAppCacheKey = (key: string) => `app_cache_${selectedStore || 'unknown'}_${key}`;
+
   // --- EFFECTS ---
   useEffect(() => {
     let cId = localStorage.getItem(CUSTOMER_ID_KEY);
@@ -93,7 +96,24 @@ const AppContent: React.FC = () => {
   }, [isAuthenticated]);
 
   const refreshData = async () => {
-    setLoading(true);
+    // 1. LOAD FROM CACHE (Agar terasa instan saat refresh)
+    if (selectedStore) {
+      try {
+        const cachedItems = localStorage.getItem(getAppCacheKey('items'));
+        const cachedBanner = localStorage.getItem(getAppCacheKey('banner'));
+        const cachedHistory = localStorage.getItem(getAppCacheKey('history'));
+
+        if (cachedItems && items.length === 0) setItems(JSON.parse(cachedItems));
+        if (cachedBanner && !bannerUrl) setBannerUrl(cachedBanner);
+        if (cachedHistory && history.length === 0) setHistory(JSON.parse(cachedHistory));
+      } catch (e) {
+        console.warn("Gagal load cache lokal", e);
+      }
+    }
+
+    // Hanya tampilkan loading spinner jika data benar-benar kosong (belum ada cache)
+    if (items.length === 0) setLoading(true);
+
     try {
         const [inventoryData, bannerItem, historyData] = await Promise.all([
           fetchInventory(selectedStore, {
@@ -104,11 +124,21 @@ const AppContent: React.FC = () => {
           getItemByPartNumber(BANNER_PART_NUMBER, selectedStore),
           fetchHistory()
         ]);
-        setItems(inventoryData.filter(i => i.partNumber !== BANNER_PART_NUMBER));
-        setBannerUrl(bannerItem?.imageUrl || '');
+        
+        const validItems = inventoryData.filter(i => i.partNumber !== BANNER_PART_NUMBER);
+        const validBanner = bannerItem?.imageUrl || '';
+        
+        setItems(validItems);
+        setBannerUrl(validBanner);
         setHistory(historyData);
         setRefreshTrigger(prev => prev + 1);
 
+        // 3. SAVE TO CACHE
+        if (selectedStore) {
+          localStorage.setItem(getAppCacheKey('items'), JSON.stringify(validItems));
+          localStorage.setItem(getAppCacheKey('banner'), validBanner);
+          localStorage.setItem(getAppCacheKey('history'), JSON.stringify(historyData));
+        }
     } catch (e) { console.error("Gagal memuat data:", e); showToast("Gagal sinkronisasi data", 'error'); }
     setLoading(false);
   };

@@ -144,10 +144,13 @@ export const ShopView: React.FC<ShopViewProps> = ({
     return () => clearTimeout(timer);
   }, [searchTerm, partNumberSearch, nameSearch, brandSearch, applicationSearch]);
 
+  // Cache Key Helper
+  const getShopCacheKey = (key: string) => `shop_cache_${selectedStore || 'unknown'}_${key}`;
+
   // PERBAIKAN 3: Load Data Stable
   useEffect(() => {
     const loadData = async () => {
-        setLoading(true);
+        let hasCachedData = false;
         try {
             // PERBAIKAN 4: Ganti 'Semua' jadi 'All' agar filter berjalan dengan baik
             const safeCategory = category === 'Semua' ? 'All' : category; 
@@ -161,6 +164,28 @@ export const ShopView: React.FC<ShopViewProps> = ({
                 brandSearch: debouncedBrand,
                 applicationSearch: debouncedApplication
             };
+
+            // Cek Default View
+            const isDefaultView = page === 1 && !debouncedSearch && safeCategory === 'All' && !debouncedPartNumber && !debouncedName && !debouncedBrand && !debouncedApplication;
+
+            // 1. LOAD CACHE
+            if (isDefaultView && selectedStore) {
+                try {
+                    const cached = localStorage.getItem(getShopCacheKey('items_default'));
+                    if (cached) {
+                        const parsed = JSON.parse(cached);
+                        if (parsed && Array.isArray(parsed.data)) {
+                            setShopItems(parsed.data);
+                            const safeCount = parsed.count || 0;
+                            setTotalPages(safeCount > 0 ? Math.ceil(safeCount / limit) : 1);
+                            hasCachedData = parsed.data.length > 0;
+                        }
+                    }
+                } catch (e) {}
+            }
+
+            // Jika cache ada, tampilkan dulu agar terasa instan.
+            setLoading(!hasCachedData);
             
             console.log('[ShopView] Fetching shop items with params:', {
                 page, 
@@ -169,6 +194,7 @@ export const ShopView: React.FC<ShopViewProps> = ({
                 selectedStore
             });
             
+            // 2. FETCH DATA
             const result = await fetchShopItems(
                 page, 
                 limit, 
@@ -181,6 +207,11 @@ export const ShopView: React.FC<ShopViewProps> = ({
             setShopItems(result.data || []);
             const safeCount = result.count || 0;
             setTotalPages(safeCount > 0 ? Math.ceil(safeCount / limit) : 1);
+
+            // 3. SAVE CACHE
+            if (isDefaultView && selectedStore) {
+                localStorage.setItem(getShopCacheKey('items_default'), JSON.stringify(result));
+            }
             
             console.log('[ShopView] Set shop items:', result.data?.length, 'Total pages:', Math.ceil(safeCount / limit));
         } catch (err) {
