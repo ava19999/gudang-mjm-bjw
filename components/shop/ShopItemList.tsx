@@ -91,6 +91,8 @@ export const ShopItemList: React.FC<ShopItemListProps> = ({
                     src={item.imageUrl} 
                     alt={item.name} 
                     className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110 cursor-zoom-in"
+                    loading="lazy"
+                    decoding="async"
                     referrerPolicy="no-referrer"
                     onClick={(e) => handleImageClick(e, item)} 
                     onError={(e)=>{(e.target as HTMLImageElement).style.display='none'}}
@@ -171,6 +173,8 @@ export const ShopItemList: React.FC<ShopItemListProps> = ({
                     src={item.imageUrl} 
                     alt={item.name} 
                     className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-110 cursor-zoom-in"
+                    loading="lazy"
+                    decoding="async"
                     referrerPolicy="no-referrer"
                     onClick={(e) => handleImageClick(e, item)} 
                     onError={(e)=>{(e.target as HTMLImageElement).style.display='none'}}
