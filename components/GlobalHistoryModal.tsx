@@ -114,7 +114,6 @@ export const GlobalHistoryModal: React.FC<GlobalHistoryModalProps> = ({ type, on
                         className="w-full bg-gray-900 border border-gray-700 rounded-lg pl-9 pr-3 py-2 text-sm text-gray-200 focus:border-blue-500 outline-none" 
                         value={filterCustomer} 
                         onChange={(e) => setFilterCustomer(e.target.value)} 
-                        disabled={loading}
                     />
                 </div>
                 <div className="relative">
@@ -125,7 +124,6 @@ export const GlobalHistoryModal: React.FC<GlobalHistoryModalProps> = ({ type, on
                         className="w-full bg-gray-900 border border-gray-700 rounded-lg pl-9 pr-3 py-2 text-sm text-gray-200 focus:border-blue-500 outline-none" 
                         value={filterPartNumber} 
                         onChange={(e) => setFilterPartNumber(e.target.value)} 
-                        disabled={loading}
                     />
                 </div>
             </div>
