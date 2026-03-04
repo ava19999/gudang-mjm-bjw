@@ -2231,6 +2231,39 @@ export const updateSoldItemKodeToko = async (
   }
 };
 
+// 4.5 UPDATE SOLD ITEM TEMPO
+export const updateSoldItemTempo = async (
+  itemId: string,
+  newTempo: string,
+  store: string | null
+): Promise<{ success: boolean; msg: string }> => {
+  const table = store === 'mjm' ? 'barang_keluar_mjm' : (store === 'bjw' ? 'barang_keluar_bjw' : null);
+  if (!table) return { success: false, msg: 'Toko tidak valid' };
+
+  const normalizedTempo = (newTempo || '').trim().toUpperCase();
+  const allowedTempo = new Set(['CASH', '3 BLN', '2 BLN', '1 BLN', 'NADIR']);
+  if (!allowedTempo.has(normalizedTempo)) {
+    return { success: false, msg: 'Tempo tidak valid' };
+  }
+
+  try {
+    const { error } = await supabase
+      .from(table)
+      .update({ tempo: normalizedTempo })
+      .eq('id', itemId);
+
+    if (error) {
+      console.error('Update Sold Item Tempo Error:', error);
+      return { success: false, msg: 'Gagal update tempo: ' + error.message };
+    }
+
+    return { success: true, msg: 'Tempo berhasil diupdate' };
+  } catch (err: any) {
+    console.error('Update Sold Item Tempo Exception:', err);
+    return { success: false, msg: 'Error: ' + (err.message || 'Unknown error') };
+  }
+};
+
 // 5. FETCH RETUR
 export const fetchReturItems = async (store: string | null): Promise<ReturRow[]> => {
   const table = store === 'mjm' ? 'retur_mjm' : (store === 'bjw' ? 'retur_bjw' : null);

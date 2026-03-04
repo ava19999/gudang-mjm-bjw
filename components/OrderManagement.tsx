@@ -6,7 +6,7 @@ import { useStore } from '../context/StoreContext';
 import { 
   fetchOfflineOrders, fetchSoldItems, fetchReturItems,
   processOfflineOrderItem, updateOfflineOrder, fetchInventory, createReturFromSold, updateReturStatus,
-  fetchDistinctEcommerce, deleteBarangLog, updateSoldItemPrice, updateSoldItemDate, updateSoldItemQty, updateSoldItemKodeToko,
+  fetchDistinctEcommerce, deleteBarangLog, updateSoldItemPrice, updateSoldItemDate, updateSoldItemQty, updateSoldItemKodeToko, updateSoldItemTempo,
   fetchSalesOrders, processSalesOrderItem, fetchSalesPaidItems
 } from '../services/supabaseService';
 import { OfflineOrderRow, SoldItemRow, ReturRow, CartItem } from '../types';
@@ -112,6 +112,7 @@ const escapeHtml = (value: string): string =>
     .replace(/'/g, '&#39;');
 
 const SOLD_KODE_TOKO_OPTIONS = ['MJM', 'BJW', 'LARIS', 'PRAKTIS PART'] as const;
+const SOLD_TEMPO_OPTIONS = ['CASH', '3 BLN', '2 BLN', '1 BLN', 'NADIR'] as const;
 
 const normalizeSoldKodeTokoInput = (value: string): string | null => {
   const normalized = (value || '').trim().toUpperCase().replace(/\s+/g, ' ');
@@ -432,6 +433,7 @@ export const OrderManagement: React.FC = () => {
   const [savingSoldQty, setSavingSoldQty] = useState(false);
   const [editingSoldDateId, setEditingSoldDateId] = useState<string | null>(null);
   const [editSoldDate, setEditSoldDate] = useState<string>('');
+  const [updatingTempoGroupId, setUpdatingTempoGroupId] = useState<string | null>(null);
 
   // Receipt Modal for Offline Sold Orders
   const [isReceiptModalOpen, setIsReceiptModalOpen] = useState(false);
@@ -693,9 +695,17 @@ export const OrderManagement: React.FC = () => {
       const safeCustomer = (item.customer || 'Tanpa Nama').trim();
       const safeResi = (item.resi || '-').trim();
       const safeEcommerce = (item.ecommerce || 'OFFLINE').trim();
+      const safeTempo = (item.tempo || 'CASH').trim();
       const safeToko = (item.kode_toko || '-').trim().toUpperCase();
-      // Group by resi jika ada, kalau tidak by customer + date
-      const key = safeResi !== '-' ? `${safeResi}` : `${safeCustomer}-${item.created_at?.slice(0, 10)}`;
+      const safeCreatedAt = (item.created_at || '').trim();
+      const dateKey = safeCreatedAt ? safeCreatedAt.slice(0, 10) : 'NO_DATE';
+
+      // Group by resi jika ada.
+      // Untuk OFFLINE tanpa resi, group berdasarkan customer + tempo + tanggal (harian),
+      // agar tempo berbeda tidak tercampur, tapi transaksi dengan tempo sama tetap tergabung.
+      const key = safeResi !== '-'
+        ? `${safeResi}`
+        : `${safeCustomer.toUpperCase()}__${safeEcommerce.toUpperCase()}__${safeTempo.toUpperCase()}__${dateKey}`;
       
       if (!groups[key]) {
         groups[key] = {
@@ -703,9 +713,9 @@ export const OrderManagement: React.FC = () => {
           customer: safeCustomer, 
           resi: safeResi, 
           ecommerce: safeEcommerce,
-          tempo: item.tempo || 'CASH',
+          tempo: safeTempo || 'CASH',
           toko: safeToko,
-          date: item.created_at, 
+          date: safeCreatedAt || new Date(0).toISOString(), 
           items: [], 
           totalQty: 0,
           totalAmount: 0
@@ -1169,6 +1179,32 @@ export const OrderManagement: React.FC = () => {
     }
 
     showToast(`Kode toko transaksi diubah ke ${nextKodeToko}`);
+    loadData();
+  };
+
+  const handleEditSoldGroupTempo = async (group: SoldGroup, nextTempo: string) => {
+    const normalizedTempo = (nextTempo || '').trim().toUpperCase();
+    if (!SOLD_TEMPO_OPTIONS.includes(normalizedTempo as typeof SOLD_TEMPO_OPTIONS[number])) {
+      showToast(`Tempo tidak valid. Pilihan: ${SOLD_TEMPO_OPTIONS.join(', ')}`, 'error');
+      return;
+    }
+
+    const currentTempo = (group.tempo || 'CASH').trim().toUpperCase();
+    if (normalizedTempo === currentTempo) return;
+
+    setUpdatingTempoGroupId(group.id);
+    const results = await Promise.all(
+      group.items.map((item) => updateSoldItemTempo(item.id, normalizedTempo, selectedStore))
+    );
+    setUpdatingTempoGroupId(null);
+
+    const failed = results.filter((result) => !result.success);
+    if (failed.length > 0) {
+      showToast(failed[0].msg || 'Gagal update tempo', 'error');
+      return;
+    }
+
+    showToast(`Tempo transaksi diubah ke ${normalizedTempo}`);
     loadData();
   };
 
@@ -2571,12 +2607,34 @@ export const OrderManagement: React.FC = () => {
                           <h3 className="font-bold text-lg text-white leading-tight">
                             {group.customer}
                           </h3>
-                          {group.ecommerce === 'OFFLINE' && group.tempo && (
-                            <span className={`text-xs font-medium px-2 py-0.5 rounded ${
-                              group.tempo === 'CASH' ? 'bg-green-900/40 text-green-400' : 'bg-orange-900/40 text-orange-400'
-                            }`}>
-                              {group.tempo}
-                            </span>
+                          {group.ecommerce === 'OFFLINE' && (
+                            <div className="mt-1 inline-flex items-center gap-1.5">
+                              <select
+                                value={(group.tempo || 'CASH').toUpperCase()}
+                                onClick={(e) => e.stopPropagation()}
+                                onMouseDown={(e) => e.stopPropagation()}
+                                onChange={(e) => {
+                                  e.stopPropagation();
+                                  handleEditSoldGroupTempo(group, e.target.value);
+                                }}
+                                disabled={updatingTempoGroupId === group.id}
+                                className={`text-xs font-semibold px-2 py-0.5 rounded border outline-none transition-colors cursor-pointer ${
+                                  (group.tempo || 'CASH').toUpperCase() === 'CASH'
+                                    ? 'bg-green-900/40 text-green-300 border-green-800/60'
+                                    : 'bg-orange-900/40 text-orange-300 border-orange-800/60'
+                                } ${updatingTempoGroupId === group.id ? 'opacity-60 cursor-wait' : 'hover:brightness-110'}`}
+                                title="Ubah tempo transaksi ini"
+                              >
+                                {SOLD_TEMPO_OPTIONS.map((tempoOption) => (
+                                  <option key={tempoOption} value={tempoOption} className="bg-gray-800 text-white">
+                                    {tempoOption}
+                                  </option>
+                                ))}
+                              </select>
+                              {updatingTempoGroupId === group.id && (
+                                <RefreshCw size={12} className="text-gray-400 animate-spin" />
+                              )}
+                            </div>
                           )}
                         </div>
                       </div>
