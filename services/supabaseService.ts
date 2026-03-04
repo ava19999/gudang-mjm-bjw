@@ -68,12 +68,6 @@ const photoRowCache = new Map<string, any | null>();
 const PHOTO_ROW_CACHE_STORAGE_KEY = 'mjm_bjw_photo_row_cache_v1';
 const PHOTO_ROW_CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 jam
 const PHOTO_ROW_CACHE_MAX_ENTRIES = 1200;
-const SELL_PRICE_CACHE_TTL_MS = 5 * 60 * 1000; // 5 menit
-const SELL_PRICE_MISS_TTL_MS = 60 * 1000; // 1 menit
-const COST_PRICE_CACHE_TTL_MS = 5 * 60 * 1000; // 5 menit
-const COST_PRICE_MISS_TTL_MS = 60 * 1000; // 1 menit
-const sellPriceCache = new Map<string, { value: number; expiresAt: number }>();
-const costPriceCache = new Map<string, { value: number; expiresAt: number }>();
 
 interface PersistedPhotoCacheEntry {
   value: any | null;
@@ -168,65 +162,6 @@ const schedulePersistedPhotoCacheWrite = () => {
     persistPhotoCacheTimer = null;
     writePersistedPhotoCache();
   }, 250);
-};
-
-const buildStorePartCacheKey = (store: string | null | undefined, partNumber: string): string => {
-  const safeStore = String(store || 'all').trim().toLowerCase();
-  const safePart = normalizePartForLookup(partNumber);
-  return `${safeStore}::${safePart}`;
-};
-
-const getNumberCacheValue = (
-  cache: Map<string, { value: number; expiresAt: number }>,
-  key: string
-): number | undefined => {
-  const entry = cache.get(key);
-  if (!entry) return undefined;
-  if (entry.expiresAt <= Date.now()) {
-    cache.delete(key);
-    return undefined;
-  }
-  return entry.value;
-};
-
-const setNumberCacheValue = (
-  cache: Map<string, { value: number; expiresAt: number }>,
-  key: string,
-  value: number,
-  ttlMs: number
-) => {
-  cache.set(key, {
-    value,
-    expiresAt: Date.now() + ttlMs
-  });
-};
-
-const setPriceMapEntry = (
-  target: Record<string, PriceData>,
-  partNumber: string,
-  harga: number
-) => {
-  const trimmed = String(partNumber || '').trim();
-  if (!trimmed || !Number.isFinite(harga) || harga <= 0) return;
-  target[trimmed] = { part_number: trimmed, harga };
-  const normalized = normalizePartForLookup(trimmed);
-  if (normalized && normalized !== trimmed) {
-    target[normalized] = { part_number: normalized, harga };
-  }
-};
-
-const setCostPriceMapEntry = (
-  target: Record<string, CostPriceData>,
-  partNumber: string,
-  hargaSatuan: number
-) => {
-  const trimmed = String(partNumber || '').trim();
-  if (!trimmed || !Number.isFinite(hargaSatuan) || hargaSatuan <= 0) return;
-  target[trimmed] = { part_number: trimmed, harga_satuan: hargaSatuan };
-  const normalized = normalizePartForLookup(trimmed);
-  if (normalized && normalized !== trimmed) {
-    target[normalized] = { part_number: normalized, harga_satuan: hargaSatuan };
-  }
 };
 
 const hasPhotoRowCacheEntry = (partNumber: string | null | undefined): boolean => {
@@ -897,168 +832,100 @@ interface CostPriceData { part_number: string; harga_satuan: number; }
 // Fetch harga modal terakhir dari barang_masuk
 const fetchLatestCostPricesForItems = async (items: any[], store?: string | null): Promise<Record<string, CostPriceData>> => {
   if (!items || items.length === 0) return {};
-  const partNumbersToCheck = [...new Set(
-    items
-      .map(i => {
-        const pn = i.part_number || i.partNumber;
-        return typeof pn === 'string' ? pn.trim() : '';
-      })
-      .filter(Boolean)
-  )];
+  const partNumbersToCheck = items.map(i => {
+       const pn = i.part_number || i.partNumber;
+       return typeof pn === 'string' ? pn.trim() : pn;
+  }).filter(Boolean);
   if (partNumbersToCheck.length === 0) return {};
-
-  const costPriceMap: Record<string, CostPriceData> = {};
-  const missingPartNumbers: string[] = [];
-
-  partNumbersToCheck.forEach((pn) => {
-    const cacheKey = buildStorePartCacheKey(store, pn);
-    const cached = getNumberCacheValue(costPriceCache, cacheKey);
-    if (cached !== undefined) {
-      setCostPriceMapEntry(costPriceMap, pn, cached);
-      return;
-    }
-    missingPartNumbers.push(pn);
-  });
-
-  if (missingPartNumbers.length === 0) return costPriceMap;
 
   const logTable = getLogTableName('barang_masuk', store);
   
   try {
-    // Ambil semua barang masuk untuk part numbers yang belum ada di cache.
+    // Ambil semua barang masuk untuk part numbers ini, order by created_at desc
     const { data, error } = await supabase
       .from(logTable)
       .select('part_number, harga_satuan, created_at')
-      .in('part_number', missingPartNumbers)
+      .in('part_number', partNumbersToCheck)
       .not('harga_satuan', 'is', null)
       .gt('harga_satuan', 0)
       .order('created_at', { ascending: false });
     
-    if (error) return costPriceMap;
-
-    const resolvedNorm = new Set<string>();
+    if (error) return {};
+    
+    // Ambil harga satuan terakhir untuk setiap part number
+    const costPriceMap: Record<string, CostPriceData> = {};
     (data || []).forEach((row: any) => {
       const pk = (row.part_number || '').trim();
-      if (!pk) return;
-      const norm = normalizePartForLookup(pk);
-      if (resolvedNorm.has(norm)) return;
-
-      const harga = Number(row.harga_satuan || 0);
-      resolvedNorm.add(norm);
-      if (harga > 0) {
-        setNumberCacheValue(costPriceCache, buildStorePartCacheKey(store, pk), harga, COST_PRICE_CACHE_TTL_MS);
-        setCostPriceMapEntry(costPriceMap, pk, harga);
+      if (pk && !costPriceMap[pk]) {
+        // Hanya ambil yang pertama (terbaru) karena sudah diorder desc
+        costPriceMap[pk] = { part_number: pk, harga_satuan: Number(row.harga_satuan || 0) };
       }
     });
-
-    missingPartNumbers.forEach((pn) => {
-      const norm = normalizePartForLookup(pn);
-      if (!resolvedNorm.has(norm)) {
-        setNumberCacheValue(costPriceCache, buildStorePartCacheKey(store, pn), 0, COST_PRICE_MISS_TTL_MS);
-      }
-    });
-
     return costPriceMap;
-  } catch (e) { return costPriceMap; }
+  } catch (e) { return {}; }
 };
 
 // Fetch harga jual dari list_harga_jual, fallback ke barang_keluar jika 0
 const fetchLatestPricesForItems = async (items: any[], store?: string | null): Promise<Record<string, PriceData>> => {
   if (!items || items.length === 0) return {};
-  const partNumbersToCheck = [...new Set(
-    items
-      .map(i => {
-        const pn = i.part_number || i.partNumber;
-        return typeof pn === 'string' ? pn.trim() : '';
-      })
-      .filter(Boolean)
-  )];
+  const partNumbersToCheck = items.map(i => {
+       const pn = i.part_number || i.partNumber;
+       return typeof pn === 'string' ? pn.trim() : pn;
+  }).filter(Boolean);
   if (partNumbersToCheck.length === 0) return {};
 
-  const priceMap: Record<string, PriceData> = {};
-  const missingPartNumbers: string[] = [];
-  const originalByNorm = new Map<string, string>();
-
-  partNumbersToCheck.forEach((pn) => {
-    const norm = normalizePartForLookup(pn);
-    if (!originalByNorm.has(norm)) originalByNorm.set(norm, pn);
-
-    const cacheKey = buildStorePartCacheKey(store, pn);
-    const cached = getNumberCacheValue(sellPriceCache, cacheKey);
-    if (cached !== undefined) {
-      if (cached > 0) setPriceMapEntry(priceMap, pn, cached);
-      return;
-    }
-    missingPartNumbers.push(pn);
-  });
-
-  if (missingPartNumbers.length === 0) return priceMap;
-
   try {
-    // 1. Ambil harga dari list_harga_jual untuk part number yang belum ada cache.
-    const { data, error } = await supabase
-      .from('list_harga_jual')
-      .select('part_number, harga')
-      .in('part_number', missingPartNumbers);
-    if (error) return priceMap;
-
-    const unresolvedNorms = new Set(missingPartNumbers.map((pn) => normalizePartForLookup(pn)));
+    // 1. Ambil harga dari list_harga_jual (pusat)
+    const { data, error } = await supabase.from('list_harga_jual').select('part_number, harga').in('part_number', partNumbersToCheck);
+    if (error) return {};
+    
+    const priceMap: Record<string, PriceData> = {};
+    const zeroOrMissingParts: string[] = [];
     
     (data || []).forEach((row: any) => {
       if (row.part_number) {
         const pk = row.part_number.trim();
         const harga = Number(row.harga || 0);
-        const norm = normalizePartForLookup(pk);
-
-        if (harga > 0) {
-          setNumberCacheValue(sellPriceCache, buildStorePartCacheKey(store, pk), harga, SELL_PRICE_CACHE_TTL_MS);
-          setPriceMapEntry(priceMap, pk, harga);
-          unresolvedNorms.delete(norm);
-        } else {
-          setNumberCacheValue(sellPriceCache, buildStorePartCacheKey(store, pk), 0, SELL_PRICE_MISS_TTL_MS);
-          unresolvedNorms.add(norm);
-        }
+        priceMap[pk] = { part_number: pk, harga };
+        if (harga === 0) zeroOrMissingParts.push(pk);
       }
     });
-
-    // 2. Jika harga masih 0 / belum ada, cari dari barang_keluar (harga terakhir laku)
-    if (unresolvedNorms.size > 0) {
-      const unresolvedParts = Array.from(unresolvedNorms)
-        .map((norm) => originalByNorm.get(norm) || norm)
-        .filter(Boolean);
-
+    
+    // Cari part numbers yang tidak ada di list_harga_jual
+    partNumbersToCheck.forEach(pk => {
+      if (!priceMap[pk]) zeroOrMissingParts.push(pk);
+    });
+    
+    // 2. Jika ada harga 0 atau tidak ada, cari dari barang_keluar (harga terakhir laku)
+    if (zeroOrMissingParts.length > 0) {
       const outTable = getLogTableName('barang_keluar', store);
       const { data: outData } = await supabase
         .from(outTable)
         .select('part_number, harga_satuan, created_at')
-        .in('part_number', unresolvedParts)
+        .in('part_number', zeroOrMissingParts)
         .not('harga_satuan', 'is', null)
         .gt('harga_satuan', 0)
         .order('created_at', { ascending: false });
       
-      const outPriceMapByNorm: Record<string, number> = {};
+      // Map harga terakhir dari barang_keluar
+      const outPriceMap: Record<string, number> = {};
       (outData || []).forEach((row: any) => {
         const pk = (row.part_number || '').trim();
-        const norm = normalizePartForLookup(pk);
-        if (pk && !outPriceMapByNorm[norm]) {
-          outPriceMapByNorm[norm] = Number(row.harga_satuan || 0);
+        if (pk && !outPriceMap[pk]) {
+          outPriceMap[pk] = Number(row.harga_satuan || 0);
         }
       });
-
-      unresolvedNorms.forEach((norm) => {
-        const fallbackHarga = Number(outPriceMapByNorm[norm] || 0);
-        const originalPn = originalByNorm.get(norm) || norm;
-        if (fallbackHarga > 0) {
-          setNumberCacheValue(sellPriceCache, buildStorePartCacheKey(store, originalPn), fallbackHarga, SELL_PRICE_CACHE_TTL_MS);
-          setPriceMapEntry(priceMap, originalPn, fallbackHarga);
-        } else {
-          setNumberCacheValue(sellPriceCache, buildStorePartCacheKey(store, originalPn), 0, SELL_PRICE_MISS_TTL_MS);
+      
+      // Update priceMap dengan harga dari barang_keluar jika harga = 0 atau tidak ada
+      zeroOrMissingParts.forEach(pk => {
+        if (outPriceMap[pk] && outPriceMap[pk] > 0) {
+          priceMap[pk] = { part_number: pk, harga: outPriceMap[pk] };
         }
       });
     }
     
     return priceMap;
-  } catch (e) { return priceMap; }
+  } catch (e) { return {}; }
 };
 
 const fetchPhotosForItems = async (items: any[]) => {
