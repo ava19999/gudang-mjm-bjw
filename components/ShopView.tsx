@@ -28,7 +28,6 @@ interface ShopViewProps {
 }
 
 export const ShopView: React.FC<ShopViewProps> = ({ 
-    items,
     cart = [], 
     isAdmin,
     isKingFano, 
@@ -217,20 +216,14 @@ export const ShopView: React.FC<ShopViewProps> = ({
             console.log('[ShopView] Set shop items:', result.data?.length, 'Total pages:', Math.ceil(safeCount / limit));
         } catch (err) {
             console.error("[ShopView] Gagal load shop items:", err);
-            // Fallback: tetap tampilkan data dari App state agar Beranda tidak kosong.
-            if (Array.isArray(items) && items.length > 0) {
-                setShopItems(items);
-                setTotalPages(Math.max(1, Math.ceil(items.length / limit)));
-            } else {
-                setShopItems([]);
-            }
+            setShopItems([]);
         } finally {
             setLoading(false);
         }
     };
 
     loadData();
-  }, [page, debouncedSearch, category, debouncedPartNumber, debouncedName, debouncedBrand, debouncedApplication, selectedStore, items]); // Hanya jalan jika ini berubah
+  }, [page, debouncedSearch, category, debouncedPartNumber, debouncedName, debouncedBrand, debouncedApplication, selectedStore]); // Hanya jalan jika ini berubah
 
   // --- Banner Upload Handlers ---
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => { 
