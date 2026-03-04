@@ -91,6 +91,72 @@ const getResiItemsTable = (store: string | null) =>
 const getStockTable = (store: string | null) =>
   store === 'mjm' ? 'base_mjm' : 'base_bjw';
 
+const fetchAllRowsPaged = async <T,>(
+  table: string,
+  selectColumns: string,
+  buildQuery: (query: any) => any,
+  options?: { orderBy?: string; ascending?: boolean; pageSize?: number }
+): Promise<T[]> => {
+  const pageSize = options?.pageSize ?? 1000;
+  const rows: T[] = [];
+  let from = 0;
+
+  while (true) {
+    let query = supabase.from(table).select(selectColumns);
+    query = buildQuery(query);
+    if (options?.orderBy) {
+      query = query.order(options.orderBy, { ascending: options.ascending ?? true });
+    }
+
+    const { data, error } = await query.range(from, from + pageSize - 1);
+    if (error) {
+      console.error(`Error fetching paged rows from ${table}:`, error);
+      return rows;
+    }
+
+    const page = (data || []) as T[];
+    rows.push(...page);
+    if (page.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return rows;
+};
+
+const splitIntoChunks = <T,>(items: T[], chunkSize: number): T[][] => {
+  if (items.length === 0) return [];
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += chunkSize) {
+    chunks.push(items.slice(i, i + chunkSize));
+  }
+  return chunks;
+};
+
+const fetchRowsByInChunksPaged = async <T,>(
+  table: string,
+  selectColumns: string,
+  inColumn: string,
+  values: Array<string | number>,
+  options?: { orderBy?: string; ascending?: boolean; chunkSize?: number }
+): Promise<T[]> => {
+  const chunkSize = options?.chunkSize ?? 200;
+  const uniqueValues = [...new Set(values)];
+  const chunks = splitIntoChunks(uniqueValues, chunkSize);
+  const rows: T[] = [];
+
+  for (const chunk of chunks) {
+    const chunkRows = await fetchAllRowsPaged<T>(
+      table,
+      selectColumns,
+      (q) => q.in(inColumn, chunk),
+      { orderBy: options?.orderBy, ascending: options?.ascending }
+    );
+    rows.push(...chunkRows);
+  }
+
+  return rows;
+};
+
 // ============================================================================
 // 1. FETCH KILAT FROM SCAN_RESI (Read existing KILAT entries)
 // ============================================================================
@@ -110,46 +176,62 @@ export const fetchKilatFromScanResi = async (
   try {
     const scanTable = getScanResiTable(store);
     const itemsTable = getResiItemsTable(store);
-    
-    // Query scan_resi untuk mendapat data KILAT
-    let query = supabase
-      .from(scanTable)
-      .select(`
-        id,
-        resi,
-        no_pesanan,
-        tanggal,
-        ecommerce,
-        sub_toko,
-        status,
-        customer
-      `)
-      .ilike('ecommerce', '%KILAT%')
-      .order('tanggal', { ascending: false });
-    
-    if (!options?.includeCompleted) {
-      query = query.neq('status', 'completed');
-    }
-    
+    const scanSelect = `
+      id,
+      resi,
+      no_pesanan,
+      tanggal,
+      ecommerce,
+      sub_toko,
+      status,
+      customer
+    `;
+
+    let scanData: any[] = [];
+
     if (options?.limit) {
-      query = query.limit(options.limit);
-    }
-    
-    const { data: scanData, error: scanError } = await query;
-    
-    if (scanError) {
-      console.error('Error fetching KILAT from scan_resi:', scanError);
-      return [];
+      let limitedQuery = supabase
+        .from(scanTable)
+        .select(scanSelect)
+        .ilike('ecommerce', '%KILAT%')
+        .order('tanggal', { ascending: false });
+
+      if (!options?.includeCompleted) {
+        limitedQuery = limitedQuery.neq('status', 'completed');
+      }
+
+      const { data, error } = await limitedQuery.limit(options.limit);
+      if (error) {
+        console.error('Error fetching KILAT from scan_resi:', error);
+        return [];
+      }
+      scanData = data || [];
+    } else {
+      scanData = await fetchAllRowsPaged<any>(
+        scanTable,
+        scanSelect,
+        (q) => {
+          let filtered = q.ilike('ecommerce', '%KILAT%');
+          if (!options?.includeCompleted) {
+            filtered = filtered.neq('status', 'completed');
+          }
+          return filtered;
+        },
+        { orderBy: 'tanggal', ascending: false }
+      );
     }
     
     if (!scanData || scanData.length === 0) return [];
     
     // Ambil detail items dari resi_items
     const resiIds = scanData.map((d: any) => d.id);
-    const { data: itemsData, error: itemsError } = await supabase
-      .from(itemsTable)
-      .select('*')
-      .in('resi_id', resiIds);
+    const itemsData = await fetchRowsByInChunksPaged<any>(
+      itemsTable,
+      '*',
+      'resi_id',
+      resiIds,
+      { orderBy: 'id', ascending: true, chunkSize: 200 }
+    );
     
     // Map items ke scan_resi
     const itemsMap = new Map<string, any[]>();
@@ -215,26 +297,38 @@ export const fetchKilatPrestockPending = async (
 ): Promise<KilatPrestock[]> => {
   try {
     const table = getKilatPrestockTable(store);
-    
-    let query = supabase
-      .from(table)
-      .select('*')
-      .in('status', ['MENUNGGU_TERJUAL', 'SEBAGIAN_TERJUAL'])
-      .order('tanggal_kirim', { ascending: true }); // FIFO
-    
-    if (options?.partNumber) {
-      query = query.eq('part_number', options.partNumber);
-    }
-    
+    let data: any[] = [];
+
     if (options?.limit) {
-      query = query.limit(options.limit);
-    }
-    
-    const { data, error } = await query;
-    
-    if (error) {
-      console.error('Error fetching KILAT prestock:', error);
-      return [];
+      let limitedQuery = supabase
+        .from(table)
+        .select('*')
+        .in('status', ['MENUNGGU_TERJUAL', 'SEBAGIAN_TERJUAL'])
+        .order('tanggal_kirim', { ascending: true });
+
+      if (options?.partNumber) {
+        limitedQuery = limitedQuery.eq('part_number', options.partNumber);
+      }
+
+      const { data: limitedData, error } = await limitedQuery.limit(options.limit);
+      if (error) {
+        console.error('Error fetching KILAT prestock:', error);
+        return [];
+      }
+      data = limitedData || [];
+    } else {
+      data = await fetchAllRowsPaged<any>(
+        table,
+        '*',
+        (q) => {
+          let filtered = q.in('status', ['MENUNGGU_TERJUAL', 'SEBAGIAN_TERJUAL']);
+          if (options?.partNumber) {
+            filtered = filtered.eq('part_number', options.partNumber);
+          }
+          return filtered;
+        },
+        { orderBy: 'tanggal_kirim', ascending: true }
+      );
     }
     
     // Calculate qty_sisa dan aging_days
@@ -264,33 +358,51 @@ export const fetchAllKilatPrestock = async (
 ): Promise<KilatPrestock[]> => {
   try {
     const table = getKilatPrestockTable(store);
-    
-    let query = supabase
-      .from(table)
-      .select('*')
-      .order('tanggal_kirim', { ascending: false });
-    
-    if (options?.status) {
-      query = query.eq('status', options.status);
-    }
-    
-    if (options?.dateFrom) {
-      query = query.gte('tanggal_kirim', options.dateFrom);
-    }
-    
-    if (options?.dateTo) {
-      query = query.lte('tanggal_kirim', options.dateTo);
-    }
-    
+    let data: any[] = [];
+
     if (options?.limit) {
-      query = query.limit(options.limit);
-    }
-    
-    const { data, error } = await query;
-    
-    if (error) {
-      console.error('Error fetching all KILAT prestock:', error);
-      return [];
+      let limitedQuery = supabase
+        .from(table)
+        .select('*')
+        .order('tanggal_kirim', { ascending: false });
+
+      if (options?.status) {
+        limitedQuery = limitedQuery.eq('status', options.status);
+      }
+
+      if (options?.dateFrom) {
+        limitedQuery = limitedQuery.gte('tanggal_kirim', options.dateFrom);
+      }
+
+      if (options?.dateTo) {
+        limitedQuery = limitedQuery.lte('tanggal_kirim', options.dateTo);
+      }
+
+      const { data: limitedData, error } = await limitedQuery.limit(options.limit);
+      if (error) {
+        console.error('Error fetching all KILAT prestock:', error);
+        return [];
+      }
+      data = limitedData || [];
+    } else {
+      data = await fetchAllRowsPaged<any>(
+        table,
+        '*',
+        (q) => {
+          let filtered = q;
+          if (options?.status) {
+            filtered = filtered.eq('status', options.status);
+          }
+          if (options?.dateFrom) {
+            filtered = filtered.gte('tanggal_kirim', options.dateFrom);
+          }
+          if (options?.dateTo) {
+            filtered = filtered.lte('tanggal_kirim', options.dateTo);
+          }
+          return filtered;
+        },
+        { orderBy: 'tanggal_kirim', ascending: false }
+      );
     }
     
     let result = (data || []).map((item: any) => ({
@@ -638,35 +750,51 @@ export const fetchKilatPenjualan = async (
 ): Promise<KilatPenjualan[]> => {
   try {
     const table = getKilatPenjualanTable(store);
-    
-    let query = supabase
-      .from(table)
-      .select('*')
-      .order('tanggal_jual', { ascending: false });
-    
-    if (options?.kilat_id) {
-      query = query.eq('kilat_id', options.kilat_id);
-    }
-    
-    if (options?.dateFrom) {
-      query = query.gte('tanggal_jual', options.dateFrom);
-    }
-    
-    if (options?.dateTo) {
-      query = query.lte('tanggal_jual', options.dateTo);
-    }
-    
+    let data: any[] = [];
+
     if (options?.limit) {
-      query = query.limit(options.limit);
+      let limitedQuery = supabase
+        .from(table)
+        .select('*')
+        .order('tanggal_jual', { ascending: false });
+
+      if (options?.kilat_id) {
+        limitedQuery = limitedQuery.eq('kilat_id', options.kilat_id);
+      }
+      if (options?.dateFrom) {
+        limitedQuery = limitedQuery.gte('tanggal_jual', options.dateFrom);
+      }
+      if (options?.dateTo) {
+        limitedQuery = limitedQuery.lte('tanggal_jual', options.dateTo);
+      }
+
+      const { data: limitedData, error } = await limitedQuery.limit(options.limit);
+      if (error) {
+        console.error('Error fetching KILAT penjualan:', error);
+        return [];
+      }
+      data = limitedData || [];
+    } else {
+      data = await fetchAllRowsPaged<any>(
+        table,
+        '*',
+        (q) => {
+          let filtered = q;
+          if (options?.kilat_id) {
+            filtered = filtered.eq('kilat_id', options.kilat_id);
+          }
+          if (options?.dateFrom) {
+            filtered = filtered.gte('tanggal_jual', options.dateFrom);
+          }
+          if (options?.dateTo) {
+            filtered = filtered.lte('tanggal_jual', options.dateTo);
+          }
+          return filtered;
+        },
+        { orderBy: 'tanggal_jual', ascending: false }
+      );
     }
-    
-    const { data, error } = await query;
-    
-    if (error) {
-      console.error('Error fetching KILAT penjualan:', error);
-      return [];
-    }
-    
+
     return data || [];
   } catch (err) {
     console.error('fetchKilatPenjualan exception:', err);
@@ -777,10 +905,13 @@ export const getKilatStats = async (
       .select('*', { count: 'exact', head: true })
       .eq('status', 'HABIS_TERJUAL');
     
-    // Sum qty
-    const { data: qtyData } = await supabase
-      .from(table)
-      .select('qty_kirim, qty_terjual, tanggal_kirim, status');
+    // Sum qty (paged to avoid default 1000 row cap)
+    const qtyData = await fetchAllRowsPaged<any>(
+      table,
+      'qty_kirim, qty_terjual, tanggal_kirim, status',
+      (q) => q,
+      { orderBy: 'tanggal_kirim', ascending: true }
+    );
     
     let totalQtyPending = 0;
     let totalQtyTerjual = 0;

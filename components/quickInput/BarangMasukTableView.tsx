@@ -37,6 +37,35 @@ const extractPhotoUrls = (fotoRow: any): string[] => {
     return urls;
 };
 
+const fetchAllRowsPaged = async <T,>(
+    table: string,
+    selectColumns: string,
+    buildQuery: (query: any) => any,
+    options?: { orderBy?: string; ascending?: boolean; pageSize?: number }
+): Promise<T[]> => {
+    const pageSize = options?.pageSize ?? 1000;
+    const rows: T[] = [];
+    let from = 0;
+
+    while (true) {
+        let query = supabase.from(table).select(selectColumns);
+        query = buildQuery(query);
+        if (options?.orderBy) {
+            query = query.order(options.orderBy, { ascending: options.ascending ?? true });
+        }
+
+        const { data, error } = await query.range(from, from + pageSize - 1);
+        if (error) throw error;
+
+        const page = (data || []) as T[];
+        rows.push(...page);
+        if (page.length < pageSize) break;
+        from += pageSize;
+    }
+
+    return rows;
+};
+
 export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger, onRefresh }) => {
     const { selectedStore } = useStore();
     const [data, setData] = useState<any[]>([]);
@@ -156,15 +185,17 @@ export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger, onRefres
 
         try {
             const tableName = selectedStore === 'mjm' ? 'base_mjm' : 'base_bjw';
-            const { data: parts, error } = await supabase
-                .from(tableName)
-                .select('part_number, name, quantity')
-                .not('part_number', 'is', null)
-                .not('part_number', 'eq', '')
-                .order('part_number', { ascending: true })
-                .limit(5000);
-            
-            if (!error && parts) {
+            const parts = await fetchAllRowsPaged<{ part_number: string; name: string; quantity: number }>(
+                tableName,
+                'part_number, name, quantity',
+                (query) =>
+                    query
+                        .not('part_number', 'is', null)
+                        .not('part_number', 'eq', ''),
+                { orderBy: 'part_number', ascending: true }
+            );
+
+            if (parts) {
                 setPartOptions(parts
                     .filter(p => p.part_number !== 'SYSTEM-BANNER-PROMO')
                     .map(p => ({

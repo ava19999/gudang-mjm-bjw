@@ -66,6 +66,63 @@ const isCashTempo = (tempo?: string): boolean => {
   return normalizeTempoLabel(tempo) === 'CASH';
 };
 
+const fetchAllRowsPaged = async <T,>(
+  table: string,
+  selectColumns: string,
+  buildQuery: (query: any) => any,
+  options?: { orderBy?: string; ascending?: boolean; pageSize?: number }
+): Promise<T[]> => {
+  const pageSize = options?.pageSize ?? 1000;
+  const rows: T[] = [];
+  let from = 0;
+
+  while (true) {
+    let query = supabase.from(table).select(selectColumns);
+    query = buildQuery(query);
+    if (options?.orderBy) {
+      query = query.order(options.orderBy, { ascending: options.ascending ?? true });
+    }
+
+    const { data, error } = await query.range(from, from + pageSize - 1);
+    if (error) {
+      console.error(`Error fetching paged rows from ${table}:`, error);
+      return rows;
+    }
+
+    const page = (data || []) as T[];
+    rows.push(...page);
+    if (page.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return rows;
+};
+
+const splitIntoChunks = <T,>(items: T[], chunkSize: number): T[][] => {
+  if (items.length === 0) return [];
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += chunkSize) {
+    chunks.push(items.slice(i, i + chunkSize));
+  }
+  return chunks;
+};
+
+const updateTempoForIds = async (
+  table: string,
+  ids: Array<number | string>,
+  tempoValue: string
+): Promise<void> => {
+  const chunks = splitIntoChunks(ids, 500);
+  for (const chunk of chunks) {
+    const { error } = await supabase
+      .from(table)
+      .update({ tempo: tempoValue })
+      .in('id', chunk);
+
+    if (error) throw error;
+  }
+};
+
 const normalizeSubToko = (value?: string): 'MJM' | 'LARIS' | 'BJW' | 'PRAKTIS PART' | '-' => {
   const normalized = (value || '').trim().toUpperCase().replace(/\s+/g, ' ');
   if (!normalized) return '-';
@@ -295,39 +352,59 @@ export const RekapBulananView: React.FC = () => {
           return;
         }
 
-        // Barang Masuk MJM - try with created_at (timestamp)
-        // Barang Masuk
-        const masukMJM = storeFilter === 'bjw' ? [] : (await supabase
-          .from('barang_masuk_mjm')
-          .select('*')
-          .gte('created_at', startDateTime)
-          .lte('created_at', endDateTime)).data || [];
-        const masukBJW = storeFilter === 'mjm' ? [] : (await supabase
-          .from('barang_masuk_bjw')
-          .select('*')
-          .gte('created_at', startDateTime)
-          .lte('created_at', endDateTime)).data || [];
-        
-        // Barang Keluar
-        const keluarMJM = storeFilter === 'bjw' ? [] : (await supabase
-          .from('barang_keluar_mjm')
-          .select('*')
-          .gte('created_at', startDateTime)
-          .lte('created_at', endDateTime)).data || [];
-        const keluarBJW = storeFilter === 'mjm' ? [] : (await supabase
-          .from('barang_keluar_bjw')
-          .select('*')
-          .gte('created_at', startDateTime)
-          .lte('created_at', endDateTime)).data || [];
-        
+        const fetchMasukMJM = storeFilter === 'bjw'
+          ? Promise.resolve([])
+          : fetchAllRowsPaged<any>(
+              'barang_masuk_mjm',
+              '*',
+              (q) => q.gte('created_at', startDateTime).lte('created_at', endDateTime),
+              { orderBy: 'created_at', ascending: true }
+            );
+
+        const fetchMasukBJW = storeFilter === 'mjm'
+          ? Promise.resolve([])
+          : fetchAllRowsPaged<any>(
+              'barang_masuk_bjw',
+              '*',
+              (q) => q.gte('created_at', startDateTime).lte('created_at', endDateTime),
+              { orderBy: 'created_at', ascending: true }
+            );
+
+        const fetchKeluarMJM = storeFilter === 'bjw'
+          ? Promise.resolve([])
+          : fetchAllRowsPaged<any>(
+              'barang_keluar_mjm',
+              '*',
+              (q) => q.gte('created_at', startDateTime).lte('created_at', endDateTime),
+              { orderBy: 'created_at', ascending: true }
+            );
+
+        const fetchKeluarBJW = storeFilter === 'mjm'
+          ? Promise.resolve([])
+          : fetchAllRowsPaged<any>(
+              'barang_keluar_bjw',
+              '*',
+              (q) => q.gte('created_at', startDateTime).lte('created_at', endDateTime),
+              { orderBy: 'created_at', ascending: true }
+            );
+
         // Petty Cash: samakan sumber dengan halaman Petty Cash (selectedStore)
         const pettyStore = selectedStore === 'bjw' ? 'bjw' : 'mjm';
         const pettyTable = pettyStore === 'bjw' ? 'petty_cash_bjw' : 'petty_cash_mjm';
-        const pettyRows = (await supabase
-          .from(pettyTable)
-          .select('*')
-          .gte('tgl', startDate)
-          .lte('tgl', endDateStr)).data || [];
+        const fetchPettyRows = fetchAllRowsPaged<any>(
+          pettyTable,
+          '*',
+          (q) => q.gte('tgl', startDate).lte('tgl', endDateStr),
+          { orderBy: 'tgl', ascending: true }
+        );
+
+        const [masukMJM, masukBJW, keluarMJM, keluarBJW, pettyRows] = await Promise.all([
+          fetchMasukMJM,
+          fetchMasukBJW,
+          fetchKeluarMJM,
+          fetchKeluarBJW,
+          fetchPettyRows
+        ]);
 
         setBarangMasuk([...(masukMJM).map(r => ({...r, store: 'mjm'})), ...(masukBJW).map(r => ({...r, store: 'bjw'}))]);
         setBarangKeluar([...(keluarMJM).map(r => ({...r, store: 'mjm'})), ...(keluarBJW).map(r => ({...r, store: 'bjw'}))]);
@@ -356,22 +433,33 @@ export const RekapBulananView: React.FC = () => {
       const customerUpper = customer.trim().toUpperCase();
       
       if (type === 'masuk') {
-        // Fetch from both MJM and BJW
-        const dataMJM = storeFilter === 'bjw' ? [] : (await supabase
-          .from('barang_masuk_mjm')
-          .select('*')
-          .ilike('customer', customerUpper)
-          .gte('created_at', startDateTime)
-          .lte('created_at', endDateTime)
-          .order('created_at', { ascending: false })).data || [];
-          
-        const dataBJW = storeFilter === 'mjm' ? [] : (await supabase
-          .from('barang_masuk_bjw')
-          .select('*')
-          .ilike('customer', customerUpper)
-          .gte('created_at', startDateTime)
-          .lte('created_at', endDateTime)
-          .order('created_at', { ascending: false })).data || [];
+        const fetchDataMJM = storeFilter === 'bjw'
+          ? Promise.resolve([])
+          : fetchAllRowsPaged<any>(
+              'barang_masuk_mjm',
+              '*',
+              (q) =>
+                q
+                  .ilike('customer', customerUpper)
+                  .gte('created_at', startDateTime)
+                  .lte('created_at', endDateTime),
+              { orderBy: 'created_at', ascending: false }
+            );
+
+        const fetchDataBJW = storeFilter === 'mjm'
+          ? Promise.resolve([])
+          : fetchAllRowsPaged<any>(
+              'barang_masuk_bjw',
+              '*',
+              (q) =>
+                q
+                  .ilike('customer', customerUpper)
+                  .gte('created_at', startDateTime)
+                  .lte('created_at', endDateTime),
+              { orderBy: 'created_at', ascending: false }
+            );
+
+        const [dataMJM, dataBJW] = await Promise.all([fetchDataMJM, fetchDataBJW]);
           
         const combined = [
           ...(dataMJM || []).map(r => ({ ...r, store: 'mjm' as const })),
@@ -383,22 +471,33 @@ export const RekapBulananView: React.FC = () => {
         
         setHistoryData(combined);
       } else {
-        // Barang Keluar
-        const dataMJM = storeFilter === 'bjw' ? [] : (await supabase
-          .from('barang_keluar_mjm')
-          .select('*')
-          .ilike('customer', customerUpper)
-          .gte('created_at', startDateTime)
-          .lte('created_at', endDateTime)
-          .order('created_at', { ascending: false })).data || [];
-          
-        const dataBJW = storeFilter === 'mjm' ? [] : (await supabase
-          .from('barang_keluar_bjw')
-          .select('*')
-          .ilike('customer', customerUpper)
-          .gte('created_at', startDateTime)
-          .lte('created_at', endDateTime)
-          .order('created_at', { ascending: false })).data || [];
+        const fetchDataMJM = storeFilter === 'bjw'
+          ? Promise.resolve([])
+          : fetchAllRowsPaged<any>(
+              'barang_keluar_mjm',
+              '*',
+              (q) =>
+                q
+                  .ilike('customer', customerUpper)
+                  .gte('created_at', startDateTime)
+                  .lte('created_at', endDateTime),
+              { orderBy: 'created_at', ascending: false }
+            );
+
+        const fetchDataBJW = storeFilter === 'mjm'
+          ? Promise.resolve([])
+          : fetchAllRowsPaged<any>(
+              'barang_keluar_bjw',
+              '*',
+              (q) =>
+                q
+                  .ilike('customer', customerUpper)
+                  .gte('created_at', startDateTime)
+                  .lte('created_at', endDateTime),
+              { orderBy: 'created_at', ascending: false }
+            );
+
+        const [dataMJM, dataBJW] = await Promise.all([fetchDataMJM, fetchDataBJW]);
           
         const combined = [
           ...(dataMJM || []).map(r => ({ ...r, store: 'mjm' as const })),
@@ -434,12 +533,16 @@ export const RekapBulananView: React.FC = () => {
       if (editType === 'masuk') {
         // Get IDs to update from MJM
         if (storeFilter !== 'bjw') {
-          const { data: mjmRecords } = await supabase
-            .from('barang_masuk_mjm')
-            .select('id, tempo')
-            .ilike('customer', customerUpper)
-            .gte('created_at', startDateTime)
-            .lte('created_at', endDateTime);
+          const mjmRecords = await fetchAllRowsPaged<{ id: number; tempo: string | null }>(
+            'barang_masuk_mjm',
+            'id, tempo',
+            (q) =>
+              q
+                .ilike('customer', customerUpper)
+                .gte('created_at', startDateTime)
+                .lte('created_at', endDateTime),
+            { orderBy: 'id', ascending: true }
+          );
             
           const mjmIdsToUpdate = (mjmRecords || [])
             .filter(r => {
@@ -449,20 +552,21 @@ export const RekapBulananView: React.FC = () => {
             .map(r => r.id);
             
           if (mjmIdsToUpdate.length > 0) {
-            await supabase
-              .from('barang_masuk_mjm')
-              .update({ tempo: newTempo })
-              .in('id', mjmIdsToUpdate);
+            await updateTempoForIds('barang_masuk_mjm', mjmIdsToUpdate, newTempo);
           }
         }
         
         if (storeFilter !== 'mjm') {
-          const { data: bjwRecords } = await supabase
-            .from('barang_masuk_bjw')
-            .select('id, tempo')
-            .ilike('customer', customerUpper)
-            .gte('created_at', startDateTime)
-            .lte('created_at', endDateTime);
+          const bjwRecords = await fetchAllRowsPaged<{ id: number; tempo: string | null }>(
+            'barang_masuk_bjw',
+            'id, tempo',
+            (q) =>
+              q
+                .ilike('customer', customerUpper)
+                .gte('created_at', startDateTime)
+                .lte('created_at', endDateTime),
+            { orderBy: 'id', ascending: true }
+          );
             
           const bjwIdsToUpdate = (bjwRecords || [])
             .filter(r => {
@@ -472,10 +576,7 @@ export const RekapBulananView: React.FC = () => {
             .map(r => r.id);
             
           if (bjwIdsToUpdate.length > 0) {
-            await supabase
-              .from('barang_masuk_bjw')
-              .update({ tempo: newTempo })
-              .in('id', bjwIdsToUpdate);
+            await updateTempoForIds('barang_masuk_bjw', bjwIdsToUpdate, newTempo);
           }
         }
         
@@ -492,12 +593,16 @@ export const RekapBulananView: React.FC = () => {
       } else {
         // Barang Keluar
         if (storeFilter !== 'bjw') {
-          const { data: mjmRecords } = await supabase
-            .from('barang_keluar_mjm')
-            .select('id, tempo')
-            .ilike('customer', customerUpper)
-            .gte('created_at', startDateTime)
-            .lte('created_at', endDateTime);
+          const mjmRecords = await fetchAllRowsPaged<{ id: number; tempo: string | null }>(
+            'barang_keluar_mjm',
+            'id, tempo',
+            (q) =>
+              q
+                .ilike('customer', customerUpper)
+                .gte('created_at', startDateTime)
+                .lte('created_at', endDateTime),
+            { orderBy: 'id', ascending: true }
+          );
             
           const mjmIdsToUpdate = (mjmRecords || [])
             .filter(r => {
@@ -507,20 +612,21 @@ export const RekapBulananView: React.FC = () => {
             .map(r => r.id);
             
           if (mjmIdsToUpdate.length > 0) {
-            await supabase
-              .from('barang_keluar_mjm')
-              .update({ tempo: newTempo })
-              .in('id', mjmIdsToUpdate);
+            await updateTempoForIds('barang_keluar_mjm', mjmIdsToUpdate, newTempo);
           }
         }
         
         if (storeFilter !== 'mjm') {
-          const { data: bjwRecords } = await supabase
-            .from('barang_keluar_bjw')
-            .select('id, tempo')
-            .ilike('customer', customerUpper)
-            .gte('created_at', startDateTime)
-            .lte('created_at', endDateTime);
+          const bjwRecords = await fetchAllRowsPaged<{ id: number; tempo: string | null }>(
+            'barang_keluar_bjw',
+            'id, tempo',
+            (q) =>
+              q
+                .ilike('customer', customerUpper)
+                .gte('created_at', startDateTime)
+                .lte('created_at', endDateTime),
+            { orderBy: 'id', ascending: true }
+          );
             
           const bjwIdsToUpdate = (bjwRecords || [])
             .filter(r => {
@@ -530,10 +636,7 @@ export const RekapBulananView: React.FC = () => {
             .map(r => r.id);
             
           if (bjwIdsToUpdate.length > 0) {
-            await supabase
-              .from('barang_keluar_bjw')
-              .update({ tempo: newTempo })
-              .in('id', bjwIdsToUpdate);
+            await updateTempoForIds('barang_keluar_bjw', bjwIdsToUpdate, newTempo);
           }
         }
         

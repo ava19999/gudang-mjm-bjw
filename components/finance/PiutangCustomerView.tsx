@@ -90,6 +90,35 @@ const formatDate = (dateStr: string): string => {
   });
 };
 
+const fetchAllRowsPaged = async <T,>(
+  table: string,
+  selectColumns: string,
+  buildQuery: (query: any) => any,
+  options?: { orderBy?: string; ascending?: boolean; pageSize?: number }
+): Promise<T[]> => {
+  const pageSize = options?.pageSize ?? 1000;
+  const rows: T[] = [];
+  let from = 0;
+
+  while (true) {
+    let query = supabase.from(table).select(selectColumns);
+    query = buildQuery(query);
+    if (options?.orderBy) {
+      query = query.order(options.orderBy, { ascending: options.ascending ?? true });
+    }
+
+    const { data, error } = await query.range(from, from + pageSize - 1);
+    if (error) throw error;
+
+    const page = (data || []) as T[];
+    rows.push(...page);
+    if (page.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return rows;
+};
+
 export const PiutangCustomerView: React.FC = () => {
   const { selectedStore } = useStore();
   
@@ -209,29 +238,32 @@ export const PiutangCustomerView: React.FC = () => {
       
       for (const store of storesToQuery) {
         const tableName = store === 'mjm' ? 'barang_masuk_mjm' : 'barang_masuk_bjw';
-        
-        const { data, error } = await supabase
-          .from(tableName)
-          .select('*')
-          .not('tempo', 'ilike', '%CASH%')
-          .not('tempo', 'ilike', '%NADIR%')
-          .not('tempo', 'ilike', '%RETUR%')
-          .not('tempo', 'ilike', '%STOK%')
-          .not('tempo', 'is', null)
-          .not('tempo', 'eq', '')
-          .not('tempo', 'eq', '-')
-          .gte('created_at', actualFetchFrom)
-          .order('created_at', { ascending: false });
 
-        if (error) {
-          console.error(`Error fetching from ${tableName}:`, error);
-        } else if (data) {
+        try {
+          const data = await fetchAllRowsPaged<BarangMasukRecord>(
+            tableName,
+            '*',
+            (query) =>
+              query
+                .not('tempo', 'ilike', '%CASH%')
+                .not('tempo', 'ilike', '%NADIR%')
+                .not('tempo', 'ilike', '%RETUR%')
+                .not('tempo', 'ilike', '%STOK%')
+                .not('tempo', 'is', null)
+                .not('tempo', 'eq', '')
+                .not('tempo', 'eq', '-')
+                .gte('created_at', actualFetchFrom),
+            { orderBy: 'created_at', ascending: false }
+          );
+
           // Filter records where due month matches the selected filterMonth
           const filteredData = data.filter(record => {
             const dueMonth = calculateDueMonth(record.created_at, record.tempo || '1 BLN');
             return dueMonth === filterMonth;
           });
           allRecords.push(...filteredData);
+        } catch (error) {
+          console.error(`Error fetching from ${tableName}:`, error);
         }
       }
 
@@ -246,12 +278,15 @@ export const PiutangCustomerView: React.FC = () => {
       const pembayaranToStr = pembayaranToDate.toISOString().split('T')[0];
 
       // Load pembayaran data - filtered by for_months (the month of the original transaction)
-      const { data: pembayaranDataRaw } = await supabase
-        .from('importir_pembayaran')
-        .select('*')
-        .gte('for_months', pembayaranFromStr)
-        .lte('for_months', pembayaranToStr)
-        .order('tanggal', { ascending: false });
+      const pembayaranDataRaw = await fetchAllRowsPaged<Pembayaran>(
+        'importir_pembayaran',
+        '*',
+        (query) =>
+          query
+            .gte('for_months', pembayaranFromStr)
+            .lte('for_months', pembayaranToStr),
+        { orderBy: 'tanggal', ascending: false }
+      );
       
       // Filter pembayaran to only include those whose transaction month + tempo = filterMonth
       // Also filter by toko column to separate payments per store
@@ -273,11 +308,12 @@ export const PiutangCustomerView: React.FC = () => {
       const tagihanFetchFromStr = `${tagihanFetchFrom.getFullYear()}-${String(tagihanFetchFrom.getMonth() + 1).padStart(2, '0')}-01`;
       const actualTagihanFetchFrom = tagihanFetchFromStr < cutoffDate ? cutoffDate : tagihanFetchFromStr;
       
-      const { data: tagihanDataRaw } = await supabase
-        .from('importir_tagihan')
-        .select('*')
-        .gte('tanggal', actualTagihanFetchFrom)
-        .order('tanggal', { ascending: false });
+      const tagihanDataRaw = await fetchAllRowsPaged<Tagihan>(
+        'importir_tagihan',
+        '*',
+        (query) => query.gte('tanggal', actualTagihanFetchFrom),
+        { orderBy: 'tanggal', ascending: false }
+      );
       
       // Filter tagihan by due month and store
       const tagihanData = (tagihanDataRaw || []).filter(t => {
@@ -401,20 +437,22 @@ export const PiutangCustomerView: React.FC = () => {
 
       for (const store of storesToQuery) {
         const tableName = store === 'mjm' ? 'barang_masuk_mjm' : 'barang_masuk_bjw';
-        
-        const { data } = await supabase
-          .from(tableName)
-          .select('created_at, tempo')
-          .not('tempo', 'ilike', '%CASH%')
-          .not('tempo', 'ilike', '%NADIR%')
-          .not('tempo', 'ilike', '%RETUR%')
-          .not('tempo', 'ilike', '%STOK%')
-          .not('tempo', 'is', null)
-          .not('tempo', 'eq', '')
-          .not('tempo', 'eq', '-')
-          .gte('created_at', '2025-11-01') // After Oct 2025 cutoff
-          .order('created_at', { ascending: true })
-          .limit(100); // Get enough records to find oldest due month
+
+        const data = await fetchAllRowsPaged<Pick<BarangMasukRecord, 'created_at' | 'tempo'>>(
+          tableName,
+          'created_at, tempo',
+          (query) =>
+            query
+              .not('tempo', 'ilike', '%CASH%')
+              .not('tempo', 'ilike', '%NADIR%')
+              .not('tempo', 'ilike', '%RETUR%')
+              .not('tempo', 'ilike', '%STOK%')
+              .not('tempo', 'is', null)
+              .not('tempo', 'eq', '')
+              .not('tempo', 'eq', '-')
+              .gte('created_at', '2025-11-01'),
+          { orderBy: 'created_at', ascending: true }
+        );
 
         if (data && data.length > 0) {
           data.forEach(record => {

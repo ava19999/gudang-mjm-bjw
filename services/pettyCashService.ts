@@ -17,6 +17,63 @@ const getTableName = (store: string | null): string => {
   return store === 'bjw' ? 'petty_cash_bjw' : 'petty_cash_mjm';
 };
 
+const fetchAllPettyCashRows = async (table: string): Promise<any[]> => {
+  const pageSize = 1000;
+  const rows: any[] = [];
+  let from = 0;
+
+  while (true) {
+    const { data, error } = await supabase
+      .from(table)
+      .select('*')
+      .order('tgl', { ascending: false })
+      .range(from, from + pageSize - 1);
+
+    if (error) {
+      console.error(`Error fetching paged petty cash rows from ${table}:`, error);
+      return rows;
+    }
+
+    const page = data || [];
+    rows.push(...page);
+    if (page.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return rows;
+};
+
+const fetchAllPettyCashRowsByAccount = async (
+  table: string,
+  akun: 'cash' | 'bank',
+  ascending: boolean
+): Promise<any[]> => {
+  const pageSize = 1000;
+  const rows: any[] = [];
+  let from = 0;
+
+  while (true) {
+    const { data, error } = await supabase
+      .from(table)
+      .select('*')
+      .eq('akun', akun)
+      .order('tgl', { ascending })
+      .range(from, from + pageSize - 1);
+
+    if (error) {
+      console.error(`Error fetching paged petty cash rows by account from ${table}:`, error);
+      return rows;
+    }
+
+    const page = data || [];
+    rows.push(...page);
+    if (page.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return rows;
+};
+
 // Helper: Parse angka dari input dengan format Indonesia (titik sebagai pemisah ribuan)
 export const parseIndonesianNumber = (value: string): number => {
   if (!value) return 0;
@@ -47,15 +104,7 @@ export const formatIndonesianNumber = (value: number): string => {
 export const getPettyCashEntries = async (store: string | null): Promise<PettyCashEntry[]> => {
   const table = getTableName(store);
   try {
-    const { data, error } = await supabase
-      .from(table)
-      .select('*')
-      .order('tgl', { ascending: false });
-
-    if (error) {
-      console.error('Error fetching petty cash entries:', error);
-      return [];
-    }
+    const data = await fetchAllPettyCashRows(table);
 
     return (data || []).map(item => ({
       id: String(item.id),
@@ -258,13 +307,7 @@ export const deletePettyCashEntry = async (
 export const recalculateBalancesByAccount = async (store: string | null, akun: 'cash' | 'bank'): Promise<void> => {
   const table = getTableName(store);
   try {
-    const { data, error } = await supabase
-      .from(table)
-      .select('*')
-      .eq('akun', akun)
-      .order('tgl', { ascending: true });
-
-    if (error || !data) return;
+    const data = await fetchAllPettyCashRowsByAccount(table, akun, true);
 
     let runningBalance = 0;
 
@@ -292,16 +335,7 @@ export const recalculateBalancesByAccount = async (store: string | null, akun: '
 export const getEntriesByAccount = async (store: string | null, akun: 'cash' | 'bank'): Promise<PettyCashEntry[]> => {
   const table = getTableName(store);
   try {
-    const { data, error } = await supabase
-      .from(table)
-      .select('*')
-      .eq('akun', akun)
-      .order('tgl', { ascending: false });
-
-    if (error) {
-      console.error('Error fetching entries by account:', error);
-      return [];
-    }
+    const data = await fetchAllPettyCashRowsByAccount(table, akun, false);
 
     return (data || []).map(item => ({
       id: String(item.id),

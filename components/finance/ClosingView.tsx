@@ -60,6 +60,38 @@ interface PivotFilterDropdownProps {
   onChange: (next: string[]) => void;
 }
 
+const fetchAllRowsPaged = async <T,>(
+  table: string,
+  selectColumns: string,
+  buildQuery: (query: any) => any,
+  options?: { orderBy?: string; ascending?: boolean; pageSize?: number }
+): Promise<T[]> => {
+  const pageSize = options?.pageSize ?? 1000;
+  const rows: T[] = [];
+  let from = 0;
+
+  while (true) {
+    let query = supabase.from(table).select(selectColumns);
+    query = buildQuery(query);
+    if (options?.orderBy) {
+      query = query.order(options.orderBy, { ascending: options.ascending ?? true });
+    }
+
+    const { data, error } = await query.range(from, from + pageSize - 1);
+    if (error) {
+      console.error(`Error fetching paged rows from ${table}:`, error);
+      return rows;
+    }
+
+    const page = (data || []) as T[];
+    rows.push(...page);
+    if (page.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return rows;
+};
+
 const PivotFilterDropdown: React.FC<PivotFilterDropdownProps> = ({
   label,
   options,
@@ -226,26 +258,26 @@ export const ClosingView: React.FC = () => {
   const loadData = async () => {
     setLoading(true);
     try {
-      // Fetch Barang Masuk
-      const { data: masukData, error: masukError } = await supabase
-        .from(getTableName('masuk'))
-        .select('*')
-        .gte('created_at', `${startDate}T00:00:00`)
-        .lte('created_at', `${endDate}T23:59:59`)
-        .order('created_at', { ascending: true });
-      
-      if (masukError) console.error('Error fetching barang masuk:', masukError);
-      setBarangMasuk(masukData || []);
+      const [masukData, keluarData] = await Promise.all([
+        fetchAllRowsPaged<BarangMasukRow>(
+          getTableName('masuk'),
+          '*',
+          (q) => q
+            .gte('created_at', `${startDate}T00:00:00`)
+            .lte('created_at', `${endDate}T23:59:59`),
+          { orderBy: 'created_at', ascending: true }
+        ),
+        fetchAllRowsPaged<BarangKeluarRow>(
+          getTableName('keluar'),
+          '*',
+          (q) => q
+            .gte('created_at', `${startDate}T00:00:00`)
+            .lte('created_at', `${endDate}T23:59:59`),
+          { orderBy: 'created_at', ascending: true }
+        )
+      ]);
 
-      // Fetch Barang Keluar
-      const { data: keluarData, error: keluarError } = await supabase
-        .from(getTableName('keluar'))
-        .select('*')
-        .gte('created_at', `${startDate}T00:00:00`)
-        .lte('created_at', `${endDate}T23:59:59`)
-        .order('created_at', { ascending: true });
-      
-      if (keluarError) console.error('Error fetching barang keluar:', keluarError);
+      setBarangMasuk(masukData || []);
       setBarangKeluar(keluarData || []);
 
       // Expand all groups by default

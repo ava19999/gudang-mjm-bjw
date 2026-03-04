@@ -38,6 +38,92 @@ const mapToBoolean = (data: any[]) => {
   }));
 };
 
+const splitIntoChunks = <T,>(items: T[], chunkSize: number): T[][] => {
+  if (items.length === 0) return [];
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += chunkSize) {
+    chunks.push(items.slice(i, i + chunkSize));
+  }
+  return chunks;
+};
+
+const fetchAllRowsPaged = async <T,>(
+  table: string,
+  selectColumns: string,
+  buildQuery: (query: any) => any,
+  options?: { orderBy?: string; ascending?: boolean; pageSize?: number }
+): Promise<T[]> => {
+  const pageSize = options?.pageSize ?? 1000;
+  const rows: T[] = [];
+  let from = 0;
+
+  while (true) {
+    let query = supabase.from(table).select(selectColumns);
+    query = buildQuery(query);
+    if (options?.orderBy) {
+      query = query.order(options.orderBy, { ascending: options.ascending ?? true });
+    }
+
+    const { data, error } = await query.range(from, from + pageSize - 1);
+    if (error) throw error;
+
+    const page = (data || []) as T[];
+    rows.push(...page);
+    if (page.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return rows;
+};
+
+const fetchRowsByInChunksPaged = async <T,>(
+  table: string,
+  selectColumns: string,
+  column: string,
+  values: Array<string | number>,
+  buildQuery?: (query: any) => any,
+  options?: { orderBy?: string; ascending?: boolean; pageSize?: number; inChunkSize?: number }
+): Promise<T[]> => {
+  const uniqueValues = [...new Set(values.map((v) => String(v).trim()).filter(Boolean))];
+  if (uniqueValues.length === 0) return [];
+
+  const inChunkSize = options?.inChunkSize ?? 300;
+  const chunks = splitIntoChunks(uniqueValues, inChunkSize);
+  const rows: T[] = [];
+
+  for (const chunk of chunks) {
+    const chunkRows = await fetchAllRowsPaged<T>(
+      table,
+      selectColumns,
+      (query) => {
+        let next = query.in(column, chunk);
+        if (buildQuery) next = buildQuery(next);
+        return next;
+      },
+      { orderBy: options?.orderBy, ascending: options?.ascending, pageSize: options?.pageSize }
+    );
+    rows.push(...chunkRows);
+  }
+
+  return rows;
+};
+
+const updateRowsByIdsInChunks = async (
+  table: string,
+  ids: Array<string | number>,
+  patch: Record<string, any>
+): Promise<void> => {
+  const chunks = splitIntoChunks(ids.filter(Boolean), 500);
+  for (const chunk of chunks) {
+    const { error } = await supabase
+      .from(table)
+      .update(patch)
+      .in('id', chunk as any[]);
+
+    if (error) throw error;
+  }
+};
+
 // ============================================================================
 // HELPER: Cek apakah resi/order sudah ada di barang_keluar (sudah terjual/keluar)
 // ============================================================================
@@ -277,15 +363,18 @@ export const getResiStage1List = async (store: string | null) => {
 // Ambil semua resi Stage 1 yang belum completed (untuk Stage 3)
 export const getAllPendingStage1Resi = async (store: string | null) => {
   const table = getTableName(store);
-  const { data, error } = await supabase
-    .from(table)
-    .select('*')
-    .eq('stage1_scanned', 'true')
-    .neq('status', 'completed')
-    .order('stage1_scanned_at', { ascending: false })
-    .limit(500);
-
-  if (error) return [];
+  let data: any[] = [];
+  try {
+    data = await fetchAllRowsPaged<any>(
+      table,
+      '*',
+      (query) => query.eq('stage1_scanned', 'true').neq('status', 'completed'),
+      { orderBy: 'stage1_scanned_at', ascending: false }
+    );
+  } catch (error) {
+    console.error('getAllPendingStage1Resi error:', error);
+    return [];
+  }
   
   const mappedData = mapToBoolean(data || []);
   if (mappedData.length === 0) return [];
@@ -313,15 +402,11 @@ export const getAllPendingStage1Resi = async (store: string | null) => {
   // Update status resi yang sudah terjual ke 'completed' - AWAIT agar selesai
   if (soldResiIds.length > 0) {
     console.log(`[getAllPendingStage1Resi] Auto-marking ${soldResiIds.length} resi as completed (already in barang_keluar):`, soldResiIds);
-    const { error: updateErr } = await supabase
-      .from(table)
-      .update({ status: 'completed' })
-      .in('id', soldResiIds);
-    
-    if (updateErr) {
-      console.error('Error auto-updating sold resi status:', updateErr);
-    } else {
+    try {
+      await updateRowsByIdsInChunks(table, soldResiIds, { status: 'completed' });
       console.log(`[getAllPendingStage1Resi] Successfully marked ${soldResiIds.length} resi as completed`);
+    } catch (updateErr) {
+      console.error('Error auto-updating sold resi status:', updateErr);
     }
   }
   
@@ -583,15 +668,18 @@ export const getResiHistory = async (store: string | null) => {
 
 export const getPendingStage3List = async (store: string | null) => {
   const table = getTableName(store);
-  const { data, error } = await supabase
-    .from(table)
-    .select('*')
-    .eq('stage2_verified', 'true')
-    .neq('status', 'completed')
-    .order('stage2_verified_at', { ascending: false });
-
-  if (error) return [];
-  return mapToBoolean(data || []);
+  try {
+    const data = await fetchAllRowsPaged<any>(
+      table,
+      '*',
+      (query) => query.eq('stage2_verified', 'true').neq('status', 'completed'),
+      { orderBy: 'stage2_verified_at', ascending: false }
+    );
+    return mapToBoolean(data || []);
+  } catch (error) {
+    console.error('getPendingStage3List error:', error);
+    return [];
+  }
 };
 
 export const checkResiStatus = async (resis: string[], store: string | null) => {
@@ -622,12 +710,14 @@ export const checkResiOrOrderStatus = async (
   const normalized = resiOrOrders.map(r => r.trim().toUpperCase());
   
   // Query semua resi dari Stage 1
-  const { data, error } = await supabase
-    .from(table)
-    .select('resi, no_pesanan, stage1_scanned, stage2_verified, status, ecommerce, sub_toko, negara_ekspor')
-    .eq('stage1_scanned', 'true');
-  
-  if (error) {
+  let data: any[] = [];
+  try {
+    data = await fetchAllRowsPaged<any>(
+      table,
+      'resi, no_pesanan, stage1_scanned, stage2_verified, status, ecommerce, sub_toko, negara_ekspor',
+      (query) => query.eq('stage1_scanned', 'true')
+    );
+  } catch (error) {
     console.error('checkResiOrOrderStatus error:', error);
     return [];
   }
@@ -647,15 +737,16 @@ export const checkResiOrOrderStatus = async (
  */
 export const getStage1ResiList = async (store: string | null): Promise<Array<{resi: string, no_pesanan?: string, ecommerce: string, sub_toko: string, stage2_verified: boolean}>> => {
   const table = getTableName(store);
-  
-  const { data, error } = await supabase
-    .from(table)
-    .select('resi, no_pesanan, ecommerce, sub_toko, stage2_verified')
-    .eq('stage1_scanned', 'true')
-    .order('stage1_scanned_at', { ascending: false })
-    .limit(500);
-  
-  if (error) {
+
+  let data: any[] = [];
+  try {
+    data = await fetchAllRowsPaged<any>(
+      table,
+      'resi, no_pesanan, ecommerce, sub_toko, stage2_verified',
+      (query) => query.eq('stage1_scanned', 'true'),
+      { orderBy: 'stage1_scanned_at', ascending: false }
+    );
+  } catch (error) {
     console.error('getStage1ResiList error:', error);
     return [];
   }
@@ -699,37 +790,43 @@ export const getBulkPartNumberInfo = async (skus: string[], store: string | null
 
 export const getAvailableParts = async (store: string | null): Promise<{part_number: string, name: string}[]> => {
   const table = getStockTable(store);
-  const { data, error } = await supabase
-    .from(table)
-    .select('part_number, name')
-    .order('part_number', { ascending: true });
-
-  if (error) return [];
-  return data?.map(d => ({ part_number: d.part_number, name: d.name || '' })) || [];
+  try {
+    const data = await fetchAllRowsPaged<any>(
+      table,
+      'part_number, name',
+      (query) => query,
+      { orderBy: 'part_number', ascending: true }
+    );
+    return data.map(d => ({ part_number: d.part_number, name: d.name || '' }));
+  } catch (error) {
+    console.error('getAvailableParts error:', error);
+    return [];
+  }
 };
 
 export const fetchPendingCSVItems = async (store: string | null) => {
   const table = store === 'mjm' ? 'resi_items_mjm' : (store === 'bjw' ? 'resi_items_bjw' : null);
   if (!table) return [];
 
-  const { data, error } = await supabase
-    .from(table)
-    .select('*')
-    .eq('status', 'pending') 
-    .order('created_at', { ascending: false })
-    .limit(2000); // Ambil semua pending items (max 2000)
-
-  if (error) {
-    console.error("Gagal ambil pending CSV:", error);
+  let pendingRows: any[] = [];
+  try {
+    pendingRows = await fetchAllRowsPaged<any>(
+      table,
+      '*',
+      (query) => query.eq('status', 'pending'),
+      { orderBy: 'created_at', ascending: false }
+    );
+  } catch (error) {
+    console.error('Gagal ambil pending CSV:', error);
     return [];
   }
   
-  if (!data || data.length === 0) return [];
+  if (!pendingRows || pendingRows.length === 0) return [];
   
   // ===== SYNC STATUS PER-ITEM (resi + part_number), BUKAN PER-RESI =====
   const logTable = getBarangKeluarTable(store);
-  const allResis = [...new Set(data.map((d: any) => String(d.resi || '').trim()).filter(Boolean))];
-  if (allResis.length === 0) return data;
+  const allResis = [...new Set(pendingRows.map((d: any) => String(d.resi || '').trim()).filter(Boolean))];
+  if (allResis.length === 0) return pendingRows;
   const allResiVariants = [...new Set(allResis.flatMap((resi) => {
     const trimmed = String(resi || '').trim();
     if (!trimmed) return [];
@@ -737,21 +834,23 @@ export const fetchPendingCSVItems = async (store: string | null) => {
   }))];
 
   // Ambil log barang_keluar untuk resi-resi yang sedang pending
-  const { data: soldLogs, error: soldErr } = await supabase
-    .from(logTable)
-    .select('resi, part_number')
-    .in('resi', allResiVariants)
-    .not('part_number', 'is', null)
-    .limit(5000);
-
-  if (soldErr) {
-    console.warn('[fetchPendingCSVItems] Gagal sync dengan barang_keluar, fallback ke pending murni:', soldErr.message);
-    return data;
+  let soldLogs: any[] = [];
+  try {
+    soldLogs = await fetchRowsByInChunksPaged<any>(
+      logTable,
+      'resi, part_number',
+      'resi',
+      allResiVariants,
+      (query) => query.not('part_number', 'is', null)
+    );
+  } catch (error: any) {
+    console.warn('[fetchPendingCSVItems] Gagal sync dengan barang_keluar, fallback ke pending murni:', error?.message || error);
+    return pendingRows;
   }
 
   // Hitung jumlah terjual per key (support duplicate key di satu resi)
   const soldCountMap = new Map<string, number>();
-  (soldLogs || []).forEach((log: any) => {
+  soldLogs.forEach((log: any) => {
     const resiKey = normalizeResiKey(log.resi);
     const partKey = normalizePartKey(log.part_number);
     if (!resiKey || !partKey) return;
@@ -760,22 +859,24 @@ export const fetchPendingCSVItems = async (store: string | null) => {
   });
 
   // Ambil item processed pada resi yang sama untuk recovery jika dulu salah auto-mark
-  const { data: processedRows, error: processedErr } = await supabase
-    .from(table)
-    .select('*')
-    .eq('status', 'processed')
-    .in('resi', allResis)
-    .limit(2000);
-
-  if (processedErr) {
-    console.warn('[fetchPendingCSVItems] Gagal cek processed rows untuk recovery:', processedErr.message);
+  let processedRows: any[] = [];
+  try {
+    processedRows = await fetchRowsByInChunksPaged<any>(
+      table,
+      '*',
+      'resi',
+      allResis,
+      (query) => query.eq('status', 'processed')
+    );
+  } catch (error: any) {
+    console.warn('[fetchPendingCSVItems] Gagal cek processed rows untuk recovery:', error?.message || error);
   }
 
   const falseProcessedIds: Array<string | number> = [];
   const recoveredRows: any[] = [];
 
   // Alokasikan sold count ke processed rows dulu (yang valid tetap processed)
-  (processedRows || []).forEach((row: any) => {
+  processedRows.forEach((row: any) => {
     const resiKey = normalizeResiKey(row.resi);
     const partKey = normalizePartKey(row.part_number);
     if (!resiKey || !partKey) return;
@@ -792,21 +893,17 @@ export const fetchPendingCSVItems = async (store: string | null) => {
   });
 
   if (falseProcessedIds.length > 0) {
-    const { error: recoverErr } = await supabase
-      .from(table)
-      .update({ status: 'pending' })
-      .in('id', falseProcessedIds as any[]);
-
-    if (recoverErr) {
-      console.error('[fetchPendingCSVItems] Gagal recovery processed->pending:', recoverErr);
-    } else {
+    try {
+      await updateRowsByIdsInChunks(table, falseProcessedIds, { status: 'pending' });
       console.log(`[fetchPendingCSVItems] Recovered ${falseProcessedIds.length} item salah processed menjadi pending.`);
+    } catch (recoverErr) {
+      console.error('[fetchPendingCSVItems] Gagal recovery processed->pending:', recoverErr);
     }
   }
 
   // Sinkron pending -> processed jika memang sudah ada log barang_keluar
   const pendingSoldIds: Array<string | number> = [];
-  const filteredPending = data.filter((row: any) => {
+  const filteredPending = pendingRows.filter((row: any) => {
     const resiKey = normalizeResiKey(row.resi);
     const partKey = normalizePartKey(row.part_number);
     if (!resiKey || !partKey) return true;
@@ -822,15 +919,11 @@ export const fetchPendingCSVItems = async (store: string | null) => {
   });
 
   if (pendingSoldIds.length > 0) {
-    const { error: markErr } = await supabase
-      .from(table)
-      .update({ status: 'processed' })
-      .in('id', pendingSoldIds as any[]);
-
-    if (markErr) {
-      console.error('[fetchPendingCSVItems] Gagal sync pending->processed:', markErr);
-    } else {
+    try {
+      await updateRowsByIdsInChunks(table, pendingSoldIds, { status: 'processed' });
       console.log(`[fetchPendingCSVItems] Synced ${pendingSoldIds.length} pending item menjadi processed.`);
+    } catch (markErr) {
+      console.error('[fetchPendingCSVItems] Gagal sync pending->processed:', markErr);
     }
   }
 
@@ -1013,34 +1106,36 @@ export const processBarangKeluarBatch = async (items: any[], store: string | nul
       const matchedIds = new Set<any>();
 
       if (resiVariants.length > 0) {
-        const { data: byResi } = await supabase
-          .from(scanTable)
-          .select('id')
-          .neq('status', 'completed')
-          .in('resi', resiVariants)
-          .limit(100);
-        (byResi || []).forEach((r: any) => matchedIds.add(r.id));
+        const byResi = await fetchRowsByInChunksPaged<any>(
+          scanTable,
+          'id',
+          'resi',
+          resiVariants,
+          (query) => query.neq('status', 'completed')
+        );
+        byResi.forEach((r: any) => matchedIds.add(r.id));
       }
 
       if (orderVariants.length > 0) {
-        const { data: byOrder } = await supabase
-          .from(scanTable)
-          .select('id')
-          .neq('status', 'completed')
-          .in('no_pesanan', orderVariants)
-          .limit(100);
-        (byOrder || []).forEach((r: any) => matchedIds.add(r.id));
+        const byOrder = await fetchRowsByInChunksPaged<any>(
+          scanTable,
+          'id',
+          'no_pesanan',
+          orderVariants,
+          (query) => query.neq('status', 'completed')
+        );
+        byOrder.forEach((r: any) => matchedIds.add(r.id));
       }
 
       // Fallback: jika belum ketemu, scan pending rows dan match manual (case-insensitive).
       if (matchedIds.size === 0) {
-        const { data: fallbackRows } = await supabase
-          .from(scanTable)
-          .select('id, resi, no_pesanan')
-          .neq('status', 'completed')
-          .limit(1000);
+        const fallbackRows = await fetchAllRowsPaged<any>(
+          scanTable,
+          'id, resi, no_pesanan',
+          (query) => query.neq('status', 'completed')
+        );
 
-        (fallbackRows || []).forEach((r: any) => {
+        fallbackRows.forEach((r: any) => {
           const resiKey = normalizeResiKey(r.resi);
           const orderKey = normalizeResiKey(r.no_pesanan);
           if (

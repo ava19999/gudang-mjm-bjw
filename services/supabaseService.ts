@@ -211,6 +211,40 @@ const fetchAllRowsForModal = async <T,>(
   return rows;
 };
 
+const fetchAllRowsForModalFiltered = async <T,>(
+  table: string,
+  select: string,
+  orderColumn: string,
+  applyFilters: (query: any) => any,
+  ascending: boolean = true
+): Promise<T[]> => {
+  const pageSize = 1000;
+  let from = 0;
+  const rows: T[] = [];
+
+  while (true) {
+    let query = supabase.from(table).select(select);
+    query = applyFilters(query);
+
+    const { data, error } = await query
+      .order(orderColumn, { ascending })
+      .range(from, from + pageSize - 1);
+
+    if (error) {
+      console.error(`Gagal mengambil data ${table} (filtered):`, error);
+      return rows;
+    }
+
+    const page = (data || []) as T[];
+    rows.push(...page);
+
+    if (page.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return rows;
+};
+
 const fetchAllModalLogs = async (): Promise<{ masukRows: ModalMasukRow[]; keluarRows: ModalKeluarRow[] }> => {
   const [masukMjm, masukBjw, keluarMjm, keluarBjw] = await Promise.all([
     fetchAllRowsForModal<ModalMasukRow>(
@@ -841,28 +875,40 @@ export interface FotoLinkRow {
 // Fetch foto produk dari tabel foto
 export const fetchFotoProduk = async (searchTerm?: string): Promise<FotoProdukRow[]> => {
   try {
-    let query = supabase
-      .from('foto')
-      .select(`id,created_at,${FOTO_SELECT_COLUMNS}`)
-      .order('created_at', { ascending: false });
+    const pageSize = 1000;
+    const rows: FotoProdukRow[] = [];
+    const trimmedSearch = searchTerm?.trim() || '';
+    let from = 0;
 
-    if (searchTerm && searchTerm.trim()) {
-      query = query.ilike('part_number', `%${searchTerm}%`);
-    }
+    while (true) {
+      let query = supabase
+        .from('foto')
+        .select(`id,created_at,${FOTO_SELECT_COLUMNS}`)
+        .order('created_at', { ascending: false });
 
-    const { data, error } = await query.limit(500);
-
-    if (error) {
-      // Check if table doesn't exist
-      if (error.code === '42P01' || error.message?.includes('does not exist')) {
-        console.warn('Table foto does not exist');
-        return [];
+      if (trimmedSearch) {
+        query = query.ilike('part_number', `%${trimmedSearch}%`);
       }
-      console.error('fetchFotoProduk Error:', error);
-      return [];
+
+      const { data, error } = await query.range(from, from + pageSize - 1);
+
+      if (error) {
+        // Check if table doesn't exist
+        if (error.code === '42P01' || error.message?.includes('does not exist')) {
+          console.warn('Table foto does not exist');
+          return [];
+        }
+        console.error('fetchFotoProduk Error:', error);
+        return rows;
+      }
+
+      const page = (data || []) as FotoProdukRow[];
+      rows.push(...page);
+      if (page.length < pageSize) break;
+      from += pageSize;
     }
 
-    return data || [];
+    return rows;
   } catch (err) {
     console.error('fetchFotoProduk Exception:', err);
     return [];
@@ -872,31 +918,14 @@ export const fetchFotoProduk = async (searchTerm?: string): Promise<FotoProdukRo
 // Fetch all foto_link entries
 export const fetchFotoLink = async (searchTerm?: string): Promise<FotoLinkRow[]> => {
   try {
-    // Select semua kolom - sku mungkin tidak ada di tabel
-    let query = supabase
-      .from('foto_link')
-      .select('*')
-      .order('nama_csv', { ascending: true });
-
-    if (searchTerm && searchTerm.trim()) {
-      // Search in nama_csv only (sku mungkin tidak ada)
-      query = query.ilike('nama_csv', `%${searchTerm}%`);
-    }
-
-    // Fetch semua data tanpa limit (untuk 3388+ rows)
-    const { data, error } = await query;
-
-    if (error) {
-      // Check if table doesn't exist
-      if (error.code === '42P01' || error.message?.includes('does not exist')) {
-        console.warn('Table foto_link does not exist');
-        return [];
-      }
-      console.error('fetchFotoLink Error:', error);
-      return [];
-    }
-
-    return data || [];
+    const trimmedSearch = searchTerm?.trim() || '';
+    return await fetchAllRowsForModalFiltered<FotoLinkRow>(
+      'foto_link',
+      '*',
+      'nama_csv',
+      (q) => (trimmedSearch ? q.ilike('nama_csv', `%${trimmedSearch}%`) : q),
+      true
+    );
   } catch (err) {
     console.error('fetchFotoLink Exception:', err);
     return [];
@@ -907,17 +936,7 @@ export const fetchFotoLink = async (searchTerm?: string): Promise<FotoLinkRow[]>
 // Note: Jika kolom sku belum ada, ini akan return semua data
 export const fetchFotoLinkWithoutSku = async (): Promise<FotoLinkRow[]> => {
   try {
-    // Coba fetch semua dulu, filter di client side jika sku column tidak ada
-    const { data, error } = await supabase
-      .from('foto_link')
-      .select('*')
-      .order('nama_csv', { ascending: true })
-      .limit(500);
-
-    if (error) {
-      console.error('fetchFotoLinkWithoutSku Error:', error);
-      return [];
-    }
+    const data = await fetchAllRowsForModal<FotoLinkRow>('foto_link', '*', 'nama_csv');
 
     // Filter di client side - items tanpa sku
     const filtered = (data || []).filter(d => !d.sku || d.sku.trim() === '');
@@ -953,16 +972,13 @@ export const checkExistingFotoPartNumbers = async (partNumbers: string[]): Promi
 // Fetch all part numbers from MJM store (for autocomplete)
 export const fetchAllPartNumbersMJM = async (): Promise<Array<{ part_number: string; name: string }>> => {
   try {
-    const { data, error } = await supabase
-      .from('base_mjm')
-      .select('part_number, name')
-      .not('part_number', 'is', null)
-      .order('part_number', { ascending: true });
-
-    if (error) {
-      console.error('fetchAllPartNumbersMJM Error:', error);
-      return [];
-    }
+    const data = await fetchAllRowsForModalFiltered<any>(
+      'base_mjm',
+      'part_number, name',
+      'part_number',
+      (q) => q.not('part_number', 'is', null),
+      true
+    );
 
     return (data || []).map(d => ({
       part_number: d.part_number || '',
@@ -1941,32 +1957,26 @@ export const fetchOfflineOrders = async (store: string | null): Promise<OfflineO
   const table = store === 'mjm' ? 'orders_mjm' : (store === 'bjw' ? 'orders_bjw' : null);
   if (!table) return [];
 
-  const { data, error } = await supabase
-    .from(table)
-    .select('*')
-    .eq('status', 'Belum Diproses')
-    .order('tanggal', { ascending: false });
-
-  if (error) { console.error(`Fetch Offline Error:`, error); return []; }
-  return data || [];
+  return await fetchAllRowsForModalFiltered<OfflineOrderRow>(
+    table,
+    '*',
+    'tanggal',
+    (q) => q.eq('status', 'Belum Diproses'),
+    false
+  );
 };
 
 // 2.1 FETCH SALES (KHUSUS BJW)
 export const fetchSalesOrders = async (store: string | null): Promise<OfflineOrderRow[]> => {
   if (store !== 'bjw') return [];
 
-  const { data, error } = await supabase
-    .from('orders_bjw')
-    .select('*')
-    .eq('status', 'Sales Pending')
-    .eq('tempo', 'SALES')
-    .order('tanggal', { ascending: false });
-
-  if (error) {
-    console.error('Fetch Sales Orders Error:', error);
-    return [];
-  }
-  return data || [];
+  return await fetchAllRowsForModalFiltered<OfflineOrderRow>(
+    'orders_bjw',
+    '*',
+    'tanggal',
+    (q) => q.eq('status', 'Sales Pending').eq('tempo', 'SALES'),
+    false
+  );
 };
 
 // 3. FETCH ONLINE
@@ -1974,14 +1984,13 @@ export const fetchOnlineOrders = async (store: string | null): Promise<OnlineOrd
   const table = store === 'mjm' ? 'scan_resi_mjm' : (store === 'bjw' ? 'scan_resi_bjw' : null);
   if (!table) return [];
 
-  const { data, error } = await supabase
-    .from(table)
-    .select('*')
-    .neq('status', 'Diproses') 
-    .order('tanggal', { ascending: false });
-
-  if (error) { console.error('Fetch Online Error:', error); return []; }
-  return data || [];
+  return await fetchAllRowsForModalFiltered<OnlineOrderRow>(
+    table,
+    '*',
+    'tanggal',
+    (q) => q.neq('status', 'Diproses'),
+    false
+  );
 };
 
 // 4. FETCH SOLD ITEMS (no limit, pagination handled in component)
@@ -1989,31 +1998,26 @@ export const fetchSoldItems = async (store: string | null): Promise<SoldItemRow[
   const table = store === 'mjm' ? 'barang_keluar_mjm' : (store === 'bjw' ? 'barang_keluar_bjw' : null);
   if (!table) return [];
 
-  const { data, error } = await supabase
-    .from(table)
-    .select(SOLD_ITEM_SELECT_COLUMNS)
-    .order('created_at', { ascending: false });
-
-  if (error) { console.error('Fetch Sold Error:', error); return []; }
-  return data || [];
+  return await fetchAllRowsForModalFiltered<SoldItemRow>(
+    table,
+    SOLD_ITEM_SELECT_COLUMNS,
+    'created_at',
+    (q) => q,
+    false
+  );
 };
 
 // 4.1 FETCH SALES PAID ITEMS (KHUSUS BJW)
 export const fetchSalesPaidItems = async (store: string | null): Promise<SoldItemRow[]> => {
   if (store !== 'bjw') return [];
 
-  const { data, error } = await supabase
-    .from('barang_keluar_bjw')
-    .select(SOLD_ITEM_SELECT_COLUMNS)
-    .ilike('ecommerce', 'SALES')
-    .ilike('tempo', 'CASH')
-    .order('created_at', { ascending: false });
-
-  if (error) {
-    console.error('Fetch Sales Paid Error:', error);
-    return [];
-  }
-  return data || [];
+  return await fetchAllRowsForModalFiltered<SoldItemRow>(
+    'barang_keluar_bjw',
+    SOLD_ITEM_SELECT_COLUMNS,
+    'created_at',
+    (q) => q.ilike('ecommerce', 'SALES').ilike('tempo', 'CASH'),
+    false
+  );
 };
 
 // 4.1 UPDATE SOLD ITEM PRICE
@@ -2295,13 +2299,13 @@ export const fetchReturItems = async (store: string | null): Promise<ReturRow[]>
   const table = store === 'mjm' ? 'retur_mjm' : (store === 'bjw' ? 'retur_bjw' : null);
   if (!table) return [];
 
-  const { data, error } = await supabase
-    .from(table)
-    .select('*')
-    .order('tanggal_retur', { ascending: false });
-
-  if (error) { console.error('Fetch Retur Error:', error); return []; }
-  return data || [];
+  return await fetchAllRowsForModalFiltered<ReturRow>(
+    table,
+    '*',
+    'tanggal_retur',
+    (q) => q,
+    false
+  );
 };
 
 const normalizePartForSync = (value: string | null | undefined): string =>
@@ -2336,14 +2340,15 @@ const syncResiToProcessed = async (
   }
 
   try {
-    const { data: pendingItems, error: fetchPendingErr } = await supabase
-      .from(tables.resiItemsTable)
-      .select('id, part_number')
-      .eq('status', 'pending')
-      .in('resi', resiVariants)
-      .limit(2000);
+    const pendingItems = await fetchAllRowsForModalFiltered<any>(
+      tables.resiItemsTable,
+      'id, part_number',
+      'id',
+      (query) => query.eq('status', 'pending').in('resi', resiVariants),
+      true
+    );
 
-    if (fetchPendingErr || !pendingItems || pendingItems.length === 0) return;
+    if (!pendingItems || pendingItems.length === 0) return;
 
     let idsToProcess = pendingItems.map((row: any) => row.id).filter(Boolean);
     if (normalizedPart) {
@@ -2355,10 +2360,15 @@ const syncResiToProcessed = async (
 
     if (idsToProcess.length === 0) return;
 
-    await supabase
-      .from(tables.resiItemsTable)
-      .update({ status: 'processed' })
-      .in('id', idsToProcess as any[]);
+    for (let i = 0; i < idsToProcess.length; i += 500) {
+      const chunk = idsToProcess.slice(i, i + 500);
+      const { error: updateErr } = await supabase
+        .from(tables.resiItemsTable)
+        .update({ status: 'processed' })
+        .in('id', chunk as any[]);
+
+      if (updateErr) throw updateErr;
+    }
   } catch (err) {
     console.warn('syncResiToProcessed resi_items warning:', err);
   }
@@ -3762,17 +3772,14 @@ export const fetchLowStockItems = async (
   try {
     // Step 1: Fetch items with low stock (10%)
     onProgress?.(5, 'Mengambil data stok...');
-    
-    const { data: items, error } = await supabase
-      .from(table)
-      .select('*')
-      .lt('quantity', threshold)
-      .order('quantity', { ascending: true });
 
-    if (error || !items) {
-      console.error('fetchLowStockItems Error:', error);
-      return [];
-    }
+    const items = await fetchAllRowsForModalFiltered<any>(
+      table,
+      '*',
+      'quantity',
+      (q) => q.lt('quantity', threshold),
+      true
+    );
 
     if (items.length === 0) {
       onProgress?.(100, 'Selesai');
@@ -3785,19 +3792,19 @@ export const fetchLowStockItems = async (
     const partNumbers = items.map(i => i.part_number);
     
     onProgress?.(20, 'Mengambil data supplier...');
-    
-    const { data: supplierData, error: supplierError } = await supabase
-      .from(logTable)
-      .select('part_number, customer, created_at, harga_satuan, qty_masuk, tempo')
-      .in('part_number', partNumbers)
-      .not('customer', 'is', null)
-      .not('customer', 'eq', '')
-      .not('customer', 'eq', '-')
-      .order('created_at', { ascending: false });
 
-    if (supplierError) {
-      console.error('fetchLowStockItems Supplier Error:', supplierError);
-    }
+    const supplierData = await fetchAllRowsForModalFiltered<any>(
+      logTable,
+      'part_number, customer, created_at, harga_satuan, qty_masuk, tempo',
+      'created_at',
+      (q) =>
+        q
+          .in('part_number', partNumbers)
+          .not('customer', 'is', null)
+          .not('customer', 'eq', '')
+          .not('customer', 'eq', '-'),
+      false
+    );
 
     onProgress?.(60, 'Memproses data supplier...');
 
@@ -3922,19 +3929,18 @@ export const fetchSupplierHistoryForItem = async (store: string | null, partNumb
   if (!logTable) return [];
 
   try {
-    const { data, error } = await supabase
-      .from(logTable)
-      .select('customer, created_at, harga_satuan, qty_masuk, tempo')
-      .eq('part_number', partNumber)
-      .not('customer', 'is', null)
-      .not('customer', 'eq', '')
-      .not('customer', 'eq', '-')
-      .order('created_at', { ascending: false });
-
-    if (error || !data) {
-      console.error('fetchSupplierHistoryForItem Error:', error);
-      return [];
-    }
+    const data = await fetchAllRowsForModalFiltered<any>(
+      logTable,
+      'customer, created_at, harga_satuan, qty_masuk, tempo',
+      'created_at',
+      (q) =>
+        q
+          .eq('part_number', partNumber)
+          .not('customer', 'is', null)
+          .not('customer', 'eq', '')
+          .not('customer', 'eq', '-'),
+      false
+    );
 
     // Group by supplier with separate CASH and TEMPO prices
     const supplierMap: Record<string, { 

@@ -34,6 +34,39 @@ interface ResellerStats {
   total_nilai: number;
 }
 
+const fetchAllRowsPaged = async <T,>(
+  table: string,
+  selectColumns: string,
+  buildQuery: (query: any) => any,
+  options?: { orderBy?: string; ascending?: boolean; pageSize?: number }
+): Promise<T[]> => {
+  const pageSize = options?.pageSize ?? 1000;
+  const rows: T[] = [];
+  let from = 0;
+
+  while (true) {
+    let query = supabase.from(table).select(selectColumns);
+    query = buildQuery(query);
+
+    if (options?.orderBy) {
+      query = query.order(options.orderBy, { ascending: options.ascending ?? true });
+    }
+
+    const { data, error } = await query.range(from, from + pageSize - 1);
+    if (error) {
+      console.error(`Error fetching paged rows from ${table}:`, error);
+      return rows;
+    }
+
+    const page = (data || []) as T[];
+    rows.push(...page);
+    if (page.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return rows;
+};
+
 export const ResellerView: React.FC<ResellerViewProps> = ({ onRefresh, refreshTrigger }) => {
   const { selectedStore } = useStore();
 
@@ -93,17 +126,12 @@ export const ResellerView: React.FC<ResellerViewProps> = ({ onRefresh, refreshTr
       
       const fetchFromTable = async (table: string, storeName: string): Promise<ResellerTransaction[]> => {
         try {
-          const { data, error } = await supabase
-            .from(table)
-            .select('id, created_at, customer, part_number, name, qty_keluar, harga_satuan, harga_total, resi, ecommerce, kode_toko')
-            .eq('ecommerce', 'RESELLER')
-            .order('created_at', { ascending: false })
-            .limit(500);
-          
-          if (error) {
-            console.error(`Error fetching from ${table}:`, error);
-            return [];
-          }
+          const data = await fetchAllRowsPaged<any>(
+            table,
+            'id, created_at, customer, part_number, name, qty_keluar, harga_satuan, harga_total, resi, ecommerce, kode_toko',
+            (q) => q.eq('ecommerce', 'RESELLER'),
+            { orderBy: 'created_at', ascending: false }
+          );
           
           // Add store indicator to each transaction with safe mapping
           return (data || []).map(t => {
@@ -164,25 +192,21 @@ export const ResellerView: React.FC<ResellerViewProps> = ({ onRefresh, refreshTr
       
       const fetchFromTable = async (table: string): Promise<any[]> => {
         try {
-          let query = supabase
-            .from(table)
-            .select('kode_toko, qty_keluar, harga_total, created_at')
-            .eq('ecommerce', 'RESELLER');
-          
-          // Apply date filters
-          if (mainDateFrom) {
-            query = query.gte('created_at', `${mainDateFrom}T00:00:00`);
-          }
-          if (mainDateTo) {
-            query = query.lte('created_at', `${mainDateTo}T23:59:59`);
-          }
-          
-          const { data, error } = await query;
-          if (error) {
-            console.error(`Error fetching stats from ${table}:`, error);
-            return [];
-          }
-          return data || [];
+          return await fetchAllRowsPaged<any>(
+            table,
+            'kode_toko, qty_keluar, harga_total, created_at',
+            (q) => {
+              let filtered = q.eq('ecommerce', 'RESELLER');
+              if (mainDateFrom) {
+                filtered = filtered.gte('created_at', `${mainDateFrom}T00:00:00`);
+              }
+              if (mainDateTo) {
+                filtered = filtered.lte('created_at', `${mainDateTo}T23:59:59`);
+              }
+              return filtered;
+            },
+            { orderBy: 'created_at', ascending: false }
+          );
         } catch (err) {
           console.error(`Exception fetching stats from ${table}:`, err);
           return [];

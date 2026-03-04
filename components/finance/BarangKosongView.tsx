@@ -121,6 +121,35 @@ const formatDate = (dateStr: string) => {
   return date.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' });
 };
 
+const fetchAllRowsPaged = async <T,>(
+  table: string,
+  selectColumns: string,
+  buildQuery: (query: any) => any,
+  options?: { orderBy?: string; ascending?: boolean; pageSize?: number }
+): Promise<T[]> => {
+  const pageSize = options?.pageSize ?? 1000;
+  const rows: T[] = [];
+  let from = 0;
+
+  while (true) {
+    let query = supabase.from(table).select(selectColumns);
+    query = buildQuery(query);
+    if (options?.orderBy) {
+      query = query.order(options.orderBy, { ascending: options.ascending ?? true });
+    }
+
+    const { data, error } = await query.range(from, from + pageSize - 1);
+    if (error) throw error;
+
+    const page = (data || []) as T[];
+    rows.push(...page);
+    if (page.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return rows;
+};
+
 const escapeHtml = (value: string) =>
   (value || '')
     .replace(/&/g, '&amp;')
@@ -2417,13 +2446,18 @@ export const BarangKosongView: React.FC = () => {
       // For MJM: fetch only from barang_masuk_mjm
       
       // Fetch base data from BOTH stores
-      const { data: baseMJMData } = await supabase
-        .from('base_mjm')
-        .select('part_number, name, quantity, brand, application');
-      
-      const { data: baseBJWData } = await supabase
-        .from('base_bjw')
-        .select('part_number, name, quantity, brand, application');
+      const [baseMJMData, baseBJWData] = await Promise.all([
+        fetchAllRowsPaged<Record<string, any>>(
+          'base_mjm',
+          'part_number, name, quantity, brand, application',
+          (query) => query
+        ),
+        fetchAllRowsPaged<Record<string, any>>(
+          'base_bjw',
+          'part_number, name, quantity, brand, application',
+          (query) => query
+        )
+      ]);
       
       // Create lookup maps for both stores
       const baseMJMMap: Record<string, BaseItemInfo> = {};
@@ -2465,39 +2499,29 @@ export const BarangKosongView: React.FC = () => {
       // Fetch barang masuk data
       let masukDataMJM: any[] = [];
       let masukDataBJW: any[] = [];
-      
+
       // Always fetch MJM data (for both BJW and MJM views)
-      let queryMJM = supabase
-        .from('barang_masuk_mjm')
-        .select('part_number, nama_barang, customer, harga_satuan, tempo, created_at')
-        .order('created_at', { ascending: false });
-      
-      if (activeTab === 'TEMPO') {
-        queryMJM = queryMJM.in('tempo', TEMPO_VALUES);
-      } else {
-        queryMJM = queryMJM.eq('tempo', 'CASH');
-      }
-      
-      const { data: mjmData, error: mjmError } = await queryMJM;
-      if (mjmError) throw mjmError;
-      masukDataMJM = mjmData || [];
+      masukDataMJM = await fetchAllRowsPaged<Record<string, any>>(
+        'barang_masuk_mjm',
+        'part_number, nama_barang, customer, harga_satuan, tempo, created_at',
+        (query) => {
+          if (activeTab === 'TEMPO') return query.in('tempo', TEMPO_VALUES);
+          return query.eq('tempo', 'CASH');
+        },
+        { orderBy: 'created_at', ascending: false }
+      );
       
       // For BJW view, also fetch BJW data
       if (isBJW) {
-        let queryBJW = supabase
-          .from('barang_masuk_bjw')
-          .select('part_number, nama_barang, customer, harga_satuan, tempo, created_at')
-          .order('created_at', { ascending: false });
-        
-        if (activeTab === 'TEMPO') {
-          queryBJW = queryBJW.in('tempo', TEMPO_VALUES);
-        } else {
-          queryBJW = queryBJW.eq('tempo', 'CASH');
-        }
-        
-        const { data: bjwData, error: bjwError } = await queryBJW;
-        if (bjwError) throw bjwError;
-        masukDataBJW = bjwData || [];
+        masukDataBJW = await fetchAllRowsPaged<Record<string, any>>(
+          'barang_masuk_bjw',
+          'part_number, nama_barang, customer, harga_satuan, tempo, created_at',
+          (query) => {
+            if (activeTab === 'TEMPO') return query.in('tempo', TEMPO_VALUES);
+            return query.eq('tempo', 'CASH');
+          },
+          { orderBy: 'created_at', ascending: false }
+        );
       }
       
       // Group by customer (supplier)
@@ -2745,22 +2769,20 @@ export const BarangKosongView: React.FC = () => {
     setImporterCatalogError(null);
 
     try {
-      const [
-        { data: baseMJMData, error: baseMJMError },
-        { data: baseBJWData, error: baseBJWError },
-        { data: masukMJMData, error: masukMJMError },
-        { data: masukBJWData, error: masukBJWError }
-      ] = await Promise.all([
-        supabase.from('base_mjm').select('part_number, name, quantity, brand, application'),
-        supabase.from('base_bjw').select('part_number, name, quantity, brand, application'),
-        supabase.from('barang_masuk_mjm').select('*'),
-        supabase.from('barang_masuk_bjw').select('*')
+      const [baseMJMData, baseBJWData, masukMJMData, masukBJWData] = await Promise.all([
+        fetchAllRowsPaged<Record<string, any>>(
+          'base_mjm',
+          'part_number, name, quantity, brand, application',
+          (query) => query
+        ),
+        fetchAllRowsPaged<Record<string, any>>(
+          'base_bjw',
+          'part_number, name, quantity, brand, application',
+          (query) => query
+        ),
+        fetchAllRowsPaged<Record<string, any>>('barang_masuk_mjm', '*', (query) => query),
+        fetchAllRowsPaged<Record<string, any>>('barang_masuk_bjw', '*', (query) => query)
       ]);
-
-      if (baseMJMError) throw baseMJMError;
-      if (baseBJWError) throw baseBJWError;
-      if (masukMJMError) throw masukMJMError;
-      if (masukBJWError) throw masukBJWError;
 
       const normalizePN = (pn: string): string => pn?.trim().toUpperCase().replace(/\s+/g, ' ') || '';
       const catalogMap = new Map<string, ImporterCatalogItem>();
@@ -2850,13 +2872,12 @@ export const BarangKosongView: React.FC = () => {
   
   const loadCartFromOrderSupplier = async (): Promise<CartItem[]> => {
     try {
-      const { data, error } = await supabase
-        .from('order_supplier')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(500);
-
-      if (error) throw error;
+      const data = await fetchAllRowsPaged<Record<string, any>>(
+        'order_supplier',
+        '*',
+        (query) => query,
+        { orderBy: 'created_at', ascending: false }
+      );
 
       return mapOrderSupplierRowsToCart((data || []) as Record<string, any>[], selectedStore || 'mjm');
     } catch (error: any) {
