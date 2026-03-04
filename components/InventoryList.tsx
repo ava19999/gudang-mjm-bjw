@@ -72,6 +72,8 @@ export const InventoryList: React.FC<InventoryListProps> = ({
                     src={item.imageUrl} 
                     alt={item.name} 
                     className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110 cursor-zoom-in" 
+                    loading="lazy"
+                    decoding="async"
                     referrerPolicy="no-referrer" 
                     onClick={(e) => handleImageClick(e, item)}
                     onError={(e)=>{(e.target as HTMLImageElement).style.display='none'}}
@@ -115,7 +117,7 @@ export const InventoryList: React.FC<InventoryListProps> = ({
                 className="w-16 h-16 bg-gray-700 rounded-lg overflow-hidden flex-shrink-0 cursor-pointer relative group" 
                 onClick={(e) => handleImageClick(e, item)}
               >
-                {item.imageUrl ? <img src={item.imageUrl} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-gray-600"><Package size={20}/></div>}
+                {item.imageUrl ? <img src={item.imageUrl} className="w-full h-full object-cover" loading="lazy" decoding="async" /> : <div className="w-full h-full flex items-center justify-center text-gray-600"><Package size={20}/></div>}
                 
                 {/* SAFETY CHECK: Gunakan item.images?.length */}
                 {item.images && item.images.length > 1 && (
