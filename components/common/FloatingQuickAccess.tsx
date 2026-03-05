@@ -2,7 +2,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Search, Plus, X, Package, ArrowRight, Loader2, Sparkles, Edit3, MapPin, Tag, Hash, Layers, Image as ImageIcon, Calculator, RefreshCw, ArrowRightLeft, ShoppingCart, Send, Minus, PackageX, DollarSign, Store, Clock, TrendingDown, History, TrendingUp, PenTool } from 'lucide-react';
 import { fetchSearchSuggestions, fetchInventoryByPartNumber, fetchShopItems, fetchSupplierPricesByPartNumber, SupplierPriceInfo, fetchPriceHistoryByPartNumber, PriceHistoryItem, fetchAllDistinctValues } from '../../services/supabaseService';
-import { supabase } from '../../services/supabaseClient';
 import { useStore } from '../../context/StoreContext';
 import { InventoryItem } from '../../types';
 

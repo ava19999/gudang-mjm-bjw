@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Calendar, BarChart2, PieChart, Download, User, Clock, ChevronDown, ChevronUp, X, Edit3, History, Save, Search, Package, ShoppingBag, Store, Printer } from 'lucide-react';
 import { supabase } from '../../services/supabaseClient';
+import { fetchCachedRowsPaged as fetchAllRowsPaged } from '../../services/edgeCacheTableReader';
+import { markEdgeListDatasetsDirty } from '../../services/supabaseService';
 import { useStore } from '../../context/StoreContext';
 import html2canvas from 'html2canvas';
 
@@ -66,38 +68,6 @@ const isCashTempo = (tempo?: string): boolean => {
   return normalizeTempoLabel(tempo) === 'CASH';
 };
 
-const fetchAllRowsPaged = async <T,>(
-  table: string,
-  selectColumns: string,
-  buildQuery: (query: any) => any,
-  options?: { orderBy?: string; ascending?: boolean; pageSize?: number }
-): Promise<T[]> => {
-  const pageSize = options?.pageSize ?? 1000;
-  const rows: T[] = [];
-  let from = 0;
-
-  while (true) {
-    let query = supabase.from(table).select(selectColumns);
-    query = buildQuery(query);
-    if (options?.orderBy) {
-      query = query.order(options.orderBy, { ascending: options.ascending ?? true });
-    }
-
-    const { data, error } = await query.range(from, from + pageSize - 1);
-    if (error) {
-      console.error(`Error fetching paged rows from ${table}:`, error);
-      return rows;
-    }
-
-    const page = (data || []) as T[];
-    rows.push(...page);
-    if (page.length < pageSize) break;
-    from += pageSize;
-  }
-
-  return rows;
-};
-
 const splitIntoChunks = <T,>(items: T[], chunkSize: number): T[][] => {
   if (items.length === 0) return [];
   const chunks: T[][] = [];
@@ -105,6 +75,24 @@ const splitIntoChunks = <T,>(items: T[], chunkSize: number): T[][] => {
     chunks.push(items.slice(i, i + chunkSize));
   }
   return chunks;
+};
+
+const markFinanceDatasetDirtyByTable = (table: string) => {
+  if (table === 'barang_masuk_mjm') {
+    markEdgeListDatasetsDirty('mjm', ['barang-masuk-log']);
+    return;
+  }
+  if (table === 'barang_masuk_bjw') {
+    markEdgeListDatasetsDirty('bjw', ['barang-masuk-log']);
+    return;
+  }
+  if (table === 'barang_keluar_mjm') {
+    markEdgeListDatasetsDirty('mjm', ['barang-keluar-log']);
+    return;
+  }
+  if (table === 'barang_keluar_bjw') {
+    markEdgeListDatasetsDirty('bjw', ['barang-keluar-log']);
+  }
 };
 
 const updateTempoForIds = async (
@@ -121,6 +109,7 @@ const updateTempoForIds = async (
 
     if (error) throw error;
   }
+  markFinanceDatasetDirtyByTable(table);
 };
 
 const normalizeSubToko = (value?: string): 'MJM' | 'LARIS' | 'BJW' | 'PRAKTIS PART' | '-' => {
@@ -818,6 +807,7 @@ export const RekapBulananView: React.FC = () => {
         showToast(`Gagal update riwayat: ${error.message}`, 'error');
         return;
       }
+      markFinanceDatasetDirtyByTable(targetTable);
 
       setHistoryData((prev) =>
         prev.map((item) =>

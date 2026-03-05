@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, Calculator, Calendar, RefreshCw, Search } from 'lucide-react';
-import { supabase } from '../../services/supabaseClient';
+import { fetchCachedRowsPaged } from '../../services/edgeCacheTableReader';
 
 type ModalSource = 'HARGA_TERENDAH_MASUK' | 'ESTIMASI_80PCT_AVG_JUAL' | 'TANPA_MODAL';
 
@@ -200,31 +200,15 @@ export const ZakatTahunanView: React.FC = () => {
     orderColumn: string,
     applyFilters?: (query: any) => any
   ): Promise<T[]> => {
-    const pageSize = 1000;
-    let from = 0;
-    const allRows: T[] = [];
-
-    while (true) {
-      let query: any = supabase
-        .from(table)
-        .select(select)
-        .order(orderColumn, { ascending: true });
-
-      if (applyFilters) {
-        query = applyFilters(query);
-      }
-
-      const { data, error: queryError } = await query.range(from, from + pageSize - 1);
-      if (queryError) throw queryError;
-
-      const page = (data || []) as T[];
-      allRows.push(...page);
-
-      if (page.length < pageSize) break;
-      from += pageSize;
-    }
-
-    return allRows;
+    return fetchCachedRowsPaged<T>(
+      table,
+      select,
+      (query) => {
+        const filtered = applyFilters ? applyFilters(query) : query;
+        return filtered.order(orderColumn, { ascending: true });
+      },
+      { orderBy: orderColumn, ascending: true }
+    );
   };
 
   const loadData = async () => {

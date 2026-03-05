@@ -68,9 +68,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [editingItem, setEditingItem] = useState<InventoryItem | undefined>(undefined);
   const [showBatchForm, setShowBatchForm] = useState(false);
   
-  // Cache Key Helper
-  const getDashCacheKey = (key: string) => `dash_cache_${selectedStore || 'unknown'}_${key}`;
-
   // --- EFFECTS ---
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -89,7 +86,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   // --- DATA LOADING (BAGIAN YANG DIPERBAIKI) ---
   const loadData = useCallback(async () => {
-    let hasCachedData = false;
     // Kita bungkus filter jadi satu objek
     const filters = {
       partNumber: debouncedPartNumber,
@@ -98,27 +94,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       app: debouncedApp,
       type: filterType
     };
-
-    // Cek apakah ini tampilan default (Halaman 1, tanpa filter)
-    const isDefaultView = page === 1 && !debouncedPartNumber && !debouncedName && !debouncedBrand && !debouncedApp && filterType === 'all' && priceSort === 'none';
-
-    // 1. LOAD CACHE (Hanya untuk default view agar cepat)
-    if (isDefaultView && selectedStore) {
-      try {
-        const cachedList = localStorage.getItem(getDashCacheKey('list_default'));
-        if (cachedList) {
-          const parsed = JSON.parse(cachedList);
-          if (parsed && Array.isArray(parsed.data)) {
-             setLocalItems(parsed.data);
-             setTotalPages(Math.ceil((parsed.total || 0) / 50));
-             hasCachedData = parsed.data.length > 0;
-          }
-        }
-      } catch (e) {}
-    }
-
-    // Jika cache ada, tampilkan dulu agar tidak menunggu fetch selesai.
-    setLoading(!hasCachedData);
+    setLoading(true);
 
     try {
       // 2. FETCH DATA
@@ -138,11 +114,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
         // Gunakan result.total dari service baru (sebelumnya mungkin result.count)
         const totalCount = result.total || 0;
         setTotalPages(Math.ceil(totalCount / 50));
-        
-        // 3. SAVE CACHE (Jika default view)
-        if (isDefaultView && selectedStore) {
-          localStorage.setItem(getDashCacheKey('list_default'), JSON.stringify(result));
-        }
       }
     } catch (error) {
       console.error("Gagal memuat data dashboard:", error);
@@ -151,15 +122,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   }, [page, debouncedPartNumber, debouncedName, filterType, debouncedBrand, debouncedApp, priceSort, selectedStore]);
 
   const loadStats = useCallback(async () => {
-    // 1. LOAD CACHE STATS
-    if (selectedStore) {
-      try {
-        const cachedStats = localStorage.getItem(getDashCacheKey('stats'));
-        if (cachedStats) setStats(JSON.parse(cachedStats));
-      } catch(e) {}
-    }
-
-    // 2. FETCH STATS
+    // FETCH STATS
     // fetchInventoryStats sekarang sudah menghitung semua: totalItems, totalStock, totalAsset, todayIn, todayOut
     const invStats = await fetchInventoryStats(selectedStore);
     setStats({
@@ -169,11 +132,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
       todayIn: invStats.todayIn || 0,
       todayOut: invStats.todayOut || 0
     });
-
-    // 3. SAVE CACHE STATS
-    if (selectedStore) {
-      localStorage.setItem(getDashCacheKey('stats'), JSON.stringify(invStats));
-    }
   }, [selectedStore]);
 
   useEffect(() => { loadData(); }, [loadData, refreshTrigger]);

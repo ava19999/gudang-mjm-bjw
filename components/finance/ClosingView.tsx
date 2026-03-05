@@ -4,7 +4,7 @@ import {
   Calendar, Download, FileDown, TrendingUp, TrendingDown,
   Search, ChevronDown, ChevronRight, Minus
 } from 'lucide-react';
-import { supabase } from '../../services/supabaseClient';
+import { fetchCachedRowsPaged as fetchAllRowsPaged } from '../../services/edgeCacheTableReader';
 import { useStore } from '../../context/StoreContext';
 import html2canvas from 'html2canvas';
 
@@ -59,38 +59,6 @@ interface PivotFilterDropdownProps {
   selected: string[];
   onChange: (next: string[]) => void;
 }
-
-const fetchAllRowsPaged = async <T,>(
-  table: string,
-  selectColumns: string,
-  buildQuery: (query: any) => any,
-  options?: { orderBy?: string; ascending?: boolean; pageSize?: number }
-): Promise<T[]> => {
-  const pageSize = options?.pageSize ?? 1000;
-  const rows: T[] = [];
-  let from = 0;
-
-  while (true) {
-    let query = supabase.from(table).select(selectColumns);
-    query = buildQuery(query);
-    if (options?.orderBy) {
-      query = query.order(options.orderBy, { ascending: options.ascending ?? true });
-    }
-
-    const { data, error } = await query.range(from, from + pageSize - 1);
-    if (error) {
-      console.error(`Error fetching paged rows from ${table}:`, error);
-      return rows;
-    }
-
-    const page = (data || []) as T[];
-    rows.push(...page);
-    if (page.length < pageSize) break;
-    from += pageSize;
-  }
-
-  return rows;
-};
 
 const PivotFilterDropdown: React.FC<PivotFilterDropdownProps> = ({
   label,

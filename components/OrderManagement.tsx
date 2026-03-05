@@ -593,21 +593,22 @@ export const OrderManagement: React.FC = () => {
       if (activeTab === 'TERJUAL') {
         setSoldData([]);
         setLoadingProgress(1);
+        const aggregatedRows: SoldItemRow[] = [];
 
         await fetchSoldItemsProgressive(selectedStore, ({ chunk, loaded, total }) => {
           if (requestId !== loadRequestRef.current) return;
-
-          setSoldData(prev => [...prev, ...chunk]);
+          if (chunk && chunk.length > 0) aggregatedRows.push(...chunk);
 
           if (total > 0) {
             const percent = Math.floor((loaded / total) * 100);
             setLoadingProgress(Math.min(99, Math.max(1, percent)));
           } else {
-            setLoadingProgress(prev => Math.min(95, prev + 6));
+            setLoadingProgress(prev => Math.min(95, prev + 8));
           }
         });
 
         if (requestId !== loadRequestRef.current) return;
+        setSoldData(aggregatedRows);
       }
       if (activeTab === 'RETUR') {
         const rows = await fetchReturItems(selectedStore);

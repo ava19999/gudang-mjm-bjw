@@ -1,5 +1,6 @@
 // FILE: services/pettyCashService.ts
 import { supabase } from './supabaseClient';
+import { markEdgeListDatasetsDirty, readEdgeListRowsCached } from './supabaseService';
 
 export interface PettyCashEntry {
   id: string;
@@ -17,61 +18,34 @@ const getTableName = (store: string | null): string => {
   return store === 'bjw' ? 'petty_cash_bjw' : 'petty_cash_mjm';
 };
 
-const fetchAllPettyCashRows = async (table: string): Promise<any[]> => {
-  const pageSize = 1000;
-  const rows: any[] = [];
-  let from = 0;
+const getPettyCashDataset = () => 'petty-cash' as const;
 
-  while (true) {
-    const { data, error } = await supabase
-      .from(table)
-      .select('*')
-      .order('tgl', { ascending: false })
-      .range(from, from + pageSize - 1);
+const markPettyCashDirty = (store: string | null) => {
+  markEdgeListDatasetsDirty(store, [getPettyCashDataset()]);
+};
 
-    if (error) {
-      console.error(`Error fetching paged petty cash rows from ${table}:`, error);
-      return rows;
-    }
-
-    const page = data || [];
-    rows.push(...page);
-    if (page.length < pageSize) break;
-    from += pageSize;
-  }
-
-  return rows;
+const fetchAllPettyCashRows = async (store: string | null): Promise<any[]> => {
+  const rows = await readEdgeListRowsCached<any>(store, getPettyCashDataset());
+  return (rows || []).sort((a: any, b: any) => {
+    const aTime = new Date(String(a?.tgl || 0)).getTime();
+    const bTime = new Date(String(b?.tgl || 0)).getTime();
+    return bTime - aTime;
+  });
 };
 
 const fetchAllPettyCashRowsByAccount = async (
-  table: string,
+  store: string | null,
   akun: 'cash' | 'bank',
   ascending: boolean
 ): Promise<any[]> => {
-  const pageSize = 1000;
-  const rows: any[] = [];
-  let from = 0;
-
-  while (true) {
-    const { data, error } = await supabase
-      .from(table)
-      .select('*')
-      .eq('akun', akun)
-      .order('tgl', { ascending })
-      .range(from, from + pageSize - 1);
-
-    if (error) {
-      console.error(`Error fetching paged petty cash rows by account from ${table}:`, error);
-      return rows;
-    }
-
-    const page = data || [];
-    rows.push(...page);
-    if (page.length < pageSize) break;
-    from += pageSize;
-  }
-
-  return rows;
+  const rows = await readEdgeListRowsCached<any>(store, getPettyCashDataset());
+  return (rows || [])
+    .filter((row: any) => String(row?.akun || 'cash') === akun)
+    .sort((a: any, b: any) => {
+      const aTime = new Date(String(a?.tgl || 0)).getTime();
+      const bTime = new Date(String(b?.tgl || 0)).getTime();
+      return ascending ? aTime - bTime : bTime - aTime;
+    });
 };
 
 // Helper: Parse angka dari input dengan format Indonesia (titik sebagai pemisah ribuan)
@@ -102,9 +76,8 @@ export const formatIndonesianNumber = (value: number): string => {
  * Ambil semua transaksi petty cash
  */
 export const getPettyCashEntries = async (store: string | null): Promise<PettyCashEntry[]> => {
-  const table = getTableName(store);
   try {
-    const data = await fetchAllPettyCashRows(table);
+    const data = await fetchAllPettyCashRows(store);
 
     return (data || []).map(item => ({
       id: String(item.id),
@@ -126,20 +99,13 @@ export const getPettyCashEntries = async (store: string | null): Promise<PettyCa
  * Hitung saldo terakhir per akun (cash atau bank)
  */
 export const getBalanceByAccount = async (store: string | null, akun: 'cash' | 'bank'): Promise<number> => {
-  const table = getTableName(store);
   try {
-    const { data, error } = await supabase
-      .from(table)
-      .select('saldosaatini')
-      .eq('akun', akun)
-      .order('tgl', { ascending: false })
-      .limit(1);
-
-    if (error || !data || data.length === 0) {
+    const rows = await fetchAllPettyCashRowsByAccount(store, akun, false);
+    if (!rows || rows.length === 0) {
       return 0;
     }
 
-    return Number(data[0].saldosaatini) || 0;
+    return Number(rows[0]?.saldosaatini) || 0;
   } catch (err) {
     console.error('getBalanceByAccount error:', err);
     return 0;
@@ -215,6 +181,7 @@ export const addPettyCashEntry = async (
       return { success: false, message: error.message };
     }
 
+    markPettyCashDirty(store);
     return { 
       success: true, 
       message: 'Transaksi berhasil ditambahkan',
@@ -255,6 +222,7 @@ export const updatePettyCashKegunaan = async (
       return { success: false, message: error.message };
     }
 
+    markPettyCashDirty(store);
     return { success: true, message: 'Kegunaan berhasil diupdate' };
   } catch (err: any) {
     console.error('updatePettyCashKegunaan error:', err);
@@ -293,6 +261,7 @@ export const deletePettyCashEntry = async (
 
     // Recalculate saldo untuk akun ini
     await recalculateBalancesByAccount(store, akun);
+    markPettyCashDirty(store);
 
     return { success: true, message: 'Transaksi berhasil dihapus' };
   } catch (err: any) {
@@ -307,7 +276,7 @@ export const deletePettyCashEntry = async (
 export const recalculateBalancesByAccount = async (store: string | null, akun: 'cash' | 'bank'): Promise<void> => {
   const table = getTableName(store);
   try {
-    const data = await fetchAllPettyCashRowsByAccount(table, akun, true);
+    const data = await fetchAllPettyCashRowsByAccount(store, akun, true);
 
     let runningBalance = 0;
 
@@ -324,6 +293,7 @@ export const recalculateBalancesByAccount = async (store: string | null, akun: '
           .eq('id', entry.id);
       }
     }
+    markPettyCashDirty(store);
   } catch (err) {
     console.error('recalculateBalancesByAccount error:', err);
   }
@@ -333,9 +303,8 @@ export const recalculateBalancesByAccount = async (store: string | null, akun: '
  * Ambil transaksi dengan filter per akun
  */
 export const getEntriesByAccount = async (store: string | null, akun: 'cash' | 'bank'): Promise<PettyCashEntry[]> => {
-  const table = getTableName(store);
   try {
-    const data = await fetchAllPettyCashRowsByAccount(table, akun, false);
+    const data = await fetchAllPettyCashRowsByAccount(store, akun, false);
 
     return (data || []).map(item => ({
       id: String(item.id),

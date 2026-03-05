@@ -8,6 +8,8 @@ import {
 } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import { supabase } from '../../services/supabaseClient';
+import { fetchCachedRowsPaged as fetchAllRowsPaged } from '../../services/edgeCacheTableReader';
+import { markEdgeListDatasetsDirty, markInventoryCacheDirty, readInventoryRowsCached } from '../../services/supabaseService';
 import { useStore } from '../../context/StoreContext';
 
 // Types
@@ -59,6 +61,7 @@ interface Pembayaran {
   created_at: string;
   store: string;
   for_months: string;
+  toko?: string;
 }
 
 // Utility functions
@@ -88,35 +91,6 @@ const formatDate = (dateStr: string): string => {
     month: 'short', 
     year: 'numeric' 
   });
-};
-
-const fetchAllRowsPaged = async <T,>(
-  table: string,
-  selectColumns: string,
-  buildQuery: (query: any) => any,
-  options?: { orderBy?: string; ascending?: boolean; pageSize?: number }
-): Promise<T[]> => {
-  const pageSize = options?.pageSize ?? 1000;
-  const rows: T[] = [];
-  let from = 0;
-
-  while (true) {
-    let query = supabase.from(table).select(selectColumns);
-    query = buildQuery(query);
-    if (options?.orderBy) {
-      query = query.order(options.orderBy, { ascending: options.ascending ?? true });
-    }
-
-    const { data, error } = await query.range(from, from + pageSize - 1);
-    if (error) throw error;
-
-    const page = (data || []) as T[];
-    rows.push(...page);
-    if (page.length < pageSize) break;
-    from += pageSize;
-  }
-
-  return rows;
 };
 
 export const PiutangCustomerView: React.FC = () => {
@@ -261,7 +235,12 @@ export const PiutangCustomerView: React.FC = () => {
             const dueMonth = calculateDueMonth(record.created_at, record.tempo || '1 BLN');
             return dueMonth === filterMonth;
           });
-          allRecords.push(...filteredData);
+          allRecords.push(
+            ...filteredData.map((record) => ({
+              ...record,
+              store: store as 'mjm' | 'bjw'
+            }))
+          );
         } catch (error) {
           console.error(`Error fetching from ${tableName}:`, error);
         }
@@ -583,6 +562,7 @@ export const PiutangCustomerView: React.FC = () => {
 
       if (error) throw error;
 
+      markEdgeListDatasetsDirty('mjm', ['importir-pembayaran']);
       showToast('Pembayaran berhasil dicatat', 'success');
       setShowPaymentModal(false);
       setPaymentAmount('');
@@ -616,6 +596,7 @@ export const PiutangCustomerView: React.FC = () => {
 
       if (error) throw error;
 
+      markEdgeListDatasetsDirty('mjm', ['importir-tagihan']);
       showToast('Tagihan berhasil ditambahkan', 'success');
       setShowTagihanModal(false);
       setTagihanCustomer('');
@@ -689,6 +670,7 @@ export const PiutangCustomerView: React.FC = () => {
 
       if (error) throw error;
 
+      markEdgeListDatasetsDirty('mjm', ['importir-pembayaran']);
       showToast('Pembayaran berhasil diupdate', 'success');
       setEditingPayment(null);
       setEditPaymentAmount('');
@@ -713,6 +695,7 @@ export const PiutangCustomerView: React.FC = () => {
 
       if (error) throw error;
 
+      markEdgeListDatasetsDirty('mjm', ['importir-pembayaran']);
       showToast('Pembayaran berhasil dihapus', 'success');
       loadData();
     } catch (err) {
@@ -741,22 +724,8 @@ export const PiutangCustomerView: React.FC = () => {
     const qtyDiff = newQty - oldQty; // positive = add stock, negative = reduce stock
 
     try {
-      // Determine which table based on the transaction
-      // We need to find which store this transaction is from
-      let tableName = '';
-      
-      // Try MJM first
-      const { data: mjmData } = await supabase
-        .from('barang_masuk_mjm')
-        .select('id')
-        .eq('id', editingTransaction.id)
-        .single();
-      
-      if (mjmData) {
-        tableName = 'barang_masuk_mjm';
-      } else {
-        tableName = 'barang_masuk_bjw';
-      }
+      const storeKey = editingTransaction.store === 'bjw' ? 'bjw' : 'mjm';
+      const tableName = storeKey === 'bjw' ? 'barang_masuk_bjw' : 'barang_masuk_mjm';
 
       // Update the barang_masuk record
       const { error: updateError } = await supabase
@@ -772,31 +741,29 @@ export const PiutangCustomerView: React.FC = () => {
 
       // Update stock in inventory if qty changed
       if (qtyDiff !== 0) {
-        const inventoryTable = tableName === 'barang_masuk_mjm' ? 'inventory_mjm' : 'inventory_bjw';
-        
-        // Get current stock
-        const { data: inventoryData } = await supabase
+        const inventoryTable = storeKey === 'mjm' ? 'inventory_mjm' : 'inventory_bjw';
+        const inventoryRows = await readInventoryRowsCached(storeKey);
+        const stockRow = inventoryRows.find(
+          (row) =>
+            String((row as any)?.part_number || '').trim().toUpperCase() ===
+            String(editingTransaction.part_number || '').trim().toUpperCase()
+        );
+        const currentStock = Number((stockRow as any)?.stok_akhir ?? (stockRow as any)?.quantity ?? 0);
+        const newStock = Math.max(0, currentStock + qtyDiff); // Prevent negative stock
+
+        const { error: stockError } = await supabase
           .from(inventoryTable)
-          .select('stok_akhir')
-          .eq('part_number', editingTransaction.part_number)
-          .single();
+          .update({ stok_akhir: newStock })
+          .eq('part_number', editingTransaction.part_number);
 
-        if (inventoryData) {
-          const currentStock = inventoryData.stok_akhir || 0;
-          const newStock = Math.max(0, currentStock + qtyDiff); // Prevent negative stock
-
-          const { error: stockError } = await supabase
-            .from(inventoryTable)
-            .update({ stok_akhir: newStock })
-            .eq('part_number', editingTransaction.part_number);
-
-          if (stockError) {
-            console.error('Error updating stock:', stockError);
-            // Don't throw - transaction update succeeded
-          }
+        if (stockError) {
+          console.error('Error updating stock:', stockError);
+          // Don't throw - transaction update succeeded
         }
       }
 
+      markEdgeListDatasetsDirty(storeKey, ['barang-masuk-log']);
+      markInventoryCacheDirty(storeKey);
       showToast('Transaksi berhasil diupdate', 'success');
       setEditingTransaction(null);
       setEditTransactionQty('');
@@ -835,6 +802,7 @@ export const PiutangCustomerView: React.FC = () => {
 
       if (error) throw error;
 
+      markEdgeListDatasetsDirty('mjm', ['importir-tagihan']);
       showToast('Tagihan berhasil diupdate', 'success');
       setEditingTagihan(null);
       setEditTagihanAmount('');
@@ -859,6 +827,7 @@ export const PiutangCustomerView: React.FC = () => {
 
       if (error) throw error;
 
+      markEdgeListDatasetsDirty('mjm', ['importir-tagihan']);
       showToast('Tagihan berhasil dihapus', 'success');
       loadData();
     } catch (err) {

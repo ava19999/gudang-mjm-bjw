@@ -3,6 +3,14 @@ import { supabase } from './supabaseClient';
 import { ResiScanStage, ResiItem, ResellerMaster, ParsedCSVItem } from '../types';
 // [UBAH] Import helper timezone
 import { getWIBDate } from '../utils/timezone';
+import { fetchCachedRowsPaged } from './edgeCacheTableReader';
+import {
+  markEdgeListDatasetsDirty,
+  markGlobalEdgeListDatasetsDirty,
+  markInventoryCacheDirty,
+  readEdgeListRowsCached,
+  readInventoryRowsCached
+} from './supabaseService';
 
 // ============================================================================
 // HELPER: Table Name Selector
@@ -15,6 +23,22 @@ const getBarangKeluarTable = (store: string | null) =>
 
 const getStockTable = (store: string | null) => 
   store === 'mjm' ? 'base_mjm' : 'base_bjw';
+
+const SCAN_RESI_DATASET = 'scan-resi' as const;
+const RESI_ITEMS_DATASET = 'resi-items' as const;
+const SOLD_ITEMS_DATASET = 'sold-items' as const;
+
+const markScanResiDirty = (store: string | null) => {
+  markEdgeListDatasetsDirty(store, [SCAN_RESI_DATASET]);
+};
+
+const markResiItemsDirty = (store: string | null) => {
+  markEdgeListDatasetsDirty(store, [RESI_ITEMS_DATASET]);
+};
+
+const markSoldItemsDirty = (store: string | null) => {
+  markEdgeListDatasetsDirty(store, [SOLD_ITEMS_DATASET, 'barang-keluar-log']);
+};
 
 const normalizeResiKey = (value: string | null | undefined): string =>
   String(value || '').trim().toUpperCase();
@@ -53,27 +77,7 @@ const fetchAllRowsPaged = async <T,>(
   buildQuery: (query: any) => any,
   options?: { orderBy?: string; ascending?: boolean; pageSize?: number }
 ): Promise<T[]> => {
-  const pageSize = options?.pageSize ?? 1000;
-  const rows: T[] = [];
-  let from = 0;
-
-  while (true) {
-    let query = supabase.from(table).select(selectColumns);
-    query = buildQuery(query);
-    if (options?.orderBy) {
-      query = query.order(options.orderBy, { ascending: options.ascending ?? true });
-    }
-
-    const { data, error } = await query.range(from, from + pageSize - 1);
-    if (error) throw error;
-
-    const page = (data || []) as T[];
-    rows.push(...page);
-    if (page.length < pageSize) break;
-    from += pageSize;
-  }
-
-  return rows;
+  return fetchCachedRowsPaged<T>(table, selectColumns, buildQuery, options);
 };
 
 const fetchRowsByInChunksPaged = async <T,>(
@@ -122,6 +126,16 @@ const updateRowsByIdsInChunks = async (
 
     if (error) throw error;
   }
+
+  if (table === 'scan_resi_mjm') {
+    markScanResiDirty('mjm');
+  } else if (table === 'scan_resi_bjw') {
+    markScanResiDirty('bjw');
+  } else if (table === 'resi_items_mjm') {
+    markResiItemsDirty('mjm');
+  } else if (table === 'resi_items_bjw') {
+    markResiItemsDirty('bjw');
+  }
 };
 
 // ============================================================================
@@ -140,65 +154,30 @@ export const checkExistingInBarangKeluar = async (
   
   try {
     // Normalize: uppercase dan trim, filter yang kosong
-    const normalized = resiOrOrders
-      .map(r => (r || '').trim().toUpperCase())
-      .filter(r => r !== '' && r !== '-');
-    
-    if (normalized.length === 0) return new Set();
-    
+    const normalized = new Set(
+      resiOrOrders
+        .map(r => (r || '').trim().toUpperCase())
+        .filter(r => r !== '' && r !== '-')
+    );
+
+    if (normalized.size === 0) return new Set();
+
+    const storesToCheck: Array<'mjm' | 'bjw'> =
+      store === 'mjm' || store === 'bjw' ? [store] : ['mjm', 'bjw'];
     const foundSet = new Set<string>();
-    
-    // Query KEDUA tabel barang_keluar (mjm dan bjw) untuk memastikan
-    // karena data bisa ada di salah satu atau kedua tabel
-    const tables = ['barang_keluar_mjm', 'barang_keluar_bjw'];
-    
-    for (const table of tables) {
-      // Query dengan .in() untuk matching langsung - lebih efisien
-      // Gunakan ilike untuk case-insensitive matching
-      const { data, error } = await supabase
-        .from(table)
-        .select('resi')
-        .in('resi', normalized);
-      
-      if (!error && data) {
-        data.forEach((d: any) => {
-          if (d.resi) {
-            foundSet.add(d.resi.trim().toUpperCase());
-          }
-        });
-      }
-      
-      // Juga cek dengan lowercase version (case-insensitive)
-      const lowerNormalized = normalized.map(r => r.toLowerCase());
-      const { data: dataLower, error: errorLower } = await supabase
-        .from(table)
-        .select('resi')
-        .in('resi', lowerNormalized);
-      
-      if (!errorLower && dataLower) {
-        dataLower.forEach((d: any) => {
-          if (d.resi) {
-            foundSet.add(d.resi.trim().toUpperCase());
-          }
-        });
-      }
-      
-      // Cek juga dengan original case
-      const { data: dataOrig, error: errorOrig } = await supabase
-        .from(table)
-        .select('resi')
-        .in('resi', resiOrOrders.map(r => (r || '').trim()).filter(r => r !== ''));
-      
-      if (!errorOrig && dataOrig) {
-        dataOrig.forEach((d: any) => {
-          if (d.resi) {
-            foundSet.add(d.resi.trim().toUpperCase());
-          }
-        });
-      }
+
+    for (const s of storesToCheck) {
+      const rows = await readEdgeListRowsCached<any>(s, SOLD_ITEMS_DATASET);
+      (rows || []).forEach((row: any) => {
+        const key = String(row?.resi || '').trim().toUpperCase();
+        if (!key) return;
+        if (normalized.has(key)) {
+          foundSet.add(key);
+        }
+      });
     }
-    
-    console.log(`[checkExistingInBarangKeluar] Checked ${normalized.length} resi, found ${foundSet.size} in barang_keluar`);
+
+    console.log(`[checkExistingInBarangKeluar] Checked ${normalized.size} resi, found ${foundSet.size} in barang_keluar`);
     return foundSet;
   } catch (err) {
     console.error('checkExistingInBarangKeluar exception:', err);
@@ -218,11 +197,9 @@ export const scanResiStage1 = async (
     const table = getTableName(store);
     
     // CEK DUPLIKAT: Pastikan resi belum pernah di-scan sebelumnya
-    const { data: existing } = await supabase
-      .from(table)
-      .select('id, resi')
-      .eq('resi', data.resi)
-      .limit(1);
+    const existing = (await readEdgeListRowsCached<any>(store, SCAN_RESI_DATASET))
+      .filter((row: any) => String(row?.resi || '').trim() === String(data.resi || '').trim())
+      .slice(0, 1);
     
     if (existing && existing.length > 0) {
       return { success: false, message: 'Resi sudah pernah di-scan sebelumnya!' };
@@ -256,6 +233,7 @@ export const scanResiStage1 = async (
       .single();
     
     if (error) throw error;
+    markScanResiDirty(store);
     
     return { 
       success: true, 
@@ -284,17 +262,19 @@ export const scanResiStage1Bulk = async (
     
     // CEK DUPLIKAT: Ambil resi yang sudah ada di database scan_resi
     const resiList = items.map(i => i.resi);
-    const { data: existingResi } = await supabase
-      .from(table)
-      .select('resi')
-      .in('resi', resiList);
+    const resiLookup = new Set(resiList.map((r) => String(r || '').trim().toUpperCase()).filter(Boolean));
+    const existingResi = (await readEdgeListRowsCached<any>(store, SCAN_RESI_DATASET))
+      .filter((row: any) => resiLookup.has(String(row?.resi || '').trim().toUpperCase()))
+      .map((row: any) => ({ resi: row.resi }));
     
-    const existingSet = new Set((existingResi || []).map(r => r.resi));
+    const existingSet = new Set((existingResi || []).map((r: any) => String(r.resi || '').trim().toUpperCase()));
     
     // CEK BARANG KELUAR: Resi yang sudah ada di barang_keluar (sudah terjual/keluar)
     const existingInBarangKeluar = await checkExistingInBarangKeluar(resiList, store);
     
-    const duplicates = items.filter(i => existingSet.has(i.resi)).map(i => i.resi);
+    const duplicates = items
+      .filter(i => existingSet.has(String(i.resi || '').trim().toUpperCase()))
+      .map(i => i.resi);
     const alreadySold = items
       .filter(i => existingInBarangKeluar.has(i.resi.trim().toUpperCase()))
       .map(i => i.resi);
@@ -302,7 +282,7 @@ export const scanResiStage1Bulk = async (
     // Filter: bukan duplikat DAN bukan sudah terjual
     const newItems = items.filter(i => {
       const resiUpper = i.resi.trim().toUpperCase();
-      return !existingSet.has(i.resi) && !existingInBarangKeluar.has(resiUpper);
+      return !existingSet.has(resiUpper) && !existingInBarangKeluar.has(resiUpper);
     });
     
     if (newItems.length === 0) {
@@ -338,6 +318,7 @@ export const scanResiStage1Bulk = async (
 
     const { error } = await supabase.from(table).insert(insertData);
     if (error) throw error;
+    markScanResiDirty(store);
 
     let msg = `${newItems.length} resi berhasil di-scan!`;
     if (duplicates.length > 0 || alreadySold.length > 0) {
@@ -362,15 +343,15 @@ export const getResiStage1List = async (store: string | null) => {
 
 // Ambil semua resi Stage 1 yang belum completed (untuk Stage 3)
 export const getAllPendingStage1Resi = async (store: string | null) => {
-  const table = getTableName(store);
   let data: any[] = [];
   try {
-    data = await fetchAllRowsPaged<any>(
-      table,
-      '*',
-      (query) => query.eq('stage1_scanned', 'true').neq('status', 'completed'),
-      { orderBy: 'stage1_scanned_at', ascending: false }
-    );
+    const rows = await readEdgeListRowsCached<any>(store, SCAN_RESI_DATASET);
+    data = (rows || [])
+      .filter((row: any) =>
+        String(row?.stage1_scanned || '').toLowerCase() === 'true'
+        && String(row?.status || '').toLowerCase() !== 'completed'
+      )
+      .sort((a: any, b: any) => String(b?.stage1_scanned_at || '').localeCompare(String(a?.stage1_scanned_at || '')));
   } catch (error) {
     console.error('getAllPendingStage1Resi error:', error);
     return [];
@@ -403,7 +384,9 @@ export const getAllPendingStage1Resi = async (store: string | null) => {
   if (soldResiIds.length > 0) {
     console.log(`[getAllPendingStage1Resi] Auto-marking ${soldResiIds.length} resi as completed (already in barang_keluar):`, soldResiIds);
     try {
+      const table = getTableName(store);
       await updateRowsByIdsInChunks(table, soldResiIds, { status: 'completed' });
+      markScanResiDirty(store);
       console.log(`[getAllPendingStage1Resi] Successfully marked ${soldResiIds.length} resi as completed`);
     } catch (updateErr) {
       console.error('Error auto-updating sold resi status:', updateErr);
@@ -415,7 +398,8 @@ export const getAllPendingStage1Resi = async (store: string | null) => {
 
 export const deleteResiStage1 = async (id: string, store: string | null) => {
   const table = getTableName(store);
-  const { data } = await supabase.from(table).select('stage2_verified').eq('id', id).single();
+  const rows = await readEdgeListRowsCached<any>(store, SCAN_RESI_DATASET);
+  const data = (rows || []).find((row: any) => String(row?.id || '') === String(id));
   
   if (data?.stage2_verified === 'true') {
     return { success: false, message: 'Tidak bisa dihapus, sudah masuk Stage 2!' };
@@ -423,6 +407,7 @@ export const deleteResiStage1 = async (id: string, store: string | null) => {
 
   const { error } = await supabase.from(table).delete().eq('id', id);
   if (error) return { success: false, message: error.message };
+  markScanResiDirty(store);
   return { success: true, message: 'Resi dihapus.' };
 };
 
@@ -431,6 +416,7 @@ export const deleteResi = async (id: string, store: string | null) => {
   const table = getTableName(store);
   const { error } = await supabase.from(table).delete().eq('id', id);
   if (error) return { success: false, message: error.message };
+  markScanResiDirty(store);
   return { success: true, message: 'Resi berhasil dihapus.' };
 };
 
@@ -447,6 +433,7 @@ export const restoreResi = async (resiData: ResiScanStage, store: string | null)
   
   const { error } = await supabase.from(table).insert([insertData]);
   if (error) return { success: false, message: error.message };
+  markScanResiDirty(store);
   return { success: true, message: 'Resi berhasil dikembalikan!' };
 };
 
@@ -459,18 +446,17 @@ export const updateResi = async (
   const table = getTableName(store);
   const { error } = await supabase.from(table).update(updates).eq('id', id);
   if (error) return { success: false, message: error.message };
+  markScanResiDirty(store);
   return { success: true, message: 'Resi berhasil diupdate!' };
 };
 
 // --- FUNGSI RESELLER ---
 
 export const getResellers = async (): Promise<ResellerMaster[]> => {
-  const { data, error } = await supabase
-    .from('reseller_master')
-    .select('*')
-    .order('nama_reseller', { ascending: true });
-  if (error) return [];
-  return data || [];
+  const data = await readEdgeListRowsCached<ResellerMaster>('mjm', 'reseller-master');
+  return (data || []).sort((a: any, b: any) =>
+    String((a as any)?.nama_reseller || '').localeCompare(String((b as any)?.nama_reseller || ''))
+  );
 };
 
 export const addReseller = async (nama: string): Promise<{ success: boolean; message: string }> => {
@@ -479,6 +465,7 @@ export const addReseller = async (nama: string): Promise<{ success: boolean; mes
       .from('reseller_master')
       .insert([{ nama_reseller: nama }]);
     if (error) throw error;
+    markGlobalEdgeListDatasetsDirty(['reseller-master']);
     return { success: true, message: 'Reseller berhasil ditambahkan' };
   } catch (err: any) {
     return { success: false, message: err.message };
@@ -494,33 +481,28 @@ export const getResellerNamesFromBarangKeluar = async (store: string | null): Pr
   try {
     const allNames: string[] = [];
     
-    const fetchFromTable = async (table: string): Promise<string[]> => {
-      const { data, error } = await supabase
-        .from(table)
-        .select('kode_toko')
-        .eq('ecommerce', 'RESELLER')
-        .not('kode_toko', 'is', null);
-
-      if (error) {
-        console.error(`Error fetching reseller names from ${table}:`, error);
-        return [];
-      }
-
-      return (data || []).map((d: any) => d.kode_toko).filter(Boolean);
+    const fetchFromStore = async (targetStore: 'mjm' | 'bjw'): Promise<string[]> => {
+      const rows = await readEdgeListRowsCached<any>(targetStore, SOLD_ITEMS_DATASET);
+      return (rows || [])
+        .filter((row: any) =>
+          String(row?.ecommerce || '').toUpperCase() === 'RESELLER'
+          && String(row?.kode_toko || '').trim() !== ''
+        )
+        .map((row: any) => row.kode_toko);
     };
     
     // Ambil dari kedua toko untuk daftar reseller yang lengkap
     if (store === 'mjm') {
-      const names = await fetchFromTable('barang_keluar_mjm');
+      const names = await fetchFromStore('mjm');
       allNames.push(...names);
     } else if (store === 'bjw') {
-      const names = await fetchFromTable('barang_keluar_bjw');
+      const names = await fetchFromStore('bjw');
       allNames.push(...names);
     } else {
       // Default: ambil dari kedua tabel
       const [mjmNames, bjwNames] = await Promise.all([
-        fetchFromTable('barang_keluar_mjm'),
-        fetchFromTable('barang_keluar_bjw')
+        fetchFromStore('mjm'),
+        fetchFromStore('bjw')
       ]);
       allNames.push(...mjmNames, ...bjwNames);
     }
@@ -543,16 +525,14 @@ export const getResellerNamesFromBarangKeluar = async (store: string | null): Pr
 // ============================================================================
 
 export const getPendingStage2List = async (store: string | null) => {
-  const table = getTableName(store);
-  const { data, error } = await supabase
-    .from(table)
-    .select('*')
-    .eq('stage1_scanned', 'true')
-    .or('stage2_verified.is.null,stage2_verified.neq.true')
-    .order('stage1_scanned_at', { ascending: false });
-    
-  if (error) return [];
-  return mapToBoolean(data || []);
+  const rows = await readEdgeListRowsCached<any>(store, SCAN_RESI_DATASET);
+  const filtered = (rows || [])
+    .filter((row: any) =>
+      String(row?.stage1_scanned || '').toLowerCase() === 'true'
+      && String(row?.stage2_verified || '').toLowerCase() !== 'true'
+    )
+    .sort((a: any, b: any) => String(b?.stage1_scanned_at || '').localeCompare(String(a?.stage1_scanned_at || '')));
+  return mapToBoolean(filtered);
 };
 
 export const verifyResiStage2 = async (
@@ -561,21 +541,22 @@ export const verifyResiStage2 = async (
 ): Promise<{ success: boolean; message: string }> => {
   const table = getTableName(store);
   const { resi, verified_by } = data;
-
-  const { data: rows } = await supabase
-    .from(table)
-    .select('id')
-    .eq('resi', resi)
-    .eq('stage1_scanned', 'true')
-    .or('stage2_verified.is.null,stage2_verified.neq.true');
+  const allRows = await readEdgeListRowsCached<any>(store, SCAN_RESI_DATASET);
+  const rows = (allRows || []).filter((row: any) =>
+    String(row?.resi || '').trim() === String(resi || '').trim()
+    && String(row?.stage1_scanned || '').toLowerCase() === 'true'
+    && String(row?.stage2_verified || '').toLowerCase() !== 'true'
+  );
 
   if (!rows || rows.length === 0) {
-    const { data: unscan } = await supabase.from(table).select('id').eq('resi', resi).limit(1);
+    const unscan = (allRows || []).filter((row: any) =>
+      String(row?.resi || '').trim() === String(resi || '').trim()
+    ).slice(0, 1);
     if (!unscan || unscan.length === 0) return { success: false, message: 'Resi belum discan di Stage 1!' };
     return { success: false, message: 'Resi sudah terverifikasi sebelumnya.' };
   }
 
-  const ids = rows.map(r => r.id);
+  const ids = rows.map((r: any) => r.id);
   const { error } = await supabase
     .from(table)
     .update({
@@ -588,6 +569,7 @@ export const verifyResiStage2 = async (
     .in('id', ids);
 
   if (error) return { success: false, message: error.message };
+  markScanResiDirty(store);
   return { success: true, message: `${ids.length} item terverifikasi.` };
 };
 
@@ -600,17 +582,17 @@ export const verifyResiStage2Bulk = async (
   const table = getTableName(store);
   let successCount = 0;
   const alreadyVerified: string[] = [];
+  const allRows = await readEdgeListRowsCached<any>(store, SCAN_RESI_DATASET);
 
   for (const resi of resiList) {
-    const { data: rows } = await supabase
-      .from(table)
-      .select('id')
-      .eq('resi', resi)
-      .eq('stage1_scanned', 'true')
-      .or('stage2_verified.is.null,stage2_verified.neq.true');
+    const rows = (allRows || []).filter((row: any) =>
+      String(row?.resi || '').trim() === String(resi || '').trim()
+      && String(row?.stage1_scanned || '').toLowerCase() === 'true'
+      && String(row?.stage2_verified || '').toLowerCase() !== 'true'
+    );
 
     if (rows && rows.length > 0) {
-      const ids = rows.map(r => r.id);
+      const ids = rows.map((r: any) => r.id);
       const { error } = await supabase
         .from(table)
         .update({
@@ -624,13 +606,11 @@ export const verifyResiStage2Bulk = async (
       if (!error) successCount += ids.length;
     } else {
       // Cek apakah resi ada tapi sudah diverifikasi
-      const { data: existingResi } = await supabase
-        .from(table)
-        .select('id, stage2_verified')
-        .eq('resi', resi)
-        .limit(1);
+      const existingResi = (allRows || []).filter((row: any) =>
+        String(row?.resi || '').trim() === String(resi || '').trim()
+      ).slice(0, 1);
       
-      if (existingResi && existingResi.length > 0 && existingResi[0].stage2_verified === 'true') {
+      if (existingResi && existingResi.length > 0 && String(existingResi[0].stage2_verified) === 'true') {
         alreadyVerified.push(resi);
       }
     }
@@ -646,7 +626,10 @@ export const verifyResiStage2Bulk = async (
   const msg = alreadyVerified.length > 0
     ? `${successCount} resi berhasil diverifikasi! (${alreadyVerified.length} sudah ada sebelumnya)`
     : `${successCount} resi berhasil diverifikasi!`;
-  
+
+  if (successCount > 0) {
+    markScanResiDirty(store);
+  }
   return { success: true, message: msg, count: successCount, alreadyVerified };
 };
 
@@ -655,27 +638,23 @@ export const verifyResiStage2Bulk = async (
 // ============================================================================
 
 export const getResiHistory = async (store: string | null) => {
-  const table = getTableName(store);
-  const { data, error } = await supabase
-    .from(table)
-    .select('*')
-    .order('stage1_scanned_at', { ascending: false })
-    .limit(100);
-    
-  if (error) return [];
-  return mapToBoolean(data || []);
+  const rows = await readEdgeListRowsCached<any>(store, SCAN_RESI_DATASET);
+  const data = (rows || [])
+    .sort((a: any, b: any) => String(b?.stage1_scanned_at || '').localeCompare(String(a?.stage1_scanned_at || '')))
+    .slice(0, 100);
+  return mapToBoolean(data);
 };
 
 export const getPendingStage3List = async (store: string | null) => {
-  const table = getTableName(store);
   try {
-    const data = await fetchAllRowsPaged<any>(
-      table,
-      '*',
-      (query) => query.eq('stage2_verified', 'true').neq('status', 'completed'),
-      { orderBy: 'stage2_verified_at', ascending: false }
-    );
-    return mapToBoolean(data || []);
+    const rows = await readEdgeListRowsCached<any>(store, SCAN_RESI_DATASET);
+    const data = (rows || [])
+      .filter((row: any) =>
+        String(row?.stage2_verified || '').toLowerCase() === 'true'
+        && String(row?.status || '').toLowerCase() !== 'completed'
+      )
+      .sort((a: any, b: any) => String(b?.stage2_verified_at || '').localeCompare(String(a?.stage2_verified_at || '')));
+    return mapToBoolean(data);
   } catch (error) {
     console.error('getPendingStage3List error:', error);
     return [];
@@ -683,16 +662,20 @@ export const getPendingStage3List = async (store: string | null) => {
 };
 
 export const checkResiStatus = async (resis: string[], store: string | null) => {
-  const table = getTableName(store);
   if (resis.length === 0) return [];
-  
-  const { data, error } = await supabase
-    .from(table)
-    .select('resi, stage1_scanned, stage2_verified, status, ecommerce, sub_toko, no_pesanan')
-    .in('resi', resis);
-  
-  if (error) return [];
-  return data || [];
+  const lookup = new Set(resis.map((r) => String(r || '').trim().toUpperCase()).filter(Boolean));
+  const rows = await readEdgeListRowsCached<any>(store, SCAN_RESI_DATASET);
+  return (rows || [])
+    .filter((row: any) => lookup.has(String(row?.resi || '').trim().toUpperCase()))
+    .map((row: any) => ({
+      resi: row.resi,
+      stage1_scanned: row.stage1_scanned,
+      stage2_verified: row.stage2_verified,
+      status: row.status,
+      ecommerce: row.ecommerce,
+      sub_toko: row.sub_toko,
+      no_pesanan: row.no_pesanan
+    }));
 };
 
 /**
@@ -703,100 +686,87 @@ export const checkResiOrOrderStatus = async (
   resiOrOrders: string[], 
   store: string | null
 ): Promise<any[]> => {
-  const table = getTableName(store);
   if (resiOrOrders.length === 0) return [];
   
   // Normalize: uppercase dan trim semua nilai
   const normalized = resiOrOrders.map(r => r.trim().toUpperCase());
   
   // Query semua resi dari Stage 1
-  let data: any[] = [];
   try {
-    data = await fetchAllRowsPaged<any>(
-      table,
-      'resi, no_pesanan, stage1_scanned, stage2_verified, status, ecommerce, sub_toko, negara_ekspor',
-      (query) => query.eq('stage1_scanned', 'true')
-    );
+    const data = await readEdgeListRowsCached<any>(store, SCAN_RESI_DATASET);
+    const stage1Rows = (data || []).filter((row: any) => String(row?.stage1_scanned || '').toLowerCase() === 'true');
+
+    // Filter manual dengan case-insensitive matching
+    const filtered = stage1Rows.filter((d: any) => {
+      const resiUpper = String(d.resi || '').trim().toUpperCase();
+      const noPesananUpper = String(d.no_pesanan || '').trim().toUpperCase();
+      return normalized.includes(resiUpper) || normalized.includes(noPesananUpper);
+    });
+    
+    return filtered;
   } catch (error) {
     console.error('checkResiOrOrderStatus error:', error);
     return [];
   }
-  
-  // Filter manual dengan case-insensitive matching
-  const filtered = (data || []).filter((d: any) => {
-    const resiUpper = String(d.resi || '').trim().toUpperCase();
-    const noPesananUpper = String(d.no_pesanan || '').trim().toUpperCase();
-    return normalized.includes(resiUpper) || normalized.includes(noPesananUpper);
-  });
-  
-  return filtered;
 };
 
 /**
  * Ambil daftar resi yang sudah melewati Stage 1 (untuk dropdown search)
  */
 export const getStage1ResiList = async (store: string | null): Promise<Array<{resi: string, no_pesanan?: string, ecommerce: string, sub_toko: string, stage2_verified: boolean}>> => {
-  const table = getTableName(store);
-
-  let data: any[] = [];
   try {
-    data = await fetchAllRowsPaged<any>(
-      table,
-      'resi, no_pesanan, ecommerce, sub_toko, stage2_verified',
-      (query) => query.eq('stage1_scanned', 'true'),
-      { orderBy: 'stage1_scanned_at', ascending: false }
-    );
+    const rows = await readEdgeListRowsCached<any>(store, SCAN_RESI_DATASET);
+    const data = (rows || [])
+      .filter((row: any) => String(row?.stage1_scanned || '').toLowerCase() === 'true')
+      .sort((a: any, b: any) => String(b?.stage1_scanned_at || '').localeCompare(String(a?.stage1_scanned_at || '')));
+    return (data || []).map(d => ({
+      resi: d.resi,
+      no_pesanan: d.no_pesanan,
+      ecommerce: d.ecommerce || '-',
+      sub_toko: d.sub_toko || '-',
+      stage2_verified: String(d.stage2_verified) === 'true'
+    }));
   } catch (error) {
     console.error('getStage1ResiList error:', error);
     return [];
   }
-  
-  return (data || []).map(d => ({
-    resi: d.resi,
-    no_pesanan: d.no_pesanan,
-    ecommerce: d.ecommerce || '-',
-    sub_toko: d.sub_toko || '-',
-    stage2_verified: String(d.stage2_verified) === 'true'
-  }));
 };
 
 export const lookupPartNumberInfo = async (sku: string, store: string | null) => {
-  const table = getStockTable(store);
-  const { data } = await supabase
-    .from(table)
-    .select('part_number, name, brand, application, quantity')
-    .eq('part_number', sku)
-    .maybeSingle();
-  return data;
+  const normalizedSku = normalizePartKey(sku);
+  const rows = await readInventoryRowsCached(store);
+  const found = (rows || []).find((row: any) => normalizePartKey(row?.part_number) === normalizedSku);
+  if (!found) return null;
+  return {
+    part_number: found.part_number,
+    name: found.name,
+    brand: found.brand,
+    application: found.application,
+    quantity: found.quantity
+  };
 };
 
 export const getBulkPartNumberInfo = async (skus: string[], store: string | null) => {
-  const table = getStockTable(store);
   if (skus.length === 0) return [];
   
-  const uniqueSkus = [...new Set(skus)].filter(Boolean);
-
-  const { data, error } = await supabase
-    .from(table)
-    .select('part_number, name, brand, application, quantity')
-    .in('part_number', uniqueSkus);
-
-  if (error) {
-    console.error("Error bulk part info:", error);
-    return [];
-  }
-  return data || [];
+  const uniqueSkus = [...new Set(skus.map((s) => normalizePartKey(s)).filter(Boolean))];
+  const lookup = new Set(uniqueSkus);
+  const rows = await readInventoryRowsCached(store);
+  return (rows || [])
+    .filter((row: any) => lookup.has(normalizePartKey(row?.part_number)))
+    .map((row: any) => ({
+      part_number: row.part_number,
+      name: row.name,
+      brand: row.brand,
+      application: row.application,
+      quantity: row.quantity
+    }));
 };
 
 export const getAvailableParts = async (store: string | null): Promise<{part_number: string, name: string}[]> => {
-  const table = getStockTable(store);
   try {
-    const data = await fetchAllRowsPaged<any>(
-      table,
-      'part_number, name',
-      (query) => query,
-      { orderBy: 'part_number', ascending: true }
-    );
+    const data = await readInventoryRowsCached(store);
+    data.sort((a: any, b: any) => String(a?.part_number || '').localeCompare(String(b?.part_number || '')));
     return data.map(d => ({ part_number: d.part_number, name: d.name || '' }));
   } catch (error) {
     console.error('getAvailableParts error:', error);
@@ -805,17 +775,15 @@ export const getAvailableParts = async (store: string | null): Promise<{part_num
 };
 
 export const fetchPendingCSVItems = async (store: string | null) => {
-  const table = store === 'mjm' ? 'resi_items_mjm' : (store === 'bjw' ? 'resi_items_bjw' : null);
-  if (!table) return [];
+  if (store !== 'mjm' && store !== 'bjw') return [];
+  const table = store === 'mjm' ? 'resi_items_mjm' : 'resi_items_bjw';
 
   let pendingRows: any[] = [];
   try {
-    pendingRows = await fetchAllRowsPaged<any>(
-      table,
-      '*',
-      (query) => query.eq('status', 'pending'),
-      { orderBy: 'created_at', ascending: false }
-    );
+    const allRows = await readEdgeListRowsCached<any>(store, RESI_ITEMS_DATASET);
+    pendingRows = (allRows || [])
+      .filter((row: any) => String(row?.status || '').toLowerCase() === 'pending')
+      .sort((a: any, b: any) => String(b?.created_at || '').localeCompare(String(a?.created_at || '')));
   } catch (error) {
     console.error('Gagal ambil pending CSV:', error);
     return [];
@@ -824,7 +792,6 @@ export const fetchPendingCSVItems = async (store: string | null) => {
   if (!pendingRows || pendingRows.length === 0) return [];
   
   // ===== SYNC STATUS PER-ITEM (resi + part_number), BUKAN PER-RESI =====
-  const logTable = getBarangKeluarTable(store);
   const allResis = [...new Set(pendingRows.map((d: any) => String(d.resi || '').trim()).filter(Boolean))];
   if (allResis.length === 0) return pendingRows;
   const allResiVariants = [...new Set(allResis.flatMap((resi) => {
@@ -836,13 +803,11 @@ export const fetchPendingCSVItems = async (store: string | null) => {
   // Ambil log barang_keluar untuk resi-resi yang sedang pending
   let soldLogs: any[] = [];
   try {
-    soldLogs = await fetchRowsByInChunksPaged<any>(
-      logTable,
-      'resi, part_number',
-      'resi',
-      allResiVariants,
-      (query) => query.not('part_number', 'is', null)
-    );
+    const soldRows = await readEdgeListRowsCached<any>(store, SOLD_ITEMS_DATASET);
+    const resiLookup = new Set(allResiVariants.map((v) => normalizeResiKey(v)));
+    soldLogs = (soldRows || [])
+      .filter((row: any) => resiLookup.has(normalizeResiKey(row?.resi)) && row?.part_number)
+      .map((row: any) => ({ resi: row.resi, part_number: row.part_number }));
   } catch (error: any) {
     console.warn('[fetchPendingCSVItems] Gagal sync dengan barang_keluar, fallback ke pending murni:', error?.message || error);
     return pendingRows;
@@ -861,12 +826,11 @@ export const fetchPendingCSVItems = async (store: string | null) => {
   // Ambil item processed pada resi yang sama untuk recovery jika dulu salah auto-mark
   let processedRows: any[] = [];
   try {
-    processedRows = await fetchRowsByInChunksPaged<any>(
-      table,
-      '*',
-      'resi',
-      allResis,
-      (query) => query.eq('status', 'processed')
+    const processedLookup = new Set(allResis.map((resi) => normalizeResiKey(resi)));
+    const allRows = await readEdgeListRowsCached<any>(store, RESI_ITEMS_DATASET);
+    processedRows = (allRows || []).filter((row: any) =>
+      String(row?.status || '').toLowerCase() === 'processed'
+      && processedLookup.has(normalizeResiKey(row?.resi))
     );
   } catch (error: any) {
     console.warn('[fetchPendingCSVItems] Gagal cek processed rows untuk recovery:', error?.message || error);
@@ -895,6 +859,7 @@ export const fetchPendingCSVItems = async (store: string | null) => {
   if (falseProcessedIds.length > 0) {
     try {
       await updateRowsByIdsInChunks(table, falseProcessedIds, { status: 'pending' });
+      markResiItemsDirty(store);
       console.log(`[fetchPendingCSVItems] Recovered ${falseProcessedIds.length} item salah processed menjadi pending.`);
     } catch (recoverErr) {
       console.error('[fetchPendingCSVItems] Gagal recovery processed->pending:', recoverErr);
@@ -921,6 +886,7 @@ export const fetchPendingCSVItems = async (store: string | null) => {
   if (pendingSoldIds.length > 0) {
     try {
       await updateRowsByIdsInChunks(table, pendingSoldIds, { status: 'processed' });
+      markResiItemsDirty(store);
       console.log(`[fetchPendingCSVItems] Synced ${pendingSoldIds.length} pending item menjadi processed.`);
     } catch (markErr) {
       console.error('[fetchPendingCSVItems] Gagal sync pending->processed:', markErr);
@@ -939,16 +905,15 @@ const checkKilatPrestock = async (partNumber: string, qty: number, store: string
   kilatId?: string;
   qtySisa?: number;
 }> => {
-  const prestockTable = store === 'mjm' ? 'kilat_prestock_mjm' : 'kilat_prestock_bjw';
-  
   try {
-    const { data } = await supabase
-      .from(prestockTable)
-      .select('id, qty_kirim, qty_terjual')
-      .eq('part_number', partNumber)
-      .in('status', ['MENUNGGU_TERJUAL', 'SEBAGIAN_TERJUAL'])
-      .order('tanggal_kirim', { ascending: true }) // FIFO
-      .limit(1);
+    const normalizedPart = normalizePartKey(partNumber);
+    const data = (await readEdgeListRowsCached<any>(store, 'kilat-prestock'))
+      .filter((row: any) =>
+        normalizePartKey(row?.part_number) === normalizedPart
+        && ['MENUNGGU_TERJUAL', 'SEBAGIAN_TERJUAL'].includes(String(row?.status || ''))
+      )
+      .sort((a: any, b: any) => String(a?.tanggal_kirim || '').localeCompare(String(b?.tanggal_kirim || '')))
+      .slice(0, 1);
     
     if (data && data.length > 0) {
       const kilat = data[0];
@@ -971,11 +936,8 @@ const updateKilatSold = async (kilatId: string, qtySold: number, saleData: any, 
   
   try {
     // Get current kilat data
-    const { data: kilat } = await supabase
-      .from(prestockTable)
-      .select('*')
-      .eq('id', kilatId)
-      .single();
+    const kilatRows = await readEdgeListRowsCached<any>(store, 'kilat-prestock');
+    const kilat = (kilatRows || []).find((row: any) => String(row?.id || '') === String(kilatId));
     
     if (!kilat) return false;
     
@@ -1001,6 +963,8 @@ const updateKilatSold = async (kilatId: string, qtySold: number, saleData: any, 
       source: 'CSV',
       ecommerce: saleData.ecommerce
     }]);
+
+    markEdgeListDatasetsDirty(store, ['kilat-prestock', 'kilat-penjualan']);
     
     console.log(`[KILAT] Updated prestock ${kilatId}: +${qtySold} sold, total ${newQtyTerjual}`);
     return true;
@@ -1014,10 +978,18 @@ export const processBarangKeluarBatch = async (items: any[], store: string | nul
   const scanTable = getTableName(store);
   const logTable = getBarangKeluarTable(store);
   const stockTable = getStockTable(store);
-  const csvTable = store === 'mjm' ? 'resi_items_mjm' : 'resi_items_bjw';
+  const csvTable = store === 'mjm' ? 'resi_items_mjm' : (store === 'bjw' ? 'resi_items_bjw' : null);
   
   let successCount = 0;
   let errors: string[] = [];
+  const inventoryRows = await readInventoryRowsCached(store);
+  const stockByPart = new Map<string, number>();
+  const scanRowsCache = await readEdgeListRowsCached<any>(store, SCAN_RESI_DATASET);
+  (inventoryRows || []).forEach((row: any) => {
+    const part = normalizePartKey(row?.part_number);
+    if (!part) return;
+    stockByPart.set(part, Number(row?.quantity || 0));
+  });
 
   for (const item of items) {
     try {
@@ -1037,20 +1009,12 @@ export const processBarangKeluarBatch = async (items: any[], store: string | nul
         // Update KILAT prestock
         await updateKilatSold(kilatCheck.kilatId, item.qty_keluar, item, store);
         
-        // Get current stock untuk logging (tanpa mengurangi)
-        const { data: stock } = await supabase
-          .from(stockTable)
-          .select('quantity')
-          .eq('part_number', item.part_number)
-          .single();
-        newStock = stock?.quantity || 0;
+        // Ambil stok dari snapshot map untuk logging (tanpa mengurangi)
+        newStock = stockByPart.get(normalizePartKey(item.part_number)) || 0;
       } else {
         // Normal flow: Cek & Potong Stok
-        const { data: stock } = await supabase
-          .from(stockTable)
-          .select('quantity')
-          .eq('part_number', item.part_number)
-          .single();
+        const currentStock = stockByPart.get(normalizePartKey(item.part_number));
+        const stock = typeof currentStock === 'number' ? { quantity: currentStock } : null;
           
         if (!stock || stock.quantity < item.qty_keluar) {
           errors.push(`Stok ${item.part_number} Habis/Kurang (Sisa: ${stock?.quantity || 0})`);
@@ -1067,6 +1031,7 @@ export const processBarangKeluarBatch = async (items: any[], store: string | nul
           errors.push(`Gagal update stok ${item.part_number}: ${stockErr.message}`);
           continue;
         }
+        stockByPart.set(normalizePartKey(item.part_number), newStock);
       }
 
       const normalizedResi = String(item.resi || '').trim();
@@ -1104,48 +1069,20 @@ export const processBarangKeluarBatch = async (items: any[], store: string | nul
       const orderVariants = buildScanKeyVariants(normalizedOrderId);
 
       const matchedIds = new Set<any>();
+      const resiVariantKeys = new Set(resiVariants.map((v) => normalizeResiKey(v)));
+      const orderVariantKeys = new Set(orderVariants.map((v) => normalizeResiKey(v)));
 
-      if (resiVariants.length > 0) {
-        const byResi = await fetchRowsByInChunksPaged<any>(
-          scanTable,
-          'id',
-          'resi',
-          resiVariants,
-          (query) => query.neq('status', 'completed')
-        );
-        byResi.forEach((r: any) => matchedIds.add(r.id));
-      }
-
-      if (orderVariants.length > 0) {
-        const byOrder = await fetchRowsByInChunksPaged<any>(
-          scanTable,
-          'id',
-          'no_pesanan',
-          orderVariants,
-          (query) => query.neq('status', 'completed')
-        );
-        byOrder.forEach((r: any) => matchedIds.add(r.id));
-      }
-
-      // Fallback: jika belum ketemu, scan pending rows dan match manual (case-insensitive).
-      if (matchedIds.size === 0) {
-        const fallbackRows = await fetchAllRowsPaged<any>(
-          scanTable,
-          'id, resi, no_pesanan',
-          (query) => query.neq('status', 'completed')
-        );
-
-        fallbackRows.forEach((r: any) => {
-          const resiKey = normalizeResiKey(r.resi);
-          const orderKey = normalizeResiKey(r.no_pesanan);
-          if (
-            (resiVariants.length > 0 && resiVariants.some(v => normalizeResiKey(v) === resiKey || normalizeResiKey(v) === orderKey)) ||
-            (orderVariants.length > 0 && orderVariants.some(v => normalizeResiKey(v) === resiKey || normalizeResiKey(v) === orderKey))
-          ) {
-            matchedIds.add(r.id);
-          }
-        });
-      }
+      (scanRowsCache || []).forEach((r: any) => {
+        if (String(r?.status || '').toLowerCase() === 'completed') return;
+        const resiKey = normalizeResiKey(r?.resi);
+        const orderKey = normalizeResiKey(r?.no_pesanan);
+        if (
+          (resiVariantKeys.size > 0 && (resiVariantKeys.has(resiKey) || resiVariantKeys.has(orderKey))) ||
+          (orderVariantKeys.size > 0 && (orderVariantKeys.has(resiKey) || orderVariantKeys.has(orderKey)))
+        ) {
+          matchedIds.add(r.id);
+        }
+      });
 
       if (matchedIds.size > 0) {
         const updateData: any = {
@@ -1164,6 +1101,12 @@ export const processBarangKeluarBatch = async (items: any[], store: string | nul
           .from(scanTable)
           .update(updateData)
           .in('id', Array.from(matchedIds) as any[]);
+
+        (scanRowsCache || []).forEach((row: any) => {
+          if (matchedIds.has(row?.id)) {
+            row.status = 'completed';
+          }
+        });
       }
 
       // 4. Update Status di Tabel CSV
@@ -1181,6 +1124,13 @@ export const processBarangKeluarBatch = async (items: any[], store: string | nul
     }
   }
 
+  if (successCount > 0) {
+    markInventoryCacheDirty(store);
+    markScanResiDirty(store);
+    markResiItemsDirty(store);
+    markSoldItemsDirty(store);
+    markEdgeListDatasetsDirty(store, ['kilat-prestock', 'kilat-penjualan']);
+  }
   return { success: errors.length === 0, processed: successCount, errors };
 };
 
@@ -1205,16 +1155,14 @@ export const saveCSVToResiItems = async (
     const scannedResiSet = new Set<string>();
     
     if (scanTable) {
-      const { data: scannedData } = await supabase
-        .from(scanTable)
-        .select('resi, no_pesanan')
-        .in('resi', allToCheck);
-      
-      // Cek juga dengan no_pesanan untuk instant/sameday
-      const { data: scannedByOrder } = await supabase
-        .from(scanTable)
-        .select('resi, no_pesanan')
-        .in('no_pesanan', allToCheck);
+      const normalizedCheck = new Set(allToCheck.map((v) => String(v || '').trim().toUpperCase()).filter(Boolean));
+      const scanRows = await readEdgeListRowsCached<any>(store, SCAN_RESI_DATASET);
+      const scannedData = (scanRows || []).filter((row: any) => {
+        const resi = String(row?.resi || '').trim().toUpperCase();
+        const orderId = String(row?.no_pesanan || '').trim().toUpperCase();
+        return normalizedCheck.has(resi) || normalizedCheck.has(orderId);
+      });
+      const scannedByOrder = scannedData;
       
       // Kumpulkan semua resi yang sudah di-scan (uppercase untuk matching)
       (scannedData || []).forEach((s: any) => {
@@ -1294,10 +1242,15 @@ export const saveCSVToResiItems = async (
     // === JIKA OVERRIDE AKTIF: Update data existing terlebih dahulu ===
     if (overrideEcommerceToko) {
       // Cek mana resi yang sudah ada di database
-      const { data: existingRows } = await supabase
-        .from(tableName)
-        .select('id, resi, ecommerce, toko')
-        .in('resi', resiList);
+      const resiLookup = new Set(resiList.map((r) => String(r || '').trim().toUpperCase()).filter(Boolean));
+      const existingRows = (await readEdgeListRowsCached<any>(store, RESI_ITEMS_DATASET))
+        .filter((row: any) => resiLookup.has(String(row?.resi || '').trim().toUpperCase()))
+        .map((row: any) => ({
+          id: row.id,
+          resi: row.resi,
+          ecommerce: row.ecommerce,
+          toko: row.toko
+        }));
       
       const existingResiSet = new Set((existingRows || []).map((r: any) => String(r.resi).trim().toUpperCase()));
       const existingResiIdMap = new Map((existingRows || []).map((r: any) => [String(r.resi).trim().toUpperCase(), r]));
@@ -1404,6 +1357,9 @@ export const saveCSVToResiItems = async (
     }
     
     const updateMsg = updatedCount > 0 ? ` (${updatedCount} diupdate)` : '';
+    if (payload.length > 0 || updatedCount > 0) {
+      markResiItemsDirty(store);
+    }
 
     return { 
       success: true, 
@@ -1435,6 +1391,7 @@ export const updateResiItem = async (
       .eq('id', id);
 
     if (error) throw error;
+    markResiItemsDirty(store);
     return { success: true, message: 'Updated' };
   } catch (err: any) {
     console.error('Update gagal:', err);
@@ -1460,6 +1417,7 @@ export const insertResiItem = async (
       .single();
 
     if (error) throw error;
+    markResiItemsDirty(store);
     return data?.id || null;
   } catch (err: any) {
     console.error('Insert gagal:', err);
@@ -1510,6 +1468,10 @@ export const batchUpdateResiItems = async (
     await Promise.all(batch);
   }
 
+  if (updatedCount > 0) {
+    markResiItemsDirty(store);
+  }
+
   return { success: errorCount === 0, updatedCount, errorCount };
 };
 
@@ -1551,6 +1513,7 @@ export const insertProductAlias = async (
       return { success: false };
     }
 
+    markGlobalEdgeListDatasetsDirty(['product-alias']);
     return { success: true };
   } catch (err: any) {
     console.error('Error insert alias:', err);
@@ -1641,6 +1604,9 @@ export const deleteProcessedResiItems = async (
     }
   }
 
+  if (deletedCount > 0) {
+    markResiItemsDirty(store);
+  }
   return { success: true, deleted: deletedCount };
 };
 
@@ -1668,6 +1634,7 @@ export const deleteResiItemById = async (
       return { success: false, message: error.message };
     }
 
+    markResiItemsDirty(store);
     return { success: true, message: 'Item berhasil dihapus' };
   } catch (err: any) {
     console.error('Delete resi item exception:', err);
@@ -1699,6 +1666,7 @@ export const deleteScanResiById = async (
       return { success: false, message: error.message };
     }
 
+    markScanResiDirty(store);
     return { success: true, message: 'Item berhasil dihapus dari Stage 1' };
   } catch (err: any) {
     console.error('Delete scan resi exception:', err);
@@ -1734,6 +1702,9 @@ export const deleteProcessedScanResi = async (
       return { success: false, deleted: 0 };
     }
 
+    if ((data?.length || 0) > 0) {
+      markScanResiDirty(store);
+    }
     return { success: true, deleted: data?.length || 0 };
   } catch (err: any) {
     console.error('Delete processed scan resi exception:', err);

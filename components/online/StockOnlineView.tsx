@@ -3,9 +3,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { useStore } from '../../context/StoreContext';
-import { InventoryItem, SoldItemRow } from '../../types';
-// import { fetchInventoryAllFiltered, fetchSoldItems } from '../../services/supabaseService';
-import { supabase } from '../../services/supabaseClient';
+import { readEdgeListRowsCached } from '../../services/supabaseService';
 import { Loader2, Package, Search } from 'lucide-react';
 
 
@@ -30,17 +28,6 @@ interface StockMoment {
 }
 
 
-const getLastNDates = (n: number): string[] => {
-  const dates: string[] = [];
-  const now = new Date();
-  for (let i = 0; i < n; i++) {
-    const d = new Date(now);
-    d.setDate(now.getDate() - i);
-    dates.push(d.toISOString().slice(0, 10));
-  }
-  return dates;
-};
-
 const StockOnlineView: React.FC = () => {
   const { selectedStore } = useStore();
   const [loading, setLoading] = useState(true);
@@ -52,12 +39,8 @@ const StockOnlineView: React.FC = () => {
   useEffect(() => {
     const loadData = async () => {
       setLoading(true);
-      // Pilih view sesuai toko
-      const viewName = selectedStore === 'mjm' ? 'v_stock_online_mjm' : 'v_stock_online_bjw';
-      const { data, error } = await supabase
-        .from(viewName)
-        .select('*');
-      if (error) {
+      const data = await readEdgeListRowsCached<any>(selectedStore, 'stock-online');
+      if (!data) {
         setMoments([]);
         setLoading(false);
         return;

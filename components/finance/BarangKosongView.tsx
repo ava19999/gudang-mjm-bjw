@@ -8,6 +8,8 @@ import {
 } from 'lucide-react';
 import { useStore } from '../../context/StoreContext';
 import { supabase } from '../../services/supabaseClient';
+import { fetchCachedRowsPaged as fetchAllRowsPaged, readTableRowsCached } from '../../services/edgeCacheTableReader';
+import { markEdgeListDatasetsDirty } from '../../services/supabaseService';
 
 // Types
 interface SupplierItem {
@@ -119,35 +121,6 @@ const formatDate = (dateStr: string) => {
   if (!dateStr) return '-';
   const date = new Date(dateStr);
   return date.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' });
-};
-
-const fetchAllRowsPaged = async <T,>(
-  table: string,
-  selectColumns: string,
-  buildQuery: (query: any) => any,
-  options?: { orderBy?: string; ascending?: boolean; pageSize?: number }
-): Promise<T[]> => {
-  const pageSize = options?.pageSize ?? 1000;
-  const rows: T[] = [];
-  let from = 0;
-
-  while (true) {
-    let query = supabase.from(table).select(selectColumns);
-    query = buildQuery(query);
-    if (options?.orderBy) {
-      query = query.order(options.orderBy, { ascending: options.ascending ?? true });
-    }
-
-    const { data, error } = await query.range(from, from + pageSize - 1);
-    if (error) throw error;
-
-    const page = (data || []) as T[];
-    rows.push(...page);
-    if (page.length < pageSize) break;
-    from += pageSize;
-  }
-
-  return rows;
 };
 
 const escapeHtml = (value: string) =>
@@ -792,15 +765,13 @@ const PurchaseHistoryModal: React.FC<{
       setLoading(true);
       try {
         const tableMasuk = store === 'bjw' ? 'barang_masuk_bjw' : 'barang_masuk_mjm';
-        
-        const { data, error } = await supabase
-          .from(tableMasuk)
-          .select('id, part_number, nama_barang, customer, qty_masuk, harga_satuan, harga_total, tempo, created_at')
-          .eq('part_number', partNumber)
-          .order('created_at', { ascending: false })
-          .limit(50);
-        
-        if (error) throw error;
+
+        const data = await fetchAllRowsPaged<PurchaseHistory>(
+          tableMasuk,
+          'id, part_number, nama_barang, customer, qty_masuk, harga_satuan, harga_total, tempo, created_at',
+          (query) => query.eq('part_number', partNumber).limit(50),
+          { orderBy: 'created_at', ascending: false }
+        );
         setHistory(data || []);
       } catch (err) {
         console.error('Error fetching purchase history:', err);
@@ -1185,36 +1156,28 @@ const OrderHistoryModal: React.FC<{
     const fetchOrders = async () => {
       setLoading(true);
       try {
-        const { data, error } = await supabase
-          .from('supplier_orders')
-          .select('*')
-          .eq('store', store || 'mjm')
-          .order('created_at', { ascending: false })
-          .limit(100);
-        
-        if (error) throw error;
+        const targetStore = (store || 'mjm').toLowerCase();
+        const data = await readTableRowsCached<any>('supplier_orders', { store: targetStore });
+        const latestOrders = [...(data || [])]
+          .sort((a, b) => new Date(String(b?.created_at || 0)).getTime() - new Date(String(a?.created_at || 0)).getTime())
+          .slice(0, 100);
         
         // Check status for pending orders - compare with current stock
         const ordersWithUpdatedStatus = await Promise.all(
-          (data || []).map(async (order) => {
+          latestOrders.map(async (order) => {
             if (order.status !== 'PENDING') return order;
             
             // Fetch order items
-            const { data: items } = await supabase
-              .from('supplier_order_items')
-              .select('*')
-              .eq('order_id', order.id);
+            const allItems = await readTableRowsCached<any>('supplier_order_items');
+            const items = (allItems || []).filter((item) => Number(item?.order_id) === Number(order.id));
             
             if (!items || items.length === 0) return order;
             
             // Fetch current stock for these items
             const tableBase = store === 'bjw' ? 'base_bjw' : 'base_mjm';
             const partNumbers = items.map(i => i.part_number);
-            
-            const { data: stockData } = await supabase
-              .from(tableBase)
-              .select('part_number, quantity')
-              .in('part_number', partNumbers);
+            const stockRows = await readTableRowsCached<any>(tableBase);
+            const stockData = (stockRows || []).filter((row) => partNumbers.includes(String(row?.part_number || '')));
             
             if (!stockData) return order;
             
@@ -1234,6 +1197,7 @@ const OrderHistoryModal: React.FC<{
                 .from('supplier_orders')
                 .update({ status: 'OK' })
                 .eq('id', order.id);
+              markEdgeListDatasetsDirty(targetStore, ['supplier-orders']);
               
               return { ...order, status: 'OK' };
             }
@@ -1254,11 +1218,8 @@ const OrderHistoryModal: React.FC<{
   }, [store]);
   
   const fetchOrderItems = async (orderId: number) => {
-    const { data } = await supabase
-      .from('supplier_order_items')
-      .select('*')
-      .eq('order_id', orderId);
-    return data || [];
+    const rows = await readTableRowsCached<any>('supplier_order_items');
+    return (rows || []).filter((row) => Number(row?.order_id) === Number(orderId));
   };
   
   const handleViewOrder = async (order: SupplierOrder) => {
@@ -1941,23 +1902,20 @@ const ImporterCatalogModal: React.FC<{
     setPriceHistoryLoading(true);
 
     try {
-      const [{ data: mjmData, error: mjmError }, { data: bjwData, error: bjwError }] = await Promise.all([
-        supabase
-          .from('barang_masuk_mjm')
-          .select('*')
-          .eq('part_number', item.part_number)
-          .order('created_at', { ascending: false })
-          .limit(200),
-        supabase
-          .from('barang_masuk_bjw')
-          .select('*')
-          .eq('part_number', item.part_number)
-          .order('created_at', { ascending: false })
-          .limit(200)
+      const [mjmData, bjwData] = await Promise.all([
+        fetchAllRowsPaged<Record<string, any>>(
+          'barang_masuk_mjm',
+          '*',
+          (query) => query.eq('part_number', item.part_number).limit(200),
+          { orderBy: 'created_at', ascending: false }
+        ),
+        fetchAllRowsPaged<Record<string, any>>(
+          'barang_masuk_bjw',
+          '*',
+          (query) => query.eq('part_number', item.part_number).limit(200),
+          { orderBy: 'created_at', ascending: false }
+        )
       ]);
-
-      if (mjmError) throw mjmError;
-      if (bjwError) throw bjwError;
 
       const mapRows = (rows: Record<string, any>[], store: 'MJM' | 'BJW'): ImporterPriceHistoryRow[] =>
         rows
@@ -2872,11 +2830,12 @@ export const BarangKosongView: React.FC = () => {
   
   const loadCartFromOrderSupplier = async (): Promise<CartItem[]> => {
     try {
+      const activeStore = (selectedStore || 'mjm').toLowerCase();
       const data = await fetchAllRowsPaged<Record<string, any>>(
         'order_supplier',
         '*',
         (query) => query,
-        { orderBy: 'created_at', ascending: false }
+        { orderBy: 'created_at', ascending: false, store: activeStore }
       );
 
       return mapOrderSupplierRowsToCart((data || []) as Record<string, any>[], selectedStore || 'mjm');
@@ -2916,19 +2875,16 @@ export const BarangKosongView: React.FC = () => {
           notes: `Keranjang Barang Kosong ${targetStore.toUpperCase()}`
         };
 
-        const { data: existingRows, error: fetchError } = await supabase
-          .from('order_supplier')
-          .select('id')
-          .eq('store', targetStore)
-          .eq('part_number', item.part_number)
-          .eq('supplier', item.supplier)
-          .in('status', localOpenStatuses)
-          .order('created_at', { ascending: false });
-
-        if (fetchError) {
-          console.error('Error checking local cart sync to order_supplier:', fetchError);
-          continue;
-        }
+        const allRows = await readTableRowsCached<any>('order_supplier', { store: targetStore });
+        const existingRows = (allRows || [])
+          .filter((row) => {
+            const sameStore = String(row?.store || '').toLowerCase() === targetStore;
+            const samePart = String(row?.part_number || '').trim().toUpperCase() === String(item.part_number || '').trim().toUpperCase();
+            const sameSupplier = String(row?.supplier || '').trim().toUpperCase() === String(item.supplier || '').trim().toUpperCase();
+            const status = String(row?.status || '').trim();
+            return sameStore && samePart && sameSupplier && localOpenStatuses.includes(status);
+          })
+          .sort((a, b) => new Date(String(b?.created_at || 0)).getTime() - new Date(String(a?.created_at || 0)).getTime());
 
         if (existingRows && existingRows.length > 0) {
           const primaryId = existingRows[0].id;
@@ -2943,6 +2899,7 @@ export const BarangKosongView: React.FC = () => {
             console.error('Error updating local cart sync row:', updateError);
             continue;
           }
+          markEdgeListDatasetsDirty(targetStore, ['order-supplier']);
 
           if (duplicateIds.length > 0) {
             const { error: deleteDuplicateError } = await supabase
@@ -2952,6 +2909,8 @@ export const BarangKosongView: React.FC = () => {
 
             if (deleteDuplicateError) {
               console.error('Error deleting duplicate local cart sync rows:', deleteDuplicateError);
+            } else {
+              markEdgeListDatasetsDirty(targetStore, ['order-supplier']);
             }
           }
           continue;
@@ -2963,6 +2922,8 @@ export const BarangKosongView: React.FC = () => {
 
         if (insertError) {
           console.error('Error inserting local cart sync row:', insertError);
+        } else {
+          markEdgeListDatasetsDirty(targetStore, ['order-supplier']);
         }
       }
     };
@@ -3122,16 +3083,16 @@ export const BarangKosongView: React.FC = () => {
   const upsertOrderSupplierCartItem = async (cartItem: CartItem) => {
     const targetStore = (cartItem.store || selectedStore || 'mjm').toLowerCase();
 
-    const { data: existingRows, error: fetchError } = await supabase
-      .from('order_supplier')
-      .select('id')
-      .eq('store', targetStore)
-      .eq('part_number', cartItem.part_number)
-      .eq('supplier', cartItem.supplier)
-      .in('status', OPEN_ORDER_SUPPLIER_STATUSES)
-      .order('created_at', { ascending: false });
-
-    if (fetchError) throw fetchError;
+    const allRows = await readTableRowsCached<any>('order_supplier', { store: targetStore });
+    const existingRows = (allRows || [])
+      .filter((row) => {
+        const sameStore = String(row?.store || '').toLowerCase() === targetStore;
+        const samePart = String(row?.part_number || '').trim().toUpperCase() === String(cartItem.part_number || '').trim().toUpperCase();
+        const sameSupplier = String(row?.supplier || '').trim().toUpperCase() === String(cartItem.supplier || '').trim().toUpperCase();
+        const status = String(row?.status || '').trim();
+        return sameStore && samePart && sameSupplier && OPEN_ORDER_SUPPLIER_STATUSES.includes(status);
+      })
+      .sort((a, b) => new Date(String(b?.created_at || 0)).getTime() - new Date(String(a?.created_at || 0)).getTime());
 
     const payload = {
       store: targetStore,
@@ -3154,6 +3115,7 @@ export const BarangKosongView: React.FC = () => {
         .eq('id', primaryId);
 
       if (updateError) throw updateError;
+      markEdgeListDatasetsDirty(targetStore, ['order-supplier']);
 
       if (duplicateIds.length > 0) {
         const { error: deleteDuplicateError } = await supabase
@@ -3162,6 +3124,7 @@ export const BarangKosongView: React.FC = () => {
           .in('id', duplicateIds);
 
         if (deleteDuplicateError) throw deleteDuplicateError;
+        markEdgeListDatasetsDirty(targetStore, ['order-supplier']);
       }
 
       return;
@@ -3172,6 +3135,7 @@ export const BarangKosongView: React.FC = () => {
       .insert(payload);
 
     if (insertError) throw insertError;
+    markEdgeListDatasetsDirty(targetStore, ['order-supplier']);
   };
 
   const deleteOrderSupplierCartItem = async (partNumber: string, supplier: string) => {
@@ -3183,6 +3147,7 @@ export const BarangKosongView: React.FC = () => {
       .in('status', OPEN_ORDER_SUPPLIER_STATUSES);
 
     if (error) throw error;
+    markEdgeListDatasetsDirty(selectedStore || 'mjm', ['order-supplier']);
   };
 
   const clearOrderSupplierCartByStore = async (store: string) => {
@@ -3194,6 +3159,7 @@ export const BarangKosongView: React.FC = () => {
       .in('status', OPEN_ORDER_SUPPLIER_STATUSES);
 
     if (error) throw error;
+    markEdgeListDatasetsDirty(targetStore, ['order-supplier']);
   };
 
   const addImporterCatalogItemsToCart = async (
@@ -3499,6 +3465,13 @@ export const BarangKosongView: React.FC = () => {
           );
         }
       }
+
+      markEdgeListDatasetsDirty((selectedStore || 'mjm').toLowerCase(), ['supplier-orders']);
+      markEdgeListDatasetsDirty('mjm', ['supplier-order-items']);
+      uniqueOrderKeys.forEach((key) => {
+        const [, itemStore] = key.split('::');
+        markEdgeListDatasetsDirty((itemStore || selectedStore || 'mjm').toLowerCase(), ['order-supplier']);
+      });
 
       setToast({ msg: `PO untuk ${currentSupplier} berhasil disimpan!`, type: 'success' });
       setShowPOPreview(false);
