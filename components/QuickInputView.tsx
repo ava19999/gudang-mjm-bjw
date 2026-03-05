@@ -244,7 +244,6 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
 
   const handlePartNumberChange = (id: number, value: string) => {
     setRows(prev => prev.map(row => row.id === id ? { ...row, partNumber: value.toUpperCase() } : row));
-    const rowIndex = rows.findIndex(r => r.id === id);
     if (value.length >= 2) {
       clearTimeout(searchTimeoutRef.current);
       searchTimeoutRef.current = setTimeout(() => {
@@ -252,7 +251,7 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
         // Pencarian barang tetap sama
         const matches = items.filter(item => item.partNumber && item.partNumber.toLowerCase().includes(lowerVal)).slice(0, 10);
         setSuggestions(matches);
-        setActiveSearchIndex(rowIndex);
+        setActiveSearchIndex(id);
         setHighlightedIndex(-1);
       }, 300);
     } else {

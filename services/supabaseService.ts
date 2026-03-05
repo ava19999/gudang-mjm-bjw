@@ -1635,12 +1635,15 @@ export const fetchInventory = async (
     includeCostPrices = true
   } = options;
   const table = getTableName(store);
-  const { data: items, error } = await supabase
-    .from(table)
-    .select(INVENTORY_SELECT_COLUMNS)
-    .order('name', { ascending: true });
+  const items = await fetchAllRowsForModalFiltered<any>(
+    table,
+    INVENTORY_SELECT_COLUMNS,
+    'name',
+    (query) => query,
+    true
+  );
   
-  if (error || !items) return [];
+  if (!items || items.length === 0) return [];
 
   const [photoMap, priceMap, costPriceMap] = await Promise.all([
     includePhotos ? fetchPhotosForItems(items) : Promise.resolve({}),
