@@ -17,6 +17,16 @@ const getTableName = (store: string | null): string => {
   return store === 'bjw' ? 'petty_cash_bjw' : 'petty_cash_mjm';
 };
 
+const normalizeAkun = (akun: unknown): 'cash' | 'bank' => {
+  const normalized = String(akun || '').trim().toLowerCase();
+  if (normalized === 'bank' || normalized === 'rekening') return 'bank';
+  return 'cash';
+};
+
+const getAkunFilters = (akun: 'cash' | 'bank'): string[] => {
+  return akun === 'bank' ? ['bank', 'rekening'] : ['cash', 'kas'];
+};
+
 const fetchAllPettyCashRows = async (table: string): Promise<any[]> => {
   const pageSize = 1000;
   const rows: any[] = [];
@@ -27,6 +37,7 @@ const fetchAllPettyCashRows = async (table: string): Promise<any[]> => {
       .from(table)
       .select('*')
       .order('tgl', { ascending: false })
+      .order('id', { ascending: false })
       .range(from, from + pageSize - 1);
 
     if (error) {
@@ -51,13 +62,15 @@ const fetchAllPettyCashRowsByAccount = async (
   const pageSize = 1000;
   const rows: any[] = [];
   let from = 0;
+  const akunFilters = getAkunFilters(akun);
 
   while (true) {
     const { data, error } = await supabase
       .from(table)
       .select('*')
-      .eq('akun', akun)
+      .in('akun', akunFilters)
       .order('tgl', { ascending })
+      .order('id', { ascending })
       .range(from, from + pageSize - 1);
 
     if (error) {
@@ -112,7 +125,7 @@ export const getPettyCashEntries = async (store: string | null): Promise<PettyCa
       keterangan: item.keterangan || '',
       kegunaan: item.kegunaan || null,
       type: item.type as 'in' | 'out',
-      akun: (item.akun || 'cash') as 'cash' | 'bank',
+      akun: normalizeAkun(item.akun),
       saldokeluarmasuk: Number(item.saldokeluarmasuk) || 0,
       saldosaatini: Number(item.saldosaatini) || 0,
     }));
@@ -127,12 +140,14 @@ export const getPettyCashEntries = async (store: string | null): Promise<PettyCa
  */
 export const getBalanceByAccount = async (store: string | null, akun: 'cash' | 'bank'): Promise<number> => {
   const table = getTableName(store);
+  const akunFilters = getAkunFilters(akun);
   try {
     const { data, error } = await supabase
       .from(table)
       .select('saldosaatini')
-      .eq('akun', akun)
+      .in('akun', akunFilters)
       .order('tgl', { ascending: false })
+      .order('id', { ascending: false })
       .limit(1);
 
     if (error || !data || data.length === 0) {
@@ -270,26 +285,35 @@ export const deletePettyCashEntry = async (
   id: string
 ): Promise<{ success: boolean; message: string }> => {
   const table = getTableName(store);
-  try {
-    // Ambil info entry yang akan dihapus
-    const { data: entryData } = await supabase
-      .from(table)
-      .select('akun')
-      .eq('id', id)
-      .single();
-    
-    const akun = (entryData?.akun || 'cash') as 'cash' | 'bank';
-    
-    // Hapus entry
-    const { error } = await supabase
+  const normalizedId = String(id || '').trim();
+
+  const deleteAndReturnRow = async (filterValue: string | number) => {
+    const { data, error } = await supabase
       .from(table)
       .delete()
-      .eq('id', id);
+      .eq('id', filterValue as any)
+      .select('id, akun')
+      .limit(1);
 
     if (error) {
-      console.error('Error deleting petty cash entry:', error);
-      return { success: false, message: error.message };
+      throw new Error(error.message);
     }
+
+    return data || [];
+  };
+
+  try {
+    let deletedRows = await deleteAndReturnRow(normalizedId);
+
+    if (deletedRows.length === 0 && /^\d+$/.test(normalizedId)) {
+      deletedRows = await deleteAndReturnRow(Number(normalizedId));
+    }
+
+    if (deletedRows.length === 0) {
+      return { success: false, message: 'Transaksi tidak ditemukan atau sudah terhapus.' };
+    }
+
+    const akun = normalizeAkun(deletedRows[0].akun);
 
     // Recalculate saldo untuk akun ini
     await recalculateBalancesByAccount(store, akun);
@@ -318,14 +342,19 @@ export const recalculateBalancesByAccount = async (store: string | null, akun: '
         : runningBalance - amount;
 
       if (Number(entry.saldosaatini) !== runningBalance) {
-        await supabase
+        const { error } = await supabase
           .from(table)
           .update({ saldosaatini: runningBalance })
           .eq('id', entry.id);
+
+        if (error) {
+          throw new Error(`Gagal update saldo transaksi #${entry.id}: ${error.message}`);
+        }
       }
     }
-  } catch (err) {
+  } catch (err: any) {
     console.error('recalculateBalancesByAccount error:', err);
+    throw new Error(err?.message || 'Gagal recalculate saldo');
   }
 };
 
@@ -343,7 +372,7 @@ export const getEntriesByAccount = async (store: string | null, akun: 'cash' | '
       keterangan: item.keterangan || '',
       kegunaan: item.kegunaan || null,
       type: item.type as 'in' | 'out',
-      akun: item.akun as 'cash' | 'bank',
+      akun: normalizeAkun(item.akun),
       saldokeluarmasuk: Number(item.saldokeluarmasuk) || 0,
       saldosaatini: Number(item.saldosaatini) || 0,
     }));
