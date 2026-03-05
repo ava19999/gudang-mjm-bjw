@@ -28,13 +28,19 @@ const buildScanKeyVariants = (value: string | null | undefined): string[] => {
   return [...new Set([trimmed, trimmed.toUpperCase(), trimmed.toLowerCase()])];
 };
 
+const isTrueValue = (value: unknown): boolean => {
+  if (value === true) return true;
+  const normalized = String(value ?? '').trim().toLowerCase();
+  return normalized === 'true' || normalized === '1';
+};
+
 // Helper: Konversi Database (String) ke App (Boolean)
 const mapToBoolean = (data: any[]) => {
   return data.map(item => ({
     ...item,
-    stage1_scanned: String(item.stage1_scanned) === 'true',
-    stage2_verified: String(item.stage2_verified) === 'true',
-    is_split: String(item.is_split) === 'true'
+    stage1_scanned: isTrueValue(item.stage1_scanned),
+    stage2_verified: isTrueValue(item.stage2_verified),
+    is_split: isTrueValue(item.is_split)
   }));
 };
 
@@ -216,12 +222,18 @@ export const scanResiStage1 = async (
 ): Promise<{ success: boolean; message: string; data?: ResiScanStage }> => {
   try {
     const table = getTableName(store);
+    const normalizedResi = normalizeResiKey(data.resi);
+    if (!normalizedResi) {
+      return { success: false, message: 'Resi tidak boleh kosong.' };
+    }
+
+    const resiVariants = buildScanKeyVariants(normalizedResi);
     
     // CEK DUPLIKAT: Pastikan resi belum pernah di-scan sebelumnya
     const { data: existing } = await supabase
       .from(table)
       .select('id, resi')
-      .eq('resi', data.resi)
+      .in('resi', resiVariants)
       .limit(1);
     
     if (existing && existing.length > 0) {
@@ -229,21 +241,21 @@ export const scanResiStage1 = async (
     }
     
     // CEK BARANG KELUAR: Pastikan resi belum ada di barang_keluar (sudah terjual/keluar)
-    const existingInBarangKeluar = await checkExistingInBarangKeluar([data.resi], store);
-    if (existingInBarangKeluar.has(data.resi.trim().toUpperCase())) {
+    const existingInBarangKeluar = await checkExistingInBarangKeluar([normalizedResi], store);
+    if (existingInBarangKeluar.has(normalizedResi)) {
       return { success: false, message: 'Resi sudah ada di Barang Keluar (sudah terjual/keluar)!' };
     }
     
     const insertData = {
       id: (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : Math.random().toString(36).slice(2),
-      resi: data.resi,
+      resi: normalizedResi,
       no_pesanan: null, // Tidak set default - INSTANT hanya muncul jika no_pesanan di-set dari CSV/Stage2
       ecommerce: data.ecommerce,
       sub_toko: data.sub_toko,
       negara_ekspor: data.negara_ekspor || null,
       // [UBAH] Gunakan getWIBDate()
       tanggal: getWIBDate().toISOString(),
-      stage1_scanned: 'true', 
+      stage1_scanned: true,
       stage1_scanned_at: getWIBDate().toISOString(),
       stage1_scanned_by: data.scanned_by,
       status: 'stage1'
@@ -281,28 +293,46 @@ export const scanResiStage1Bulk = async (
 ): Promise<{ success: boolean; message: string; count?: number; duplicates?: string[]; alreadySold?: string[] }> => {
   try {
     const table = getTableName(store);
+
+    const normalizedItems = items
+      .map((item) => {
+        const normalizedResi = normalizeResiKey(item.resi);
+        if (!normalizedResi) return null;
+        return { ...item, resi: normalizedResi };
+      })
+      .filter(Boolean) as Array<{
+        resi: string;
+        ecommerce: string;
+        sub_toko: string;
+        negara_ekspor?: string;
+        scanned_by: string;
+      }>;
+
+    if (normalizedItems.length === 0) {
+      return { success: false, message: 'Tidak ada resi valid untuk diproses.' };
+    }
     
     // CEK DUPLIKAT: Ambil resi yang sudah ada di database scan_resi
-    const resiList = items.map(i => i.resi);
+    const resiList = normalizedItems.map(i => i.resi);
+    const resiVariants = [...new Set(resiList.flatMap((resi) => buildScanKeyVariants(resi)))];
     const { data: existingResi } = await supabase
       .from(table)
       .select('resi')
-      .in('resi', resiList);
+      .in('resi', resiVariants);
     
-    const existingSet = new Set((existingResi || []).map(r => r.resi));
+    const existingSet = new Set((existingResi || []).map(r => normalizeResiKey(r.resi)));
     
     // CEK BARANG KELUAR: Resi yang sudah ada di barang_keluar (sudah terjual/keluar)
     const existingInBarangKeluar = await checkExistingInBarangKeluar(resiList, store);
     
-    const duplicates = items.filter(i => existingSet.has(i.resi)).map(i => i.resi);
-    const alreadySold = items
-      .filter(i => existingInBarangKeluar.has(i.resi.trim().toUpperCase()))
+    const duplicates = normalizedItems.filter(i => existingSet.has(i.resi)).map(i => i.resi);
+    const alreadySold = normalizedItems
+      .filter(i => existingInBarangKeluar.has(i.resi))
       .map(i => i.resi);
     
     // Filter: bukan duplikat DAN bukan sudah terjual
-    const newItems = items.filter(i => {
-      const resiUpper = i.resi.trim().toUpperCase();
-      return !existingSet.has(i.resi) && !existingInBarangKeluar.has(resiUpper);
+    const newItems = normalizedItems.filter(i => {
+      return !existingSet.has(i.resi) && !existingInBarangKeluar.has(i.resi);
     });
     
     if (newItems.length === 0) {
@@ -330,7 +360,7 @@ export const scanResiStage1Bulk = async (
       sub_toko: item.sub_toko,
       negara_ekspor: item.negara_ekspor || null,
       tanggal: getWIBDate().toISOString(),
-      stage1_scanned: 'true',
+      stage1_scanned: true,
       stage1_scanned_at: getWIBDate().toISOString(),
       stage1_scanned_by: item.scanned_by,
       status: 'stage1'
@@ -368,7 +398,7 @@ export const getAllPendingStage1Resi = async (store: string | null) => {
     data = await fetchAllRowsPaged<any>(
       table,
       '*',
-      (query) => query.eq('stage1_scanned', 'true').neq('status', 'completed'),
+      (query) => query.eq('stage1_scanned', true).neq('status', 'completed'),
       { orderBy: 'stage1_scanned_at', ascending: false }
     );
   } catch (error) {
@@ -417,7 +447,7 @@ export const deleteResiStage1 = async (id: string, store: string | null) => {
   const table = getTableName(store);
   const { data } = await supabase.from(table).select('stage2_verified').eq('id', id).single();
   
-  if (data?.stage2_verified === 'true') {
+  if (isTrueValue(data?.stage2_verified)) {
     return { success: false, message: 'Tidak bisa dihapus, sudah masuk Stage 2!' };
   }
 
@@ -438,11 +468,13 @@ export const deleteResi = async (id: string, store: string | null) => {
 export const restoreResi = async (resiData: ResiScanStage, store: string | null) => {
   const table = getTableName(store);
   
-  // Convert boolean back to string for database
+  // Keep payload boolean-safe and normalize key fields before restore.
   const insertData = {
     ...resiData,
-    stage1_scanned: resiData.stage1_scanned ? 'true' : 'false',
-    stage2_verified: resiData.stage2_verified ? 'true' : 'false'
+    resi: normalizeResiKey((resiData as any).resi),
+    no_pesanan: (resiData as any).no_pesanan ? String((resiData as any).no_pesanan).trim() : null,
+    stage1_scanned: !!resiData.stage1_scanned,
+    stage2_verified: !!resiData.stage2_verified
   };
   
   const { error } = await supabase.from(table).insert([insertData]);
@@ -547,7 +579,7 @@ export const getPendingStage2List = async (store: string | null) => {
   const { data, error } = await supabase
     .from(table)
     .select('*')
-    .eq('stage1_scanned', 'true')
+    .eq('stage1_scanned', true)
     .or('stage2_verified.is.null,stage2_verified.neq.true')
     .order('stage1_scanned_at', { ascending: false });
     
@@ -560,17 +592,27 @@ export const verifyResiStage2 = async (
   store: string | null
 ): Promise<{ success: boolean; message: string }> => {
   const table = getTableName(store);
-  const { resi, verified_by } = data;
+  const { verified_by } = data;
+  const normalizedResi = normalizeResiKey(data.resi);
+  const resiVariants = buildScanKeyVariants(normalizedResi);
+
+  if (!normalizedResi) {
+    return { success: false, message: 'Resi tidak valid.' };
+  }
 
   const { data: rows } = await supabase
     .from(table)
     .select('id')
-    .eq('resi', resi)
-    .eq('stage1_scanned', 'true')
+    .in('resi', resiVariants)
+    .eq('stage1_scanned', true)
     .or('stage2_verified.is.null,stage2_verified.neq.true');
 
   if (!rows || rows.length === 0) {
-    const { data: unscan } = await supabase.from(table).select('id').eq('resi', resi).limit(1);
+    const { data: unscan } = await supabase
+      .from(table)
+      .select('id')
+      .in('resi', resiVariants)
+      .limit(1);
     if (!unscan || unscan.length === 0) return { success: false, message: 'Resi belum discan di Stage 1!' };
     return { success: false, message: 'Resi sudah terverifikasi sebelumnya.' };
   }
@@ -579,7 +621,7 @@ export const verifyResiStage2 = async (
   const { error } = await supabase
     .from(table)
     .update({
-      stage2_verified: 'true',
+      stage2_verified: true,
       // [UBAH] Gunakan getWIBDate()
       stage2_verified_at: getWIBDate().toISOString(),
       stage2_verified_by: verified_by,
@@ -602,11 +644,15 @@ export const verifyResiStage2Bulk = async (
   const alreadyVerified: string[] = [];
 
   for (const resi of resiList) {
+    const normalizedResi = normalizeResiKey(resi);
+    if (!normalizedResi) continue;
+    const resiVariants = buildScanKeyVariants(normalizedResi);
+
     const { data: rows } = await supabase
       .from(table)
       .select('id')
-      .eq('resi', resi)
-      .eq('stage1_scanned', 'true')
+      .in('resi', resiVariants)
+      .eq('stage1_scanned', true)
       .or('stage2_verified.is.null,stage2_verified.neq.true');
 
     if (rows && rows.length > 0) {
@@ -614,7 +660,7 @@ export const verifyResiStage2Bulk = async (
       const { error } = await supabase
         .from(table)
         .update({
-          stage2_verified: 'true',
+          stage2_verified: true,
           stage2_verified_at: getWIBDate().toISOString(),
           stage2_verified_by: verified_by,
           status: 'stage2'
@@ -627,11 +673,11 @@ export const verifyResiStage2Bulk = async (
       const { data: existingResi } = await supabase
         .from(table)
         .select('id, stage2_verified')
-        .eq('resi', resi)
+        .in('resi', resiVariants)
         .limit(1);
       
-      if (existingResi && existingResi.length > 0 && existingResi[0].stage2_verified === 'true') {
-        alreadyVerified.push(resi);
+      if (existingResi && existingResi.length > 0 && isTrueValue(existingResi[0].stage2_verified)) {
+        alreadyVerified.push(normalizedResi);
       }
     }
   }
@@ -672,7 +718,7 @@ export const getPendingStage3List = async (store: string | null) => {
     const data = await fetchAllRowsPaged<any>(
       table,
       '*',
-      (query) => query.eq('stage2_verified', 'true').neq('status', 'completed'),
+      (query) => query.eq('stage2_verified', true).neq('status', 'completed'),
       { orderBy: 'stage2_verified_at', ascending: false }
     );
     return mapToBoolean(data || []);
@@ -685,11 +731,13 @@ export const getPendingStage3List = async (store: string | null) => {
 export const checkResiStatus = async (resis: string[], store: string | null) => {
   const table = getTableName(store);
   if (resis.length === 0) return [];
+  const variants = [...new Set(resis.flatMap((r) => buildScanKeyVariants(r)))];
+  if (variants.length === 0) return [];
   
   const { data, error } = await supabase
     .from(table)
     .select('resi, stage1_scanned, stage2_verified, status, ecommerce, sub_toko, no_pesanan')
-    .in('resi', resis);
+    .in('resi', variants);
   
   if (error) return [];
   return data || [];
@@ -715,7 +763,7 @@ export const checkResiOrOrderStatus = async (
     data = await fetchAllRowsPaged<any>(
       table,
       'resi, no_pesanan, stage1_scanned, stage2_verified, status, ecommerce, sub_toko, negara_ekspor',
-      (query) => query.eq('stage1_scanned', 'true')
+      (query) => query.eq('stage1_scanned', true)
     );
   } catch (error) {
     console.error('checkResiOrOrderStatus error:', error);
@@ -743,7 +791,7 @@ export const getStage1ResiList = async (store: string | null): Promise<Array<{re
     data = await fetchAllRowsPaged<any>(
       table,
       'resi, no_pesanan, ecommerce, sub_toko, stage2_verified',
-      (query) => query.eq('stage1_scanned', 'true'),
+      (query) => query.eq('stage1_scanned', true),
       { orderBy: 'stage1_scanned_at', ascending: false }
     );
   } catch (error) {
@@ -756,7 +804,7 @@ export const getStage1ResiList = async (store: string | null): Promise<Array<{re
     no_pesanan: d.no_pesanan,
     ecommerce: d.ecommerce || '-',
     sub_toko: d.sub_toko || '-',
-    stage2_verified: String(d.stage2_verified) === 'true'
+    stage2_verified: isTrueValue(d.stage2_verified)
   }));
 };
 

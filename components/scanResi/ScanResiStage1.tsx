@@ -71,6 +71,7 @@ import {
   getResellerNamesFromBarangKeluar,
   addReseller
 } from '../../services/resiScanService';
+import { supabase } from '../../services/supabaseClient';
 import { 
   ResiScanStage, 
   EcommercePlatform, 
@@ -276,6 +277,61 @@ export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh, refre
     const names = await getResellerNamesFromBarangKeluar(selectedStore);
     setResellerNamesList(names);
   };
+
+  // Sinkronisasi lintas-device: auto refresh jika ada perubahan di tabel scan_resi.
+  useEffect(() => {
+    if (!selectedStore) return;
+
+    const tableName = selectedStore === 'bjw' ? 'scan_resi_bjw' : 'scan_resi_mjm';
+    let active = true;
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const silentReload = async () => {
+      try {
+        const data = await getResiStage1List(selectedStore);
+        if (!active) return;
+        setResiList(data);
+      } catch (error) {
+        console.warn('Stage1 silent reload failed:', error);
+      }
+    };
+
+    const scheduleReload = () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        silentReload();
+      }, 250);
+    };
+
+    const channel = supabase
+      .channel(`stage1-sync-${selectedStore}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: tableName },
+        () => scheduleReload()
+      )
+      .subscribe();
+
+    const pollingId = window.setInterval(() => {
+      silentReload();
+    }, 15000);
+
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        silentReload();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      active = false;
+      if (debounceTimer) clearTimeout(debounceTimer);
+      window.clearInterval(pollingId);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      supabase.removeChannel(channel);
+    };
+  }, [selectedStore]);
   
   const handleScanResi = async (e: React.FormEvent) => {
     e.preventDefault();

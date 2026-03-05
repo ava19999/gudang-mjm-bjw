@@ -228,17 +228,24 @@ export const ScanResiStage2: React.FC<ScanResiStage2Props> = ({ onRefresh }) => 
   };
 
   const handleScanSuccess = async (decodedText: string) => {
+    const cleanedText = String(decodedText || '').trim().toUpperCase();
+    if (!cleanedText) {
+      showToast('Hasil scan kosong atau tidak valid.', 'error');
+      playBeep('error');
+      return;
+    }
+
     // 1. Jika masih cooldown, abaikan scan berikutnya
     if (!scanningEnabled) return;
 
     // 2. CEK DOUBLE SCAN (resi yang baru saja di-scan)
-    if (decodedText === lastScannedResi) {
-      showDuplicateAlert(decodedText, 'Resi ini baru saja di-scan!');
+    if (cleanedText === lastScannedResi) {
+      showDuplicateAlert(cleanedText, 'Resi ini baru saja di-scan!');
       return;
     }
     
     // 3. Scan Baru yang Valid
-    setLastScannedResi(decodedText);
+    setLastScannedResi(cleanedText);
     setScanningEnabled(false);
     
     // Play sound "Ting" (Sukses Scan)
@@ -250,7 +257,7 @@ export const ScanResiStage2: React.FC<ScanResiStage2Props> = ({ onRefresh }) => 
     }
     
     // Proses verifikasi ke database
-    await verifyResi(decodedText);
+    await verifyResi(cleanedText);
     
     // Cooldown lebih lama (3 detik) untuk menghindari scan terlalu cepat
     if (scanCooldownRef.current) {
@@ -262,16 +269,23 @@ export const ScanResiStage2: React.FC<ScanResiStage2Props> = ({ onRefresh }) => 
   };
   
   const verifyResi = async (resiNumber: string) => {
+    const normalizedResi = String(resiNumber || '').trim().toUpperCase();
+    if (!normalizedResi) {
+      showToast('Nomor resi tidak valid!', 'error');
+      playBeep('error');
+      return;
+    }
+
     const result = await verifyResiStage2(
       {
-        resi: resiNumber,
+        resi: normalizedResi,
         verified_by: userName || 'Admin'
       },
       selectedStore
     );
 
     if (result.success) {
-      showToast(`✓ ${resiNumber} terverifikasi!`, 'success');
+      showToast(`[OK] ${normalizedResi} terverifikasi!`, 'success');
       setLoading(true);
       let data: ResiScanStage[] = [];
       if (statusFilter === 'pending') {
@@ -285,7 +299,7 @@ export const ScanResiStage2: React.FC<ScanResiStage2Props> = ({ onRefresh }) => 
     } else {
       // Jika error dari server (misal resi tidak ditemukan atau sudah diverifikasi)
       // Tampilkan popup dengan suara
-      showDuplicateAlert(resiNumber, result.message);
+      showDuplicateAlert(normalizedResi, result.message);
     }
   };
 
@@ -1177,3 +1191,4 @@ export const ScanResiStage2: React.FC<ScanResiStage2Props> = ({ onRefresh }) => 
     </div>
   );
 };
+
