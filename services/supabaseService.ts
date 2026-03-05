@@ -645,25 +645,26 @@ export const fetchDistinctSuppliers = async (store: string | null): Promise<stri
   if (!table) return [];
 
   try {
-    const { data, error } = await supabase
-      .from(table)
-      .select('customer')
-      .not('customer', 'is', null)
-      .not('customer', 'eq', '')
-      .not('customer', 'eq', '-')
-      .not('customer', 'ilike', '%RETUR%');
+    const rows = await fetchAllRowsForModalFiltered<{ customer: string | null }>(
+      table,
+      'customer',
+      'customer',
+      (query) =>
+        query
+          .not('customer', 'is', null)
+          .not('customer', 'eq', '')
+          .not('customer', 'eq', '-')
+          .not('customer', 'ilike', '%RETUR%'),
+      true
+    );
 
-    if (error) {
-      console.error('Fetch Distinct Suppliers Error:', error);
-      return [];
-    }
-
-    // Get unique values and filter out empty/dash
+    // Get unique values and filter out empty/dash/retur
     const uniqueValues = [...new Set(
-      (data || [])
+      rows
         .map(d => d.customer?.trim().toUpperCase())
-        .filter(Boolean)
+        .filter((c): c is string => Boolean(c))
         .filter(c => c !== '-' && c !== '')
+        .filter(c => !c.includes('RETUR'))
     )];
     return uniqueValues.sort();
   } catch (err) {
@@ -678,24 +679,26 @@ export const fetchDistinctCustomers = async (store: string | null): Promise<stri
   if (!table) return [];
 
   try {
-    const { data, error } = await supabase
-      .from(table)
-      .select('customer')
-      .not('customer', 'is', null)
-      .not('customer', 'eq', '')
-      .not('customer', 'eq', '-');
+    const rows = await fetchAllRowsForModalFiltered<{ customer: string | null }>(
+      table,
+      'customer',
+      'customer',
+      (query) =>
+        query
+          .not('customer', 'is', null)
+          .not('customer', 'eq', '')
+          .not('customer', 'eq', '-')
+          .not('customer', 'ilike', '%RETUR%'),
+      true
+    );
 
-    if (error) {
-      console.error('Fetch Distinct Customers Error:', error);
-      return [];
-    }
-
-    // Get unique values and filter out empty/dash
+    // Get unique values and filter out empty/dash/retur
     const uniqueValues = [...new Set(
-      (data || [])
+      rows
         .map(d => d.customer?.trim().toUpperCase())
-        .filter(Boolean)
+        .filter((c): c is string => Boolean(c))
         .filter(c => c !== '-' && c !== '')
+        .filter(c => !c.includes('RETUR'))
     )];
     return uniqueValues.sort();
   } catch (err) {
