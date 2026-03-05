@@ -109,10 +109,10 @@ export const QuickInputTableRow: React.FC<QuickInputTableRowProps> = ({
     };
 
     useEffect(() => {
-        if (activeSearchIndex === index && activeItemRef.current) {
+        if (activeSearchIndex === row.id && activeItemRef.current) {
             activeItemRef.current.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
         }
-    }, [highlightedIndex, activeSearchIndex, index]);
+    }, [highlightedIndex, activeSearchIndex, row.id]);
 
     // Scroll highlighted customer item into view
     useEffect(() => {
@@ -274,7 +274,7 @@ export const QuickInputTableRow: React.FC<QuickInputTableRowProps> = ({
                                 <Info size={12} />
                             </button>
                         )}
-                        {activeSearchIndex === index && suggestions.length > 0 && (
+                        {activeSearchIndex === row.id && suggestions.length > 0 && (
                             <div className="absolute top-full left-0 right-0 mt-1 bg-gray-800 rounded-lg shadow-xl z-20 max-h-48 overflow-y-auto border border-gray-600">
                                 {suggestions.map((item, idx) => (
                                     <div
