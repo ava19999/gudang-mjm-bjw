@@ -210,6 +210,21 @@ export const PiutangCustomerView: React.FC = () => {
     return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
   };
 
+  // Untuk modul piutang per bulan jatuh tempo:
+  // tanggal transaksi manual perlu dihitung dari bulan jatuh tempo yang aktif.
+  const getTransactionDateFromDueMonth = (dueMonth: string, tempo: string): string => {
+    const safeTempo = String(tempo || '1 BLN').toUpperCase();
+    const due = new Date(`${dueMonth}-01T00:00:00`);
+    if (Number.isNaN(due.getTime())) {
+      return new Date().toISOString().split('T')[0];
+    }
+    const tempoMatch = safeTempo.match(/(\d+)/);
+    const tempoMonths = tempoMatch ? parseInt(tempoMatch[1], 10) : 1;
+    const transactionDate = new Date(due);
+    transactionDate.setMonth(transactionDate.getMonth() - tempoMonths);
+    return `${transactionDate.getFullYear()}-${String(transactionDate.getMonth() + 1).padStart(2, '0')}-01`;
+  };
+
   // Load data
   const loadData = async () => {
     setLoading(true);
@@ -603,12 +618,15 @@ export const PiutangCustomerView: React.FC = () => {
     }
 
     try {
+      const resolvedTempo = (tagihanTempo || '1 BLN').toUpperCase();
+      const resolvedDate = tagihanDate || getTransactionDateFromDueMonth(filterMonth, resolvedTempo);
+
       const { error } = await supabase
         .from('importir_tagihan')
         .insert([{
           customer: tagihanCustomer.trim().toUpperCase(),
-          tempo: tagihanTempo || '1 BLN',
-          tanggal: tagihanDate || new Date().toISOString().split('T')[0],
+          tempo: resolvedTempo,
+          tanggal: resolvedDate,
           jumlah: parseFloat(tagihanAmount),
           keterangan: tagihanNote || 'Tagihan manual',
           store: selectedStore?.toUpperCase() || 'MJM',
@@ -623,7 +641,12 @@ export const PiutangCustomerView: React.FC = () => {
       setTagihanAmount('');
       setTagihanNote('');
       setTagihanDate('');
-      loadData();
+      const dueMonth = calculateDueMonth(resolvedDate, resolvedTempo);
+      if (!filterMonth || dueMonth === filterMonth) {
+        loadData();
+      } else {
+        setFilterMonth(dueMonth);
+      }
     } catch (err) {
       console.error('Error adding tagihan:', err);
       showToast('Gagal menambahkan tagihan', 'error');
@@ -840,7 +863,14 @@ export const PiutangCustomerView: React.FC = () => {
       setEditTagihanAmount('');
       setEditTagihanNote('');
       setEditTagihanDate('');
-      loadData();
+      const savedDate = editTagihanDate || editingTagihan.tanggal;
+      const savedTempo = editingTagihan.tempo || '1 BLN';
+      const dueMonth = calculateDueMonth(savedDate, savedTempo);
+      if (!filterMonth || dueMonth === filterMonth) {
+        loadData();
+      } else {
+        setFilterMonth(dueMonth);
+      }
     } catch (err) {
       console.error('Error updating tagihan:', err);
       showToast('Gagal update tagihan', 'error');
@@ -1268,7 +1298,9 @@ export const PiutangCustomerView: React.FC = () => {
           <button
             onClick={() => {
               setShowTagihanModal(true);
-              setTagihanDate(new Date().toISOString().split('T')[0]);
+              const defaultTempo = '1 BLN';
+              setTagihanTempo(defaultTempo);
+              setTagihanDate(getTransactionDateFromDueMonth(filterMonth, defaultTempo));
             }}
             className="flex items-center gap-2 px-4 py-2.5 bg-orange-600 hover:bg-orange-700 rounded-xl transition-colors"
           >
@@ -1890,6 +1922,7 @@ export const PiutangCustomerView: React.FC = () => {
                   setTagihanTempo('');
                   setTagihanAmount('');
                   setTagihanNote('');
+                  setTagihanDate('');
                 }}
                 className="p-1 hover:bg-gray-700 rounded-lg transition-colors"
               >
@@ -1912,7 +1945,13 @@ export const PiutangCustomerView: React.FC = () => {
                 <label className="block text-sm text-gray-400 mb-1">Tempo</label>
                 <select
                   value={tagihanTempo}
-                  onChange={(e) => setTagihanTempo(e.target.value)}
+                  onChange={(e) => {
+                    const nextTempo = e.target.value;
+                    setTagihanTempo(nextTempo);
+                    if (nextTempo && filterMonth) {
+                      setTagihanDate(getTransactionDateFromDueMonth(filterMonth, nextTempo));
+                    }
+                  }}
                   className="w-full px-3 py-2.5 bg-gray-900 border border-gray-700 rounded-xl text-white focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
                 >
                   <option value="">Pilih Tempo</option>
@@ -1967,6 +2006,7 @@ export const PiutangCustomerView: React.FC = () => {
                   setTagihanTempo('');
                   setTagihanAmount('');
                   setTagihanNote('');
+                  setTagihanDate('');
                 }}
                 className="flex-1 px-4 py-2.5 bg-gray-700 hover:bg-gray-600 rounded-xl transition-colors"
               >
