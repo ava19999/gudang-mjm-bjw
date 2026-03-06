@@ -794,6 +794,14 @@ export const FloatingQuickAccess: React.FC<FloatingQuickAccessProps> = ({
                         <p className="text-white text-xs">{previewItem.brand || '-'}</p>
                       </div>
                     </div>
+
+                    <div className="flex items-start gap-2">
+                      <PenTool size={14} className="text-blue-400 mt-0.5 flex-shrink-0" />
+                      <div>
+                        <p className="text-[10px] text-gray-500 uppercase">Aplikasi</p>
+                        <p className="text-white text-xs">{previewItem.application || '-'}</p>
+                      </div>
+                    </div>
                     
                     <div className="flex items-start gap-2">
                       <MapPin size={14} className="text-orange-400 mt-0.5 flex-shrink-0" />
@@ -1146,6 +1154,9 @@ export const FloatingQuickAccess: React.FC<FloatingQuickAccessProps> = ({
                             <div className="flex-1 min-w-0">
                               <p className="text-white text-xs font-medium truncate">{item.name}</p>
                               <p className="text-gray-400 text-[10px] font-mono truncate">{item.partNumber}</p>
+                              {item.application && (
+                                <p className="text-gray-500 text-[10px] truncate">{item.application}</p>
+                              )}
                             </div>
                             
                             {/* Stock Badge */}
@@ -1445,6 +1456,9 @@ export const FloatingQuickAccess: React.FC<FloatingQuickAccessProps> = ({
                             <div className="flex-1 min-w-0">
                               <p className="text-white text-xs font-medium truncate">{item.name}</p>
                               <p className="text-gray-400 text-[10px] font-mono truncate">{item.partNumber}</p>
+                              {item.application && (
+                                <p className="text-gray-500 text-[10px] truncate">{item.application}</p>
+                              )}
                             </div>
                             
                             {/* Stock Badge */}
@@ -1479,6 +1493,9 @@ export const FloatingQuickAccess: React.FC<FloatingQuickAccessProps> = ({
                           <div className="flex-1 min-w-0">
                             <p className="text-white text-sm font-medium truncate">{selectedOrderItem.name}</p>
                             <p className="text-gray-400 text-xs font-mono">{selectedOrderItem.partNumber}</p>
+                            {selectedOrderItem.application && (
+                              <p className="text-gray-500 text-[10px] truncate mt-0.5">{selectedOrderItem.application}</p>
+                            )}
                             <span className={`text-xs px-2 py-0.5 rounded inline-block mt-1 ${
                               selectedOrderItem.quantity === 0 ? 'bg-red-900/50 text-red-400' :
                               selectedOrderItem.quantity < 4 ? 'bg-yellow-900/50 text-yellow-400' :
