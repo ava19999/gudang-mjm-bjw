@@ -1,14 +1,7 @@
 // FILE: src/components/quickInput/BarangMasukTableView.tsx
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useStore } from '../../context/StoreContext';
-import {
-    deleteBarangLog,
-    fetchBarangMasukLog,
-    fetchFotoProduk,
-    markEdgeListDatasetsDirty,
-    markInventoryCacheDirty,
-    readInventoryRowsCached
-} from '../../services/supabaseService';
+import { fetchBarangMasukLog, deleteBarangLog } from '../../services/supabaseService';
 import { supabase } from '../../services/supabaseClient';
 import { formatRupiah, formatDate } from '../../utils';
 import { Loader2, RefreshCw, ChevronLeft, ChevronRight, PackageOpen, Trash2, Search, X, Edit2, Save, XCircle, Image } from 'lucide-react';
@@ -42,6 +35,35 @@ const extractPhotoUrls = (fotoRow: any): string[] => {
         }
     }
     return urls;
+};
+
+const fetchAllRowsPaged = async <T,>(
+    table: string,
+    selectColumns: string,
+    buildQuery: (query: any) => any,
+    options?: { orderBy?: string; ascending?: boolean; pageSize?: number }
+): Promise<T[]> => {
+    const pageSize = options?.pageSize ?? 1000;
+    const rows: T[] = [];
+    let from = 0;
+
+    while (true) {
+        let query = supabase.from(table).select(selectColumns);
+        query = buildQuery(query);
+        if (options?.orderBy) {
+            query = query.order(options.orderBy, { ascending: options.ascending ?? true });
+        }
+
+        const { data, error } = await query.range(from, from + pageSize - 1);
+        if (error) throw error;
+
+        const page = (data || []) as T[];
+        rows.push(...page);
+        if (page.length < pageSize) break;
+        from += pageSize;
+    }
+
+    return rows;
 };
 
 export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger, onRefresh }) => {
@@ -97,18 +119,22 @@ export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger, onRefres
         }
         
         try {
-            const fotoRows = await fetchFotoProduk(partNumber);
-            const normalized = String(partNumber || '').trim().toUpperCase();
-            const fotoData = (fotoRows || []).find((row: any) =>
-                String(row?.part_number || '').trim().toUpperCase() === normalized
-            ) || null;
-
-            if (!fotoData) {
+            // Use ilike for case-insensitive matching
+            const { data: fotoData, error } = await supabase
+                .from('foto')
+                .select('*')
+                .ilike('part_number', partNumber)
+                .limit(1)
+                .single();
+            
+            if (error) {
+                console.log('[Photo] No photo found for:', partNumber);
                 setPhotoCache(prev => ({ ...prev, [partNumber]: [] }));
                 return [];
             }
             
             const urls = extractPhotoUrls(fotoData);
+            console.log('[Photo] Found', urls.length, 'photos for:', partNumber);
             setPhotoCache(prev => ({ ...prev, [partNumber]: urls }));
             return urls;
         } catch (e) {
@@ -158,12 +184,19 @@ export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger, onRefres
         }
 
         try {
-            const parts = await readInventoryRowsCached(selectedStore);
+            const tableName = selectedStore === 'mjm' ? 'base_mjm' : 'base_bjw';
+            const parts = await fetchAllRowsPaged<{ part_number: string; name: string; quantity: number }>(
+                tableName,
+                'part_number, name, quantity',
+                (query) =>
+                    query
+                        .not('part_number', 'is', null)
+                        .not('part_number', 'eq', ''),
+                { orderBy: 'part_number', ascending: true }
+            );
+
             if (parts) {
-                const sorted = [...parts].sort((a: any, b: any) =>
-                    String(a?.part_number || '').localeCompare(String(b?.part_number || ''))
-                );
-                setPartOptions(sorted
+                setPartOptions(parts
                     .filter(p => p.part_number !== 'SYSTEM-BANNER-PROMO')
                     .map(p => ({
                     part_number: p.part_number,
@@ -346,22 +379,6 @@ export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger, onRefres
             const inventoryTable = selectedStore === 'mjm' ? 'base_mjm' : 'base_bjw';
             const qtyDiff = newQty - oldQty;
             let resultingCurrentQty = item.current_qty || 0;
-            const inventoryRows = await readInventoryRowsCached(selectedStore);
-            const getInventoryQty = (partNumber: string): number => {
-                const row = (inventoryRows || []).find(
-                    (entry) =>
-                        String((entry as any)?.part_number || '').trim().toUpperCase() ===
-                        String(partNumber || '').trim().toUpperCase()
-                );
-                return Number((row as any)?.quantity || 0);
-            };
-            const hasInventoryPart = (partNumber: string): boolean => {
-                return (inventoryRows || []).some(
-                    (entry) =>
-                        String((entry as any)?.part_number || '').trim().toUpperCase() ===
-                        String(partNumber || '').trim().toUpperCase()
-                );
-            };
 
             // Update barang_masuk record (including part_number)
             const { error: updateError } = await supabase
@@ -383,8 +400,16 @@ export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger, onRefres
                 // Part number changed: reduce stock from old part, add to new part
                 
                 // 1. Reduce stock from old part number
-                if (hasInventoryPart(oldPartNumber)) {
-                    const oldStock = getInventoryQty(oldPartNumber);
+                const { data: oldInventory, error: oldInventoryError } = await supabase
+                    .from(inventoryTable)
+                    .select('quantity')
+                    .eq('part_number', oldPartNumber)
+                    .maybeSingle();
+
+                if (oldInventoryError) throw oldInventoryError;
+
+                if (oldInventory) {
+                    const oldStock = Number(oldInventory.quantity || 0);
                     const newOldStock = Math.max(0, oldStock - oldQty);
                     const { error: oldUpdateError } = await supabase
                         .from(inventoryTable)
@@ -394,11 +419,16 @@ export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger, onRefres
                 }
 
                 // 2. Add stock to new part number
-                if (!hasInventoryPart(newPartNumber)) {
-                    throw new Error(`Part number ${newPartNumber} tidak ditemukan di ${inventoryTable}`);
-                }
+                const { data: newInventory, error: newInventoryError } = await supabase
+                    .from(inventoryTable)
+                    .select('quantity')
+                    .eq('part_number', newPartNumber)
+                    .maybeSingle();
 
-                const currentNewStock = getInventoryQty(newPartNumber);
+                if (newInventoryError) throw newInventoryError;
+                if (!newInventory) throw new Error(`Part number ${newPartNumber} tidak ditemukan di ${inventoryTable}`);
+
+                const currentNewStock = Number(newInventory.quantity || 0);
                 const finalNewStock = currentNewStock + newQty;
                 const { error: newUpdateError } = await supabase
                     .from(inventoryTable)
@@ -409,8 +439,16 @@ export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger, onRefres
                 resultingCurrentQty = finalNewStock;
             } else if (qtyDiff !== 0) {
                 // Same part number, only qty changed
-                if (hasInventoryPart(item.part_number)) {
-                    const currentStock = getInventoryQty(item.part_number);
+                const { data: inventoryData, error: inventoryError } = await supabase
+                    .from(inventoryTable)
+                    .select('quantity')
+                    .eq('part_number', item.part_number)
+                    .maybeSingle();
+
+                if (inventoryError) throw inventoryError;
+
+                if (inventoryData) {
+                    const currentStock = Number(inventoryData.quantity || 0);
                     const newStock = Math.max(0, currentStock + qtyDiff);
                     const { error: stockUpdateError } = await supabase
                         .from(inventoryTable)
@@ -438,9 +476,6 @@ export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger, onRefres
                     } 
                     : d
             ));
-
-            markInventoryCacheDirty(selectedStore);
-            markEdgeListDatasetsDirty(selectedStore, ['barang-masuk-log']);
 
             setEditingId(null);
             setEditForm({ part_number: '', quantity: '', harga_satuan: '', customer: '', tempo: '' });

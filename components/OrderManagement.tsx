@@ -128,7 +128,7 @@ const normalizeSoldKodeTokoInput = (value: string): string | null => {
 interface AutocompleteDropdownProps {
   value: string;
   onChange: (value: string) => void;
-  options: string[];
+  options: Array<{ value: string; secondaryText?: string }>;
   placeholder: string;
   icon: React.ReactNode;
 }
@@ -174,7 +174,7 @@ const AutocompleteDropdown: React.FC<AutocompleteDropdownProps> = ({ value, onCh
       case 'Enter':
         e.preventDefault();
         if (highlightedIndex >= 0 && options[highlightedIndex]) {
-          onChange(options[highlightedIndex]);
+          onChange(options[highlightedIndex].value);
           setIsOpen(false);
           setHighlightedIndex(-1);
         }
@@ -186,8 +186,8 @@ const AutocompleteDropdown: React.FC<AutocompleteDropdownProps> = ({ value, onCh
     }
   };
 
-  const handleSelect = (option: string) => {
-    onChange(option);
+  const handleSelect = (option: { value: string; secondaryText?: string }) => {
+    onChange(option.value);
     setIsOpen(false);
     setHighlightedIndex(-1);
     inputRef.current?.focus();
@@ -219,7 +219,7 @@ const AutocompleteDropdown: React.FC<AutocompleteDropdownProps> = ({ value, onCh
         >
           {options.map((option, index) => (
             <li
-              key={option}
+              key={`${option.value}-${index}`}
               className={`px-4 py-2 text-sm cursor-pointer transition-colors ${
                 index === highlightedIndex
                   ? 'bg-purple-600 text-white'
@@ -229,7 +229,14 @@ const AutocompleteDropdown: React.FC<AutocompleteDropdownProps> = ({ value, onCh
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => handleSelect(option)}
             >
-              {option}
+              <div className="flex flex-col">
+                <span>{option.value}</span>
+                {option.secondaryText && (
+                  <span className={`text-[11px] ${index === highlightedIndex ? 'text-purple-100' : 'text-gray-400'}`}>
+                    {option.secondaryText}
+                  </span>
+                )}
+              </div>
             </li>
           ))}
         </ul>
@@ -593,22 +600,21 @@ export const OrderManagement: React.FC = () => {
       if (activeTab === 'TERJUAL') {
         setSoldData([]);
         setLoadingProgress(1);
-        const aggregatedRows: SoldItemRow[] = [];
 
         await fetchSoldItemsProgressive(selectedStore, ({ chunk, loaded, total }) => {
           if (requestId !== loadRequestRef.current) return;
-          if (chunk && chunk.length > 0) aggregatedRows.push(...chunk);
+
+          setSoldData(prev => [...prev, ...chunk]);
 
           if (total > 0) {
             const percent = Math.floor((loaded / total) * 100);
             setLoadingProgress(Math.min(99, Math.max(1, percent)));
           } else {
-            setLoadingProgress(prev => Math.min(95, prev + 8));
+            setLoadingProgress(prev => Math.min(95, prev + 6));
           }
         });
 
         if (requestId !== loadRequestRef.current) return;
-        setSoldData(aggregatedRows);
       }
       if (activeTab === 'RETUR') {
         const rows = await fetchReturItems(selectedStore);
@@ -816,25 +822,54 @@ export const OrderManagement: React.FC = () => {
       : activeTab === 'RETUR'
         ? [...new Set(returData.map(item => item.customer).filter(Boolean))]
         : [...new Set(soldData.map(item => item.customer).filter(Boolean))];
-    return customers.filter(c => c.toLowerCase().includes(search)).slice(0, 50);
+    return customers
+      .filter(c => c.toLowerCase().includes(search))
+      .slice(0, 50)
+      .map((customer) => ({ value: customer }));
   }, [activeTab, groupedOfflineOrders, salesData, salesPaidData, soldData, returData, customerFilter]);
 
   const filteredPartNumberOptions = useMemo(() => {
     if (!partNumberFilter || partNumberFilter.length < 1) return [];
     const search = partNumberFilter.toLowerCase();
-    const partNumbers = activeTab === 'OFFLINE'
-      ? [...new Set(offlineData.map(item => item.part_number).filter(Boolean))]
+
+    const sourceItems: any[] = activeTab === 'OFFLINE'
+      ? offlineData
       : activeTab === 'SALES'
-        ? [
-            ...new Set([
-              ...salesData.map(item => item.part_number).filter(Boolean),
-              ...salesPaidData.map(item => item.part_number).filter(Boolean)
-            ])
-          ]
-      : activeTab === 'RETUR'
-        ? [...new Set(returData.map(item => item.part_number).filter(Boolean))]
-        : [...new Set(soldData.map(item => item.part_number).filter(Boolean))];
-    return partNumbers.filter(p => p.toLowerCase().includes(search)).slice(0, 50);
+        ? [...salesData, ...salesPaidData]
+        : activeTab === 'RETUR'
+          ? returData
+          : soldData;
+
+    const optionMap = new Map<string, { value: string; application: string }>();
+    sourceItems.forEach((item: any) => {
+      const partNumber = String(item?.part_number || '').trim();
+      if (!partNumber) return;
+
+      const key = partNumber.toUpperCase();
+      const application = String(item?.application || '').trim();
+      const existing = optionMap.get(key);
+
+      if (!existing) {
+        optionMap.set(key, { value: partNumber, application });
+        return;
+      }
+
+      if (!existing.application && application) {
+        existing.application = application;
+      }
+    });
+
+    return Array.from(optionMap.values())
+      .filter((option) => {
+        const pn = option.value.toLowerCase();
+        const ap = option.application.toLowerCase();
+        return pn.includes(search) || ap.includes(search);
+      })
+      .slice(0, 50)
+      .map((option) => ({
+        value: option.value,
+        secondaryText: option.application ? `Aplikasi: ${option.application}` : undefined
+      }));
   }, [activeTab, offlineData, salesData, salesPaidData, soldData, returData, partNumberFilter]);
 
   // Pagination for grouped sold data

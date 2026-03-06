@@ -1,12 +1,6 @@
 // FILE: services/kirimBarangService.ts
 import { supabase } from './supabaseClient';
 import { getWIBDate } from '../utils/timezone';
-import {
-  markEdgeListDatasetsDirty,
-  markInventoryCacheDirty,
-  readEdgeListRowsCached,
-  readInventoryRowsCached
-} from './supabaseService';
 
 // ====================================
 // TYPES
@@ -55,15 +49,6 @@ export interface StockItem {
   quantity: number;
   shelf: string;
 }
-
-const mapRowToStockItem = (row: any): StockItem => ({
-  part_number: String(row?.part_number || ''),
-  name: String(row?.name || ''),
-  brand: String(row?.brand || ''),
-  application: String(row?.application || ''),
-  quantity: Number(row?.quantity || 0),
-  shelf: String(row?.shelf || '')
-});
 
 const normalizePartNumber = (partNumber: string): string => (
   String(partNumber || '').trim().toUpperCase()
@@ -183,7 +168,6 @@ const ensureTransferIncomingLog = async (
       return { success: false, error: insertLogError.message };
     }
 
-    markEdgeListDatasetsDirty(transfer.to_store, ['barang-masuk-log']);
     return { success: true };
   } catch (error: any) {
     console.error('ensureTransferIncomingLog Exception:', error);
@@ -213,10 +197,6 @@ const dedupePendingRequests = (items: KirimBarangItem[]): KirimBarangItem[] => {
   return result;
 };
 
-const markKirimBarangChanged = () => {
-  markEdgeListDatasetsDirty(null, ['kirim-barang']);
-};
-
 // ====================================
 // FETCH FUNCTIONS
 // ====================================
@@ -227,22 +207,40 @@ export const fetchBothStoreStock = async (partNumber?: string): Promise<{
   bjw: StockItem[];
 }> => {
   try {
-    const [mjmRows, bjwRows] = await Promise.all([
-      readInventoryRowsCached('mjm'),
-      readInventoryRowsCached('bjw')
-    ]);
-    const term = String(partNumber || '').trim().toLowerCase();
-    const withFilter = (rows: any[]) => (
-      rows.filter((row) => {
-        if (!term) return true;
-        const part = String(row?.part_number || '').toLowerCase();
-        return part.includes(term);
-      })
-    );
+    let mjmQuery = supabase
+      .from('base_mjm')
+      .select('part_number, name, brand, application, quantity, shelf')
+      .order('part_number');
+
+    let bjwQuery = supabase
+      .from('base_bjw')
+      .select('part_number, name, brand, application, quantity, shelf')
+      .order('part_number');
+
+    if (partNumber) {
+      mjmQuery = mjmQuery.ilike('part_number', `%${partNumber}%`);
+      bjwQuery = bjwQuery.ilike('part_number', `%${partNumber}%`);
+    }
+
+    const [mjmResult, bjwResult] = await Promise.all([mjmQuery, bjwQuery]);
 
     return {
-      mjm: withFilter(mjmRows).map(mapRowToStockItem),
-      bjw: withFilter(bjwRows).map(mapRowToStockItem)
+      mjm: (mjmResult.data || []).map(item => ({
+        part_number: item.part_number || '',
+        name: item.name || '',
+        brand: item.brand || '',
+        application: item.application || '',
+        quantity: item.quantity || 0,
+        shelf: item.shelf || ''
+      })),
+      bjw: (bjwResult.data || []).map(item => ({
+        part_number: item.part_number || '',
+        name: item.name || '',
+        brand: item.brand || '',
+        application: item.application || '',
+        quantity: item.quantity || 0,
+        shelf: item.shelf || ''
+      }))
     };
   } catch (error) {
     console.error('fetchBothStoreStock Error:', error);
@@ -256,27 +254,37 @@ export const fetchKirimBarang = async (
   filter?: 'all' | 'incoming' | 'outgoing' | 'rejected' | 'pending' | 'approved' | 'sent' | 'completed'
 ): Promise<KirimBarangItem[]> => {
   try {
-    const allRows = await readEdgeListRowsCached<KirimBarangItem>(store || 'mjm', 'kirim-barang');
-    const filtered = (allRows || []).filter((row) => {
-      if (store && filter === 'incoming') {
-        return row.to_store === store && ['pending', 'approved', 'sent'].includes(String(row.status || ''));
-      }
-      if (store && filter === 'outgoing') {
-        return row.from_store === store && ['pending', 'approved', 'sent'].includes(String(row.status || ''));
-      }
-      if (filter === 'rejected') return row.status === 'rejected';
-      if (filter === 'pending') return row.status === 'pending';
-      if (filter === 'approved') return row.status === 'approved';
-      if (filter === 'sent') return row.status === 'sent';
-      if (filter === 'completed') return row.status === 'received';
-      return true;
-    }).sort((a, b) => {
-      const aTime = new Date(String(a.created_at || 0)).getTime();
-      const bTime = new Date(String(b.created_at || 0)).getTime();
-      return bTime - aTime;
-    });
+    let query = supabase
+      .from('kirim_barang')
+      .select('*')
+      .order('created_at', { ascending: false });
 
-    const dedupedData = dedupePendingRequests(filtered as KirimBarangItem[]);
+    if (store && filter === 'incoming') {
+      query = query.eq('to_store', store);
+      query = query.in('status', ['pending', 'approved', 'sent']);
+    } else if (store && filter === 'outgoing') {
+      query = query.eq('from_store', store);
+      query = query.in('status', ['pending', 'approved', 'sent']);
+    } else if (filter === 'rejected') {
+      query = query.eq('status', 'rejected');
+    } else if (filter === 'pending') {
+      query = query.eq('status', 'pending');
+    } else if (filter === 'approved') {
+      query = query.eq('status', 'approved');
+    } else if (filter === 'sent') {
+      query = query.eq('status', 'sent');
+    } else if (filter === 'completed') {
+      query = query.eq('status', 'received');
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      console.error('fetchKirimBarang Error:', error);
+      return [];
+    }
+
+    const dedupedData = dedupePendingRequests((data || []) as KirimBarangItem[]);
 
     // Auto-sync transfer yang sudah diterima agar masuk ke Detail Barang Masuk.
     const receivedTransfers = dedupedData.filter(item => (
@@ -364,7 +372,6 @@ export const createKirimBarangRequest = async (
       }
     }
 
-    markKirimBarangChanged();
     return { success: true };
   } catch (error: any) {
     console.error('createKirimBarangRequest Exception:', error);
@@ -410,7 +417,6 @@ export const approveKirimBarang = async (
       return { success: false, error: error.message };
     }
 
-    markKirimBarangChanged();
     return { success: true };
   } catch (error: any) {
     console.error('approveKirimBarang Exception:', error);
@@ -490,8 +496,6 @@ export const sendKirimBarang = async (
       return { success: false, error: updateError.message };
     }
 
-    markInventoryCacheDirty(transfer.from_store);
-    markKirimBarangChanged();
     return { success: true };
   } catch (error: any) {
     console.error('sendKirimBarang Exception:', error);
@@ -607,9 +611,6 @@ export const receiveKirimBarang = async (
       };
     }
 
-    markInventoryCacheDirty(transfer.to_store);
-    markEdgeListDatasetsDirty(transfer.to_store, ['barang-masuk-log']);
-    markKirimBarangChanged();
     return { success: true };
   } catch (error: any) {
     console.error('receiveKirimBarang Exception:', error);
@@ -667,10 +668,6 @@ export const rejectKirimBarang = async (
       return { success: false, error: error.message };
     }
 
-    if (transfer.status === 'sent') {
-      markInventoryCacheDirty(transfer.from_store);
-    }
-    markKirimBarangChanged();
     return { success: true };
   } catch (error: any) {
     console.error('rejectKirimBarang Exception:', error);
@@ -694,7 +691,6 @@ export const deleteKirimBarang = async (
       return { success: false, error: error.message };
     }
 
-    markKirimBarangChanged();
     return { success: true };
   } catch (error: any) {
     console.error('deleteKirimBarang Exception:', error);
@@ -707,17 +703,22 @@ export const getStockComparison = async (
   partNumber: string
 ): Promise<{ mjm: number; bjw: number }> => {
   try {
-    const normalizedPart = normalizePartNumber(partNumber);
-    const [mjmRows, bjwRows] = await Promise.all([
-      readInventoryRowsCached('mjm'),
-      readInventoryRowsCached('bjw')
+    const [mjmResult, bjwResult] = await Promise.all([
+      supabase
+        .from('base_mjm')
+        .select('quantity')
+        .eq('part_number', partNumber)
+        .single(),
+      supabase
+        .from('base_bjw')
+        .select('quantity')
+        .eq('part_number', partNumber)
+        .single()
     ]);
-    const mjmItem = mjmRows.find((row: any) => normalizePartNumber(row?.part_number) === normalizedPart);
-    const bjwItem = bjwRows.find((row: any) => normalizePartNumber(row?.part_number) === normalizedPart);
 
     return {
-      mjm: Number(mjmItem?.quantity || 0),
-      bjw: Number(bjwItem?.quantity || 0)
+      mjm: mjmResult.data?.quantity || 0,
+      bjw: bjwResult.data?.quantity || 0
     };
   } catch (error) {
     console.error('getStockComparison Error:', error);
@@ -733,17 +734,15 @@ export const getBulkStockComparison = async (
   if (uniquePartNumbers.length === 0) return {};
 
   try {
-    const normalizedParts = new Set(uniquePartNumbers.map((pn) => normalizePartNumber(pn)));
-    const requestedByNormalized = new Map<string, string>();
-    uniquePartNumbers.forEach((pn) => {
-      const normalized = normalizePartNumber(pn);
-      if (!requestedByNormalized.has(normalized)) {
-        requestedByNormalized.set(normalized, pn);
-      }
-    });
-    const [mjmRows, bjwRows] = await Promise.all([
-      readInventoryRowsCached('mjm'),
-      readInventoryRowsCached('bjw')
+    const [mjmResult, bjwResult] = await Promise.all([
+      supabase
+        .from('base_mjm')
+        .select('part_number, quantity')
+        .in('part_number', uniquePartNumbers),
+      supabase
+        .from('base_bjw')
+        .select('part_number, quantity')
+        .in('part_number', uniquePartNumbers)
     ]);
 
     const stockMap: Record<string, { mjm: number; bjw: number }> = {};
@@ -752,22 +751,22 @@ export const getBulkStockComparison = async (
       stockMap[partNumber] = { mjm: 0, bjw: 0 };
     });
 
-    (mjmRows || []).forEach((item: any) => {
+    (mjmResult.data || []).forEach((item: any) => {
       const partNumber = item.part_number || '';
-      const normalized = normalizePartNumber(partNumber);
-      if (!normalizedParts.has(normalized)) return;
-      const requestedKey = requestedByNormalized.get(normalized);
-      if (!requestedKey) return;
-      stockMap[requestedKey].mjm = item.quantity || 0;
+      if (!partNumber) return;
+      if (!stockMap[partNumber]) {
+        stockMap[partNumber] = { mjm: 0, bjw: 0 };
+      }
+      stockMap[partNumber].mjm = item.quantity || 0;
     });
 
-    (bjwRows || []).forEach((item: any) => {
+    (bjwResult.data || []).forEach((item: any) => {
       const partNumber = item.part_number || '';
-      const normalized = normalizePartNumber(partNumber);
-      if (!normalizedParts.has(normalized)) return;
-      const requestedKey = requestedByNormalized.get(normalized);
-      if (!requestedKey) return;
-      stockMap[requestedKey].bjw = item.quantity || 0;
+      if (!partNumber) return;
+      if (!stockMap[partNumber]) {
+        stockMap[partNumber] = { mjm: 0, bjw: 0 };
+      }
+      stockMap[partNumber].bjw = item.quantity || 0;
     });
 
     return stockMap;
@@ -802,18 +801,16 @@ export const updateKirimBarangPartNumber = async (
       return { success: false, error: 'Part number hanya bisa diubah saat status pending' };
     }
 
-    const sourceRows = await readInventoryRowsCached(currentRequest.from_store);
-    const normalizedLookup = normalizePartNumber(normalizedPartNumber);
-    const sourceItem = (sourceRows || [])
-      .map((row: any) => ({
-        part_number: String(row?.part_number || ''),
-        name: String(row?.name || ''),
-        brand: String(row?.brand || ''),
-        application: String(row?.application || '')
-      }))
-      .find((row: any) => normalizePartNumber(row.part_number).includes(normalizedLookup));
+    const sourceTable = currentRequest.from_store === 'mjm' ? 'base_mjm' : 'base_bjw';
+    const { data: sourceItem, error: sourceItemError } = await supabase
+      .from(sourceTable)
+      .select('part_number, name, brand, application')
+      .ilike('part_number', normalizedPartNumber)
+      .order('part_number')
+      .limit(1)
+      .maybeSingle();
 
-    if (!sourceItem) {
+    if (sourceItemError || !sourceItem) {
       return { success: false, error: 'Part number tidak ditemukan di master pengirim' };
     }
 
@@ -875,7 +872,6 @@ export const updateKirimBarangPartNumber = async (
       return { success: false, error: updateError.message };
     }
 
-    markKirimBarangChanged();
     return { success: true };
   } catch (error: any) {
     console.error('updateKirimBarangPartNumber Exception:', error);
@@ -891,17 +887,15 @@ export const getBulkShelfComparison = async (
   if (uniquePartNumbers.length === 0) return {};
 
   try {
-    const normalizedParts = new Set(uniquePartNumbers.map((pn) => normalizePartNumber(pn)));
-    const requestedByNormalized = new Map<string, string>();
-    uniquePartNumbers.forEach((pn) => {
-      const normalized = normalizePartNumber(pn);
-      if (!requestedByNormalized.has(normalized)) {
-        requestedByNormalized.set(normalized, pn);
-      }
-    });
-    const [mjmRows, bjwRows] = await Promise.all([
-      readInventoryRowsCached('mjm'),
-      readInventoryRowsCached('bjw')
+    const [mjmResult, bjwResult] = await Promise.all([
+      supabase
+        .from('base_mjm')
+        .select('part_number, shelf')
+        .in('part_number', uniquePartNumbers),
+      supabase
+        .from('base_bjw')
+        .select('part_number, shelf')
+        .in('part_number', uniquePartNumbers)
     ]);
 
     const shelfMap: Record<string, { mjm: string; bjw: string }> = {};
@@ -910,22 +904,22 @@ export const getBulkShelfComparison = async (
       shelfMap[partNumber] = { mjm: '-', bjw: '-' };
     });
 
-    (mjmRows || []).forEach((item: any) => {
+    (mjmResult.data || []).forEach((item: any) => {
       const partNumber = item.part_number || '';
-      const normalized = normalizePartNumber(partNumber);
-      if (!normalizedParts.has(normalized)) return;
-      const requestedKey = requestedByNormalized.get(normalized);
-      if (!requestedKey) return;
-      shelfMap[requestedKey].mjm = item.shelf || '-';
+      if (!partNumber) return;
+      if (!shelfMap[partNumber]) {
+        shelfMap[partNumber] = { mjm: '-', bjw: '-' };
+      }
+      shelfMap[partNumber].mjm = item.shelf || '-';
     });
 
-    (bjwRows || []).forEach((item: any) => {
+    (bjwResult.data || []).forEach((item: any) => {
       const partNumber = item.part_number || '';
-      const normalized = normalizePartNumber(partNumber);
-      if (!normalizedParts.has(normalized)) return;
-      const requestedKey = requestedByNormalized.get(normalized);
-      if (!requestedKey) return;
-      shelfMap[requestedKey].bjw = item.shelf || '-';
+      if (!partNumber) return;
+      if (!shelfMap[partNumber]) {
+        shelfMap[partNumber] = { mjm: '-', bjw: '-' };
+      }
+      shelfMap[partNumber].bjw = item.shelf || '-';
     });
 
     return shelfMap;
@@ -945,23 +939,40 @@ export const searchItemsBothStores = async (
   if (!query || query.length < 2) return { mjm: [], bjw: [] };
 
   try {
-    const keyword = String(query || '').trim().toLowerCase();
-    const [mjmRows, bjwRows] = await Promise.all([
-      readInventoryRowsCached('mjm'),
-      readInventoryRowsCached('bjw')
+    const searchPattern = `%${query}%`;
+
+    const [mjmResult, bjwResult] = await Promise.all([
+      supabase
+        .from('base_mjm')
+        .select('part_number, name, brand, application, quantity, shelf')
+        .or(`part_number.ilike.${searchPattern},name.ilike.${searchPattern}`)
+        .order('part_number')
+        .limit(50),
+      supabase
+        .from('base_bjw')
+        .select('part_number, name, brand, application, quantity, shelf')
+        .or(`part_number.ilike.${searchPattern},name.ilike.${searchPattern}`)
+        .order('part_number')
+        .limit(50)
     ]);
-    const filterRows = (rows: any[]) => rows
-      .filter((row) => {
-        const part = String(row?.part_number || '').toLowerCase();
-        const name = String(row?.name || '').toLowerCase();
-        return part.includes(keyword) || name.includes(keyword);
-      })
-      .sort((a, b) => String(a?.part_number || '').localeCompare(String(b?.part_number || '')))
-      .slice(0, 50);
 
     return {
-      mjm: filterRows(mjmRows).map(mapRowToStockItem),
-      bjw: filterRows(bjwRows).map(mapRowToStockItem)
+      mjm: (mjmResult.data || []).map(item => ({
+        part_number: item.part_number || '',
+        name: item.name || '',
+        brand: item.brand || '',
+        application: item.application || '',
+        quantity: item.quantity || 0,
+        shelf: item.shelf || ''
+      })),
+      bjw: (bjwResult.data || []).map(item => ({
+        part_number: item.part_number || '',
+        name: item.name || '',
+        brand: item.brand || '',
+        application: item.application || '',
+        quantity: item.quantity || 0,
+        shelf: item.shelf || ''
+      }))
     };
   } catch (error) {
     console.error('searchItemsBothStores Error:', error);

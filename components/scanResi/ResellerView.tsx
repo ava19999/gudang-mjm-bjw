@@ -4,7 +4,7 @@ import { useStore } from '../../context/StoreContext';
 import { 
   Users, ChevronLeft, ChevronRight, Loader2, X, Search, Calendar, FileText, AlertTriangle
 } from 'lucide-react';
-import { readEdgeListRowsCached } from '../../services/supabaseService';
+import { supabase } from '../../services/supabaseClient';
 import { formatCompactNumber } from '../../utils/dashboardHelpers';
 
 interface ResellerViewProps {
@@ -33,6 +33,39 @@ interface ResellerStats {
   total_qty: number;
   total_nilai: number;
 }
+
+const fetchAllRowsPaged = async <T,>(
+  table: string,
+  selectColumns: string,
+  buildQuery: (query: any) => any,
+  options?: { orderBy?: string; ascending?: boolean; pageSize?: number }
+): Promise<T[]> => {
+  const pageSize = options?.pageSize ?? 1000;
+  const rows: T[] = [];
+  let from = 0;
+
+  while (true) {
+    let query = supabase.from(table).select(selectColumns);
+    query = buildQuery(query);
+
+    if (options?.orderBy) {
+      query = query.order(options.orderBy, { ascending: options.ascending ?? true });
+    }
+
+    const { data, error } = await query.range(from, from + pageSize - 1);
+    if (error) {
+      console.error(`Error fetching paged rows from ${table}:`, error);
+      return rows;
+    }
+
+    const page = (data || []) as T[];
+    rows.push(...page);
+    if (page.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return rows;
+};
 
 export const ResellerView: React.FC<ResellerViewProps> = ({ onRefresh, refreshTrigger }) => {
   const { selectedStore } = useStore();
@@ -91,16 +124,17 @@ export const ResellerView: React.FC<ResellerViewProps> = ({ onRefresh, refreshTr
     try {
       let allTransactions: ResellerTransaction[] = [];
       
-      const fetchFromStore = async (storeName: 'MJM' | 'BJW'): Promise<ResellerTransaction[]> => {
+      const fetchFromTable = async (table: string, storeName: string): Promise<ResellerTransaction[]> => {
         try {
-          const storeKey = storeName.toLowerCase() as 'mjm' | 'bjw';
-          const data = await readEdgeListRowsCached<any>(storeKey, 'sold-items');
-          const resellerRows = (data || []).filter((row: any) =>
-            String(row?.ecommerce || '').toUpperCase() === 'RESELLER'
+          const data = await fetchAllRowsPaged<any>(
+            table,
+            'id, created_at, customer, part_number, name, qty_keluar, harga_satuan, harga_total, resi, ecommerce, kode_toko',
+            (q) => q.eq('ecommerce', 'RESELLER'),
+            { orderBy: 'created_at', ascending: false }
           );
           
           // Add store indicator to each transaction with safe mapping
-          return resellerRows.map(t => {
+          return (data || []).map(t => {
             const qtyKeluar = Number(t.qty_keluar) || 0;
             const hargaTotal = Number(t.harga_total) || 0;
             const hargaSatuan = getEffectiveUnitPrice({
@@ -125,23 +159,23 @@ export const ResellerView: React.FC<ResellerViewProps> = ({ onRefresh, refreshTr
             };
           });
         } catch (err) {
-          console.error(`Exception fetching from ${storeName}:`, err);
+          console.error(`Exception fetching from ${table}:`, err);
           return [];
         }
       };
       
       if (storeFilter === 'all') {
         const [mjmData, bjwData] = await Promise.all([
-          fetchFromStore('MJM'),
-          fetchFromStore('BJW')
+          fetchFromTable('barang_keluar_mjm', 'MJM'),
+          fetchFromTable('barang_keluar_bjw', 'BJW')
         ]);
         allTransactions = [...mjmData, ...bjwData];
         // Sort by created_at descending
         allTransactions.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
       } else if (storeFilter === 'mjm') {
-        allTransactions = await fetchFromStore('MJM');
+        allTransactions = await fetchFromTable('barang_keluar_mjm', 'MJM');
       } else {
-        allTransactions = await fetchFromStore('BJW');
+        allTransactions = await fetchFromTable('barang_keluar_bjw', 'BJW');
       }
       
       setTransactions(allTransactions);
@@ -156,18 +190,25 @@ export const ResellerView: React.FC<ResellerViewProps> = ({ onRefresh, refreshTr
     try {
       const statsMap: Record<string, ResellerStats> = {};
       
-      const fetchFromStore = async (storeName: 'mjm' | 'bjw'): Promise<any[]> => {
+      const fetchFromTable = async (table: string): Promise<any[]> => {
         try {
-          const rows = await readEdgeListRowsCached<any>(storeName, 'sold-items');
-          return (rows || []).filter((row: any) => {
-            if (String(row?.ecommerce || '').toUpperCase() !== 'RESELLER') return false;
-            const createdAt = String(row?.created_at || '');
-            if (mainDateFrom && createdAt < `${mainDateFrom}T00:00:00`) return false;
-            if (mainDateTo && createdAt > `${mainDateTo}T23:59:59`) return false;
-            return true;
-          });
+          return await fetchAllRowsPaged<any>(
+            table,
+            'kode_toko, qty_keluar, harga_total, created_at',
+            (q) => {
+              let filtered = q.eq('ecommerce', 'RESELLER');
+              if (mainDateFrom) {
+                filtered = filtered.gte('created_at', `${mainDateFrom}T00:00:00`);
+              }
+              if (mainDateTo) {
+                filtered = filtered.lte('created_at', `${mainDateTo}T23:59:59`);
+              }
+              return filtered;
+            },
+            { orderBy: 'created_at', ascending: false }
+          );
         } catch (err) {
-          console.error(`Exception fetching stats from ${storeName}:`, err);
+          console.error(`Exception fetching stats from ${table}:`, err);
           return [];
         }
       };
@@ -176,14 +217,14 @@ export const ResellerView: React.FC<ResellerViewProps> = ({ onRefresh, refreshTr
       
       if (storeFilter === 'all') {
         const [mjmData, bjwData] = await Promise.all([
-          fetchFromStore('mjm'),
-          fetchFromStore('bjw')
+          fetchFromTable('barang_keluar_mjm'),
+          fetchFromTable('barang_keluar_bjw')
         ]);
         allData = [...mjmData, ...bjwData];
       } else if (storeFilter === 'mjm') {
-        allData = await fetchFromStore('mjm');
+        allData = await fetchFromTable('barang_keluar_mjm');
       } else {
-        allData = await fetchFromStore('bjw');
+        allData = await fetchFromTable('barang_keluar_bjw');
       }
       
       // Group by kode_toko (reseller name)

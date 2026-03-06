@@ -3,7 +3,6 @@
 
 import { supabase } from './supabaseClient';
 import { OnlineProduct, ProdukKosong, TableMasuk } from '../types';
-import { markEdgeListDatasetsDirty, readEdgeListRowsCached } from './supabaseService';
 
 // ============================================================================
 // HELPER FUNCTIONS
@@ -25,20 +24,6 @@ const getMasukTable = (store: string | null): string | null => {
   if (store === 'mjm') return 'data_agung_masuk_mjm';
   if (store === 'bjw') return 'data_agung_masuk_bjw';
   return null;
-};
-
-const getOnlineDataset = () => 'data-agung-online' as const;
-const getKosongDataset = () => 'data-agung-kosong' as const;
-const getMasukDataset = () => 'data-agung-masuk' as const;
-
-const markOnlineDatasetDirty = (store: string | null) => {
-  markEdgeListDatasetsDirty(store, [getOnlineDataset()]);
-};
-const markKosongDatasetDirty = (store: string | null) => {
-  markEdgeListDatasetsDirty(store, [getKosongDataset()]);
-};
-const markMasukDatasetDirty = (store: string | null) => {
-  markEdgeListDatasetsDirty(store, [getMasukDataset()]);
 };
 
 // Map database row to OnlineProduct
@@ -83,7 +68,16 @@ export const getOnlineProducts = async (store: string | null): Promise<OnlinePro
   if (!table) return [];
 
   try {
-    const data = await readEdgeListRowsCached<any>(store, getOnlineDataset());
+    const { data, error } = await supabase
+      .from(table)
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('Error fetching online products:', error);
+      return [];
+    }
+
     return (data || []).map(mapToOnlineProduct);
   } catch (err) {
     console.error('Exception fetching online products:', err);
@@ -100,10 +94,11 @@ export const addOnlineProduct = async (
 
   try {
     // Check if already exists
-    const currentRows = await readEdgeListRowsCached<any>(store, getOnlineDataset());
-    const existing = (currentRows || []).find((row: any) =>
-      String(row?.part_number || '').trim().toUpperCase() === String(product.partNumber || '').trim().toUpperCase()
-    );
+    const { data: existing } = await supabase
+      .from(table)
+      .select('id')
+      .eq('part_number', product.partNumber)
+      .single();
 
     if (existing) {
       return { success: false, message: 'Produk sudah ada di list online' };
@@ -126,7 +121,6 @@ export const addOnlineProduct = async (
       return { success: false, message: error.message };
     }
 
-    markOnlineDatasetDirty(store);
     return { success: true, id: data.id };
   } catch (err: any) {
     console.error('Exception adding online product:', err);
@@ -160,7 +154,6 @@ export const updateOnlineProduct = async (
       return { success: false, message: error.message };
     }
 
-    markOnlineDatasetDirty(store);
     return { success: true };
   } catch (err: any) {
     console.error('Exception updating online product:', err);
@@ -186,7 +179,6 @@ export const deleteOnlineProduct = async (
       return { success: false, message: error.message };
     }
 
-    markOnlineDatasetDirty(store);
     return { success: true };
   } catch (err: any) {
     console.error('Exception deleting online product:', err);
@@ -203,10 +195,13 @@ export const toggleOnlineProduct = async (
 
   try {
     // Get current value
-    const rows = await readEdgeListRowsCached<any>(store, getOnlineDataset());
-    const current = (rows || []).find((row: any) => String(row?.id || '') === String(id));
+    const { data: current, error: fetchError } = await supabase
+      .from(table)
+      .select('is_active')
+      .eq('id', id)
+      .single();
 
-    if (!current) {
+    if (fetchError || !current) {
       return { success: false, message: 'Produk tidak ditemukan' };
     }
 
@@ -222,7 +217,6 @@ export const toggleOnlineProduct = async (
       return { success: false, message: error.message };
     }
 
-    markOnlineDatasetDirty(store);
     return { success: true, newValue };
   } catch (err: any) {
     console.error('Exception toggling online product:', err);
@@ -239,7 +233,16 @@ export const getProdukKosong = async (store: string | null): Promise<ProdukKoson
   if (!table) return [];
 
   try {
-    const data = await readEdgeListRowsCached<any>(store, getKosongDataset());
+    const { data, error } = await supabase
+      .from(table)
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('Error fetching produk kosong:', error);
+      return [];
+    }
+
     return (data || []).map(mapToProdukKosong);
   } catch (err) {
     console.error('Exception fetching produk kosong:', err);
@@ -256,10 +259,11 @@ export const addProdukKosong = async (
 
   try {
     // Check if already exists
-    const currentRows = await readEdgeListRowsCached<any>(store, getKosongDataset());
-    const existing = (currentRows || []).find((row: any) =>
-      String(row?.part_number || '').trim().toUpperCase() === String(product.partNumber || '').trim().toUpperCase()
-    );
+    const { data: existing } = await supabase
+      .from(table)
+      .select('id')
+      .eq('part_number', product.partNumber)
+      .single();
 
     if (existing) {
       return { success: false, message: 'Produk sudah ada di list kosong' };
@@ -282,7 +286,6 @@ export const addProdukKosong = async (
       return { success: false, message: error.message };
     }
 
-    markKosongDatasetDirty(store);
     return { success: true, id: data.id };
   } catch (err: any) {
     console.error('Exception adding produk kosong:', err);
@@ -316,7 +319,6 @@ export const updateProdukKosong = async (
       return { success: false, message: error.message };
     }
 
-    markKosongDatasetDirty(store);
     return { success: true };
   } catch (err: any) {
     console.error('Exception updating produk kosong:', err);
@@ -342,7 +344,6 @@ export const deleteProdukKosong = async (
       return { success: false, message: error.message };
     }
 
-    markKosongDatasetDirty(store);
     return { success: true };
   } catch (err: any) {
     console.error('Exception deleting produk kosong:', err);
@@ -359,10 +360,13 @@ export const toggleProdukKosong = async (
 
   try {
     // Get current value
-    const rows = await readEdgeListRowsCached<any>(store, getKosongDataset());
-    const current = (rows || []).find((row: any) => String(row?.id || '') === String(id));
+    const { data: current, error: fetchError } = await supabase
+      .from(table)
+      .select('is_online_active')
+      .eq('id', id)
+      .single();
 
-    if (!current) {
+    if (fetchError || !current) {
       return { success: false, message: 'Produk tidak ditemukan' };
     }
 
@@ -378,7 +382,6 @@ export const toggleProdukKosong = async (
       return { success: false, message: error.message };
     }
 
-    markKosongDatasetDirty(store);
     return { success: true, newValue };
   } catch (err: any) {
     console.error('Exception toggling produk kosong:', err);
@@ -395,7 +398,16 @@ export const getTableMasuk = async (store: string | null): Promise<TableMasuk[]>
   if (!table) return [];
 
   try {
-    const data = await readEdgeListRowsCached<any>(store, getMasukDataset());
+    const { data, error } = await supabase
+      .from(table)
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('Error fetching table masuk:', error);
+      return [];
+    }
+
     return (data || []).map(mapToTableMasuk);
   } catch (err) {
     console.error('Exception fetching table masuk:', err);
@@ -412,10 +424,11 @@ export const addTableMasuk = async (
 
   try {
     // Check if already exists
-    const currentRows = await readEdgeListRowsCached<any>(store, getMasukDataset());
-    const existing = (currentRows || []).find((row: any) =>
-      String(row?.part_number || '').trim().toUpperCase() === String(product.partNumber || '').trim().toUpperCase()
-    );
+    const { data: existing } = await supabase
+      .from(table)
+      .select('id')
+      .eq('part_number', product.partNumber)
+      .single();
 
     if (existing) {
       return { success: false, message: 'Produk sudah ada di table masuk' };
@@ -438,7 +451,6 @@ export const addTableMasuk = async (
       return { success: false, message: error.message };
     }
 
-    markMasukDatasetDirty(store);
     return { success: true, id: data.id };
   } catch (err: any) {
     console.error('Exception adding table masuk:', err);
@@ -472,7 +484,6 @@ export const updateTableMasuk = async (
       return { success: false, message: error.message };
     }
 
-    markMasukDatasetDirty(store);
     return { success: true };
   } catch (err: any) {
     console.error('Exception updating table masuk:', err);
@@ -498,7 +509,6 @@ export const deleteTableMasuk = async (
       return { success: false, message: error.message };
     }
 
-    markMasukDatasetDirty(store);
     return { success: true };
   } catch (err: any) {
     console.error('Exception deleting table masuk:', err);
@@ -515,10 +525,13 @@ export const toggleTableMasuk = async (
 
   try {
     // Get current value
-    const rows = await readEdgeListRowsCached<any>(store, getMasukDataset());
-    const current = (rows || []).find((row: any) => String(row?.id || '') === String(id));
+    const { data: current, error: fetchError } = await supabase
+      .from(table)
+      .select('is_active')
+      .eq('id', id)
+      .single();
 
-    if (!current) {
+    if (fetchError || !current) {
       return { success: false, message: 'Produk tidak ditemukan' };
     }
 
@@ -534,7 +547,6 @@ export const toggleTableMasuk = async (
       return { success: false, message: error.message };
     }
 
-    markMasukDatasetDirty(store);
     return { success: true, newValue };
   } catch (err: any) {
     console.error('Exception toggling table masuk:', err);
@@ -557,23 +569,26 @@ export const moveProdukKosongToMasuk = async (
 
   try {
     // Get produk kosong data
-    const kosongRows = await readEdgeListRowsCached<any>(store, getKosongDataset());
-    const produk = (kosongRows || []).find((row: any) => String(row?.id || '') === String(produkKosongId));
+    const { data: produk, error: fetchError } = await supabase
+      .from(kosongTable)
+      .select('*')
+      .eq('id', produkKosongId)
+      .single();
 
-    if (!produk) {
+    if (fetchError || !produk) {
       return { success: false, message: 'Produk tidak ditemukan' };
     }
 
     // Check if already in masuk table
-    const masukRows = await readEdgeListRowsCached<any>(store, getMasukDataset());
-    const existing = (masukRows || []).find((row: any) =>
-      String(row?.part_number || '').trim().toUpperCase() === String(produk.part_number || '').trim().toUpperCase()
-    );
+    const { data: existing } = await supabase
+      .from(masukTable)
+      .select('id')
+      .eq('part_number', produk.part_number)
+      .single();
 
     if (existing) {
       // Delete from kosong only
       await supabase.from(kosongTable).delete().eq('id', produkKosongId);
-      markKosongDatasetDirty(store);
       return { success: true, message: 'Produk sudah ada di Table Masuk, dihapus dari Produk Kosong' };
     }
 
@@ -595,8 +610,6 @@ export const moveProdukKosongToMasuk = async (
     // Delete from kosong table
     await supabase.from(kosongTable).delete().eq('id', produkKosongId);
 
-    markKosongDatasetDirty(store);
-    markMasukDatasetDirty(store);
     return { success: true };
   } catch (err: any) {
     console.error('Exception moving produk:', err);
@@ -628,7 +641,7 @@ export const syncQuantityFromInventory = async (
 
   try {
     // Update online products quantity
-    const onlineProducts = await readEdgeListRowsCached<any>(store, getOnlineDataset());
+    const { data: onlineProducts } = await supabase.from(onlineTable).select('id, part_number');
     for (const product of onlineProducts || []) {
       const qty = qtyMap.get(product.part_number);
       if (qty !== undefined) {
@@ -641,7 +654,7 @@ export const syncQuantityFromInventory = async (
     }
 
     // Update produk kosong quantity
-    const kosongProducts = await readEdgeListRowsCached<any>(store, getKosongDataset());
+    const { data: kosongProducts } = await supabase.from(kosongTable).select('id, part_number');
     for (const product of kosongProducts || []) {
       const qty = qtyMap.get(product.part_number);
       if (qty !== undefined) {
@@ -654,7 +667,7 @@ export const syncQuantityFromInventory = async (
     }
 
     // Update table masuk quantity
-    const masukProducts = await readEdgeListRowsCached<any>(store, getMasukDataset());
+    const { data: masukProducts } = await supabase.from(masukTable).select('id, part_number');
     for (const product of masukProducts || []) {
       const qty = qtyMap.get(product.part_number);
       if (qty !== undefined) {
@@ -666,9 +679,6 @@ export const syncQuantityFromInventory = async (
       }
     }
 
-    markOnlineDatasetDirty(store);
-    markKosongDatasetDirty(store);
-    markMasukDatasetDirty(store);
     return { updated, errors };
   } catch (err) {
     console.error('Exception syncing quantity:', err);

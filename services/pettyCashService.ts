@@ -1,6 +1,5 @@
 // FILE: services/pettyCashService.ts
 import { supabase } from './supabaseClient';
-import { markEdgeListDatasetsDirty, readEdgeListRowsCached } from './supabaseService';
 
 export interface PettyCashEntry {
   id: string;
@@ -18,34 +17,74 @@ const getTableName = (store: string | null): string => {
   return store === 'bjw' ? 'petty_cash_bjw' : 'petty_cash_mjm';
 };
 
-const getPettyCashDataset = () => 'petty-cash' as const;
-
-const markPettyCashDirty = (store: string | null) => {
-  markEdgeListDatasetsDirty(store, [getPettyCashDataset()]);
+const normalizeAkun = (akun: unknown): 'cash' | 'bank' => {
+  const normalized = String(akun || '').trim().toLowerCase();
+  if (normalized === 'bank' || normalized === 'rekening') return 'bank';
+  return 'cash';
 };
 
-const fetchAllPettyCashRows = async (store: string | null): Promise<any[]> => {
-  const rows = await readEdgeListRowsCached<any>(store, getPettyCashDataset());
-  return (rows || []).sort((a: any, b: any) => {
-    const aTime = new Date(String(a?.tgl || 0)).getTime();
-    const bTime = new Date(String(b?.tgl || 0)).getTime();
-    return bTime - aTime;
-  });
+const getAkunFilters = (akun: 'cash' | 'bank'): string[] => {
+  return akun === 'bank' ? ['bank', 'rekening'] : ['cash', 'kas'];
+};
+
+const fetchAllPettyCashRows = async (table: string): Promise<any[]> => {
+  const pageSize = 1000;
+  const rows: any[] = [];
+  let from = 0;
+
+  while (true) {
+    const { data, error } = await supabase
+      .from(table)
+      .select('*')
+      .order('tgl', { ascending: false })
+      .order('id', { ascending: false })
+      .range(from, from + pageSize - 1);
+
+    if (error) {
+      console.error(`Error fetching paged petty cash rows from ${table}:`, error);
+      return rows;
+    }
+
+    const page = data || [];
+    rows.push(...page);
+    if (page.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return rows;
 };
 
 const fetchAllPettyCashRowsByAccount = async (
-  store: string | null,
+  table: string,
   akun: 'cash' | 'bank',
   ascending: boolean
 ): Promise<any[]> => {
-  const rows = await readEdgeListRowsCached<any>(store, getPettyCashDataset());
-  return (rows || [])
-    .filter((row: any) => String(row?.akun || 'cash') === akun)
-    .sort((a: any, b: any) => {
-      const aTime = new Date(String(a?.tgl || 0)).getTime();
-      const bTime = new Date(String(b?.tgl || 0)).getTime();
-      return ascending ? aTime - bTime : bTime - aTime;
-    });
+  const pageSize = 1000;
+  const rows: any[] = [];
+  let from = 0;
+  const akunFilters = getAkunFilters(akun);
+
+  while (true) {
+    const { data, error } = await supabase
+      .from(table)
+      .select('*')
+      .in('akun', akunFilters)
+      .order('tgl', { ascending })
+      .order('id', { ascending })
+      .range(from, from + pageSize - 1);
+
+    if (error) {
+      console.error(`Error fetching paged petty cash rows by account from ${table}:`, error);
+      return rows;
+    }
+
+    const page = data || [];
+    rows.push(...page);
+    if (page.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return rows;
 };
 
 // Helper: Parse angka dari input dengan format Indonesia (titik sebagai pemisah ribuan)
@@ -76,8 +115,9 @@ export const formatIndonesianNumber = (value: number): string => {
  * Ambil semua transaksi petty cash
  */
 export const getPettyCashEntries = async (store: string | null): Promise<PettyCashEntry[]> => {
+  const table = getTableName(store);
   try {
-    const data = await fetchAllPettyCashRows(store);
+    const data = await fetchAllPettyCashRows(table);
 
     return (data || []).map(item => ({
       id: String(item.id),
@@ -85,7 +125,7 @@ export const getPettyCashEntries = async (store: string | null): Promise<PettyCa
       keterangan: item.keterangan || '',
       kegunaan: item.kegunaan || null,
       type: item.type as 'in' | 'out',
-      akun: (item.akun || 'cash') as 'cash' | 'bank',
+      akun: normalizeAkun(item.akun),
       saldokeluarmasuk: Number(item.saldokeluarmasuk) || 0,
       saldosaatini: Number(item.saldosaatini) || 0,
     }));
@@ -99,13 +139,22 @@ export const getPettyCashEntries = async (store: string | null): Promise<PettyCa
  * Hitung saldo terakhir per akun (cash atau bank)
  */
 export const getBalanceByAccount = async (store: string | null, akun: 'cash' | 'bank'): Promise<number> => {
+  const table = getTableName(store);
+  const akunFilters = getAkunFilters(akun);
   try {
-    const rows = await fetchAllPettyCashRowsByAccount(store, akun, false);
-    if (!rows || rows.length === 0) {
+    const { data, error } = await supabase
+      .from(table)
+      .select('saldosaatini')
+      .in('akun', akunFilters)
+      .order('tgl', { ascending: false })
+      .order('id', { ascending: false })
+      .limit(1);
+
+    if (error || !data || data.length === 0) {
       return 0;
     }
 
-    return Number(rows[0]?.saldosaatini) || 0;
+    return Number(data[0].saldosaatini) || 0;
   } catch (err) {
     console.error('getBalanceByAccount error:', err);
     return 0;
@@ -181,7 +230,6 @@ export const addPettyCashEntry = async (
       return { success: false, message: error.message };
     }
 
-    markPettyCashDirty(store);
     return { 
       success: true, 
       message: 'Transaksi berhasil ditambahkan',
@@ -222,7 +270,6 @@ export const updatePettyCashKegunaan = async (
       return { success: false, message: error.message };
     }
 
-    markPettyCashDirty(store);
     return { success: true, message: 'Kegunaan berhasil diupdate' };
   } catch (err: any) {
     console.error('updatePettyCashKegunaan error:', err);
@@ -238,30 +285,38 @@ export const deletePettyCashEntry = async (
   id: string
 ): Promise<{ success: boolean; message: string }> => {
   const table = getTableName(store);
-  try {
-    // Ambil info entry yang akan dihapus
-    const { data: entryData } = await supabase
-      .from(table)
-      .select('akun')
-      .eq('id', id)
-      .single();
-    
-    const akun = (entryData?.akun || 'cash') as 'cash' | 'bank';
-    
-    // Hapus entry
-    const { error } = await supabase
+  const normalizedId = String(id || '').trim();
+
+  const deleteAndReturnRow = async (filterValue: string | number) => {
+    const { data, error } = await supabase
       .from(table)
       .delete()
-      .eq('id', id);
+      .eq('id', filterValue as any)
+      .select('id, akun')
+      .limit(1);
 
     if (error) {
-      console.error('Error deleting petty cash entry:', error);
-      return { success: false, message: error.message };
+      throw new Error(error.message);
     }
+
+    return data || [];
+  };
+
+  try {
+    let deletedRows = await deleteAndReturnRow(normalizedId);
+
+    if (deletedRows.length === 0 && /^\d+$/.test(normalizedId)) {
+      deletedRows = await deleteAndReturnRow(Number(normalizedId));
+    }
+
+    if (deletedRows.length === 0) {
+      return { success: false, message: 'Transaksi tidak ditemukan atau sudah terhapus.' };
+    }
+
+    const akun = normalizeAkun(deletedRows[0].akun);
 
     // Recalculate saldo untuk akun ini
     await recalculateBalancesByAccount(store, akun);
-    markPettyCashDirty(store);
 
     return { success: true, message: 'Transaksi berhasil dihapus' };
   } catch (err: any) {
@@ -276,7 +331,7 @@ export const deletePettyCashEntry = async (
 export const recalculateBalancesByAccount = async (store: string | null, akun: 'cash' | 'bank'): Promise<void> => {
   const table = getTableName(store);
   try {
-    const data = await fetchAllPettyCashRowsByAccount(store, akun, true);
+    const data = await fetchAllPettyCashRowsByAccount(table, akun, true);
 
     let runningBalance = 0;
 
@@ -287,15 +342,19 @@ export const recalculateBalancesByAccount = async (store: string | null, akun: '
         : runningBalance - amount;
 
       if (Number(entry.saldosaatini) !== runningBalance) {
-        await supabase
+        const { error } = await supabase
           .from(table)
           .update({ saldosaatini: runningBalance })
           .eq('id', entry.id);
+
+        if (error) {
+          throw new Error(`Gagal update saldo transaksi #${entry.id}: ${error.message}`);
+        }
       }
     }
-    markPettyCashDirty(store);
-  } catch (err) {
+  } catch (err: any) {
     console.error('recalculateBalancesByAccount error:', err);
+    throw new Error(err?.message || 'Gagal recalculate saldo');
   }
 };
 
@@ -303,8 +362,9 @@ export const recalculateBalancesByAccount = async (store: string | null, akun: '
  * Ambil transaksi dengan filter per akun
  */
 export const getEntriesByAccount = async (store: string | null, akun: 'cash' | 'bank'): Promise<PettyCashEntry[]> => {
+  const table = getTableName(store);
   try {
-    const data = await fetchAllPettyCashRowsByAccount(store, akun, false);
+    const data = await fetchAllPettyCashRowsByAccount(table, akun, false);
 
     return (data || []).map(item => ({
       id: String(item.id),
@@ -312,7 +372,7 @@ export const getEntriesByAccount = async (store: string | null, akun: 'cash' | '
       keterangan: item.keterangan || '',
       kegunaan: item.kegunaan || null,
       type: item.type as 'in' | 'out',
-      akun: item.akun as 'cash' | 'bank',
+      akun: normalizeAkun(item.akun),
       saldokeluarmasuk: Number(item.saldokeluarmasuk) || 0,
       saldosaatini: Number(item.saldosaatini) || 0,
     }));

@@ -8,8 +8,6 @@ import {
 } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import { supabase } from '../../services/supabaseClient';
-import { fetchCachedRowsPaged as fetchAllRowsPaged, readTableRowsCached } from '../../services/edgeCacheTableReader';
-import { markEdgeListDatasetsDirty } from '../../services/supabaseService';
 import { useStore } from '../../context/StoreContext';
 
 // Types
@@ -25,7 +23,6 @@ interface BarangKeluarRecord {
   customer: string;
   resi: string;
   created_at: string;
-  store?: 'mjm' | 'bjw';
 }
 
 interface TagihanToko {
@@ -127,6 +124,35 @@ const formatCurrencyInput = (value: string): string => {
 
 const parseCurrencyInput = (value: string): string => {
   return value.replace(/\D/g, '');
+};
+
+const fetchAllRowsPaged = async <T,>(
+  table: string,
+  selectColumns: string,
+  buildQuery: (query: any) => any,
+  options?: { orderBy?: string; ascending?: boolean; pageSize?: number }
+): Promise<T[]> => {
+  const pageSize = options?.pageSize ?? 1000;
+  const rows: T[] = [];
+  let from = 0;
+
+  while (true) {
+    let query = supabase.from(table).select(selectColumns);
+    query = buildQuery(query);
+    if (options?.orderBy) {
+      query = query.order(options.orderBy, { ascending: options.ascending ?? true });
+    }
+
+    const { data, error } = await query.range(from, from + pageSize - 1);
+    if (error) throw error;
+
+    const page = (data || []) as T[];
+    rows.push(...page);
+    if (page.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return rows;
 };
 
 const LOCAL_TAGIHAN_STORAGE_KEY = 'tagihan_toko_local_fallback_v1';
@@ -484,22 +510,23 @@ export const TagihanTokoView: React.FC = () => {
     }
     try {
       const storeKey = filterStore === 'all' ? ['all', 'mjm', 'bjw'] : [filterStore];
-      const data = await readTableRowsCached<any>('inv_tagihan');
-      const filteredRows = (data || []).filter((row) => {
-        const dueMonth = String(row?.jatuh_tempo_bulan || '').trim();
-        const status = String(row?.status || '').trim().toUpperCase();
-        const inv = String(row?.inv || '').trim().toUpperCase();
-        const toko = String(row?.toko || '').trim().toLowerCase();
-        return (
-          dueMonth === filterMonth &&
-          status === 'PRINTED' &&
-          inv.startsWith('INV-') &&
-          storeKey.includes(toko as any)
-        );
-      });
+      const { data, error } = await supabase
+        .from('inv_tagihan')
+        // only label receipts that were printed (avoid IMG/export rows)
+        .select('customer, inv, created_at, toko, total, status')
+        .eq('jatuh_tempo_bulan', filterMonth)
+        .eq('status', 'PRINTED')
+        .ilike('inv', 'INV-%')
+        .in('toko', storeKey);
+
+      if (error) {
+        console.error('Load inv_tagihan error:', error);
+        setPrintedInfo(new Map());
+        return;
+      }
 
       const map = new Map<string, { invoice_no: string; printed_at: string; store: string; total: number }>();
-      filteredRows.forEach(row => {
+      (data || []).forEach(row => {
         const cust = (row.customer || row.toko || '').toUpperCase();
         if (!cust || !customers.includes(cust)) return;
         map.set(cust, {
@@ -540,7 +567,6 @@ export const TagihanTokoView: React.FC = () => {
       return;
     }
 
-    markEdgeListDatasetsDirty('mjm', ['inv-tagihan']);
     const next = new Map(printedInfo);
     rows.forEach(r => {
       next.set(r.customer.toUpperCase(), { invoice_no: r.inv, printed_at: new Date().toISOString(), store: r.toko, total: r.total });
@@ -605,12 +631,7 @@ export const TagihanTokoView: React.FC = () => {
           const dueMonth = calculateDueMonth(record.created_at, record.tempo || '1 BLN');
           return dueMonth === filterMonth;
         });
-        allRecords.push(
-          ...filteredData.map((record) => ({
-            ...record,
-            store: store as 'mjm' | 'bjw'
-          }))
-        );
+        allRecords.push(...filteredData);
       }
 
       // Load pembayaran data (filtered by store only, payments reduce outstanding across months)
@@ -889,7 +910,6 @@ export const TagihanTokoView: React.FC = () => {
 
       if (error) throw error;
 
-      markEdgeListDatasetsDirty('mjm', ['toko-pembayaran']);
       showToast('Pembayaran berhasil dicatat', 'success');
       setShowPaymentModal(false);
       setPaymentAmount('');
@@ -949,8 +969,6 @@ export const TagihanTokoView: React.FC = () => {
       if (error && !savedToLocalFallback) throw error;
       if (savedToLocalFallback) {
         appendLocalTagihanFallback(payload);
-      } else {
-        markEdgeListDatasetsDirty('mjm', ['toko-tagihan']);
       }
 
       showToast(
@@ -1032,7 +1050,6 @@ export const TagihanTokoView: React.FC = () => {
 
       if (error) throw error;
 
-      markEdgeListDatasetsDirty('mjm', ['toko-pembayaran']);
       showToast('Pembayaran berhasil diupdate', 'success');
       setEditingPayment(null);
       setEditPaymentAmount('');
@@ -1057,7 +1074,6 @@ export const TagihanTokoView: React.FC = () => {
 
       if (error) throw error;
 
-      markEdgeListDatasetsDirty('mjm', ['toko-pembayaran']);
       showToast('Pembayaran berhasil dihapus', 'success');
       loadData();
     } catch (err) {
@@ -1087,8 +1103,20 @@ export const TagihanTokoView: React.FC = () => {
     const newDateIso = `${editTransactionDate}T00:00:00Z`; // ensure UTC timestamp
 
     try {
-      const storeKey = editingTransaction.store === 'bjw' ? 'bjw' : 'mjm';
-      const tableName = storeKey === 'bjw' ? 'barang_keluar_bjw' : 'barang_keluar_mjm';
+      // Determine which table
+      let tableName = '';
+      
+      const { data: mjmData } = await supabase
+        .from('barang_keluar_mjm')
+        .select('id')
+        .eq('id', editingTransaction.id)
+        .single();
+      
+      if (mjmData) {
+        tableName = 'barang_keluar_mjm';
+      } else {
+        tableName = 'barang_keluar_bjw';
+      }
 
       // Update the barang_keluar record
       const { error: updateError } = await supabase
@@ -1102,7 +1130,6 @@ export const TagihanTokoView: React.FC = () => {
 
       if (updateError) throw updateError;
 
-      markEdgeListDatasetsDirty(storeKey, ['barang-keluar-log']);
       showToast('Transaksi berhasil diupdate', 'success');
       setEditingTransaction(null);
       setEditTransactionQty('');
@@ -1168,7 +1195,6 @@ export const TagihanTokoView: React.FC = () => {
 
       if (error) throw error;
 
-      markEdgeListDatasetsDirty('mjm', ['toko-tagihan']);
       showToast('Tagihan berhasil diupdate', 'success');
       setEditingTagihan(null);
       setEditTagihanAmount('');
@@ -1205,7 +1231,6 @@ export const TagihanTokoView: React.FC = () => {
 
       if (error) throw error;
 
-      markEdgeListDatasetsDirty('mjm', ['toko-tagihan']);
       showToast('Tagihan berhasil dihapus', 'success');
       loadData();
     } catch (err) {
@@ -1225,13 +1250,17 @@ export const TagihanTokoView: React.FC = () => {
         { name: 'toko_tagihan', column: 'customer' },
         { name: 'inv_tagihan', column: 'customer' }
       ];
-      const results = await Promise.all(tables.map((t) => readTableRowsCached<any>(t.name)));
+      const results = await Promise.all(
+        tables.map(t => supabase.from(t.name).select(`${t.column}`).not(t.column, 'is', null))
+      );
       const names = new Set<string>();
-      results.forEach((rows) => {
-        (rows || []).forEach((row: any) => {
-          const n = (row.customer || '').trim().toUpperCase();
-          if (n) names.add(n);
-        });
+      results.forEach(res => {
+        if (res.data) {
+          res.data.forEach((row: any) => {
+            const n = (row.customer || '').trim().toUpperCase();
+            if (n) names.add(n);
+          });
+        }
       });
       readLocalTagihanFallback().forEach(row => {
         const n = (row.customer || '').trim().toUpperCase();
@@ -1276,9 +1305,6 @@ export const TagihanTokoView: React.FC = () => {
       if (failed && (failed as any).error) throw (failed as any).error;
 
       renameLocalTagihanFallback(oldName, newName);
-      markEdgeListDatasetsDirty('mjm', ['toko-pembayaran', 'toko-tagihan', 'inv-tagihan']);
-      markEdgeListDatasetsDirty('mjm', ['barang-keluar-log']);
-      markEdgeListDatasetsDirty('bjw', ['barang-keluar-log']);
 
       // Update local state
       const renamePiutang = (list: TokoPiutang[]) =>
@@ -1343,9 +1369,6 @@ export const TagihanTokoView: React.FC = () => {
       const results = await Promise.all(updates);
       const failed = results.find(r => (r as any).error);
       if (failed && (failed as any).error) throw (failed as any).error;
-      markEdgeListDatasetsDirty('mjm', ['toko-pembayaran', 'toko-tagihan', 'inv-tagihan']);
-      markEdgeListDatasetsDirty('mjm', ['barang-keluar-log']);
-      markEdgeListDatasetsDirty('bjw', ['barang-keluar-log']);
 
       // Update local state lists
       const rename = (list: TokoPiutang[]) =>

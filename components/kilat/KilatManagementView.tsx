@@ -16,10 +16,10 @@ import {
   fetchKilatPenjualan,
   addKilatPenjualanManual,
   getKilatStats,
-  searchKilatStockParts,
   KilatPrestock,
   KilatPenjualan
 } from '../../services/kilatService';
+import { supabase } from '../../services/supabaseClient';
 import {
   Package,
   Truck,
@@ -135,8 +135,15 @@ export const KilatManagementView: React.FC = () => {
       setPartSuggestions([]);
       return;
     }
-
-    const data = await searchKilatStockParts(currentStore, term, 20);
+    
+    const stockTable = currentStore === 'mjm' ? 'base_mjm' : 'base_bjw';
+    const { data } = await supabase
+      .from(stockTable)
+      .select('part_number, name, brand, quantity')
+      .or(`part_number.ilike.%${term}%,name.ilike.%${term}%`)
+      .order('part_number')
+      .limit(20);
+    
     setPartSuggestions(data || []);
     setShowPartDropdown(true);
   }, [currentStore]);
