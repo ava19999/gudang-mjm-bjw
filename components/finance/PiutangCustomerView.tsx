@@ -58,27 +58,138 @@ interface Pembayaran {
   keterangan: string;
   created_at: string;
   store: string;
+  toko?: string;
   for_months: string;
 }
 
 // Utility functions
+const normalizeMoney = (value: number): number => {
+  if (!Number.isFinite(value)) return 0;
+  const rounded = Math.round(value * 100) / 100;
+  return Math.abs(rounded) < 0.005 ? 0 : rounded;
+};
+
 const formatCurrency = (value: number): string => {
+  const normalized = normalizeMoney(value);
   return new Intl.NumberFormat('id-ID', {
     style: 'currency',
     currency: 'IDR',
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
-  }).format(value);
+  }).format(normalized);
 };
 
 const formatCompactNumber = (num: number): string => {
-  if (num >= 1000000) {
-    return (num / 1000000).toFixed(1).replace(/\.0$/, '') + 'jt';
+  const normalized = normalizeMoney(num);
+  const absValue = Math.abs(normalized);
+  const sign = normalized < 0 ? '-' : '';
+
+  if (absValue >= 1000000) {
+    return sign + (absValue / 1000000).toFixed(1).replace(/\.0$/, '') + 'jt';
   }
-  if (num >= 1000) {
-    return (num / 1000).toFixed(0) + 'rb';
+  if (absValue >= 1000) {
+    return sign + (absValue / 1000).toFixed(0) + 'rb';
   }
-  return num.toString();
+  return normalized.toString();
+};
+
+const getTempoMonths = (tempo: string | null | undefined): number | null => {
+  const tempoMatch = String(tempo || '').toUpperCase().match(/(\d+)/);
+  return tempoMatch ? parseInt(tempoMatch[1], 10) : null;
+};
+
+const getTempoBucket = (tempo: string | null | undefined): '3 BLN' | '2 BLN' | '1 BLN' | 'LAINNYA' => {
+  const tempoMonths = getTempoMonths(tempo);
+  if (tempoMonths === 3) return '3 BLN';
+  if (tempoMonths === 2) return '2 BLN';
+  if (tempoMonths === 1) return '1 BLN';
+  return 'LAINNYA';
+};
+
+const getTempoBadgeClassName = (tempo: string | null | undefined): string => {
+  switch (getTempoBucket(tempo)) {
+    case '3 BLN':
+      return 'bg-purple-900/40 text-purple-300';
+    case '2 BLN':
+      return 'bg-blue-900/40 text-blue-300';
+    case '1 BLN':
+      return 'bg-green-900/40 text-green-300';
+    default:
+      return 'bg-yellow-900/40 text-yellow-300';
+  }
+};
+
+const getTempoBadgeColors = (tempo: string | null | undefined): { background: string; color: string } => {
+  switch (getTempoBucket(tempo)) {
+    case '3 BLN':
+      return { background: '#f3e8ff', color: '#7c3aed' };
+    case '2 BLN':
+      return { background: '#dbeafe', color: '#2563eb' };
+    case '1 BLN':
+      return { background: '#dcfce7', color: '#16a34a' };
+    default:
+      return { background: '#fef3c7', color: '#d97706' };
+  }
+};
+
+const matchesCustomerFilters = (
+  customer: CustomerPiutang,
+  searchTerm: string,
+  filterTempo: string
+): boolean => {
+  if (searchTerm && !customer.customer.toLowerCase().includes(searchTerm.toLowerCase())) {
+    return false;
+  }
+
+  if (filterTempo !== 'all' && customer.tempo !== filterTempo) {
+    return false;
+  }
+
+  return true;
+};
+
+const buildCustomerStats = (customerList: CustomerPiutang[]) => {
+  const totalPiutang = normalizeMoney(customerList.reduce((sum, c) => sum + c.sisaPiutang, 0));
+
+  const tempo3BlnCustomers = customerList.filter(c => getTempoBucket(c.tempo) === '3 BLN');
+  const tempo3Bln = normalizeMoney(tempo3BlnCustomers.reduce((sum, c) => sum + c.sisaPiutang, 0));
+  const tempo3BlnTagihan = normalizeMoney(tempo3BlnCustomers.reduce((sum, c) => sum + c.totalPiutang + c.totalTagihanManual, 0));
+  const tempo3BlnBayar = normalizeMoney(tempo3BlnCustomers.reduce((sum, c) => sum + c.totalBayar, 0));
+
+  const tempo2BlnCustomers = customerList.filter(c => getTempoBucket(c.tempo) === '2 BLN');
+  const tempo2Bln = normalizeMoney(tempo2BlnCustomers.reduce((sum, c) => sum + c.sisaPiutang, 0));
+  const tempo2BlnTagihan = normalizeMoney(tempo2BlnCustomers.reduce((sum, c) => sum + c.totalPiutang + c.totalTagihanManual, 0));
+  const tempo2BlnBayar = normalizeMoney(tempo2BlnCustomers.reduce((sum, c) => sum + c.totalBayar, 0));
+
+  const tempo1BlnCustomers = customerList.filter(c => getTempoBucket(c.tempo) === '1 BLN');
+  const tempo1Bln = normalizeMoney(tempo1BlnCustomers.reduce((sum, c) => sum + c.sisaPiutang, 0));
+  const tempo1BlnTagihan = normalizeMoney(tempo1BlnCustomers.reduce((sum, c) => sum + c.totalPiutang + c.totalTagihanManual, 0));
+  const tempo1BlnBayar = normalizeMoney(tempo1BlnCustomers.reduce((sum, c) => sum + c.totalBayar, 0));
+
+  const tempoLainnyaCustomers = customerList.filter(c => getTempoBucket(c.tempo) === 'LAINNYA');
+  const tempoLainnya = normalizeMoney(tempoLainnyaCustomers.reduce((sum, c) => sum + c.sisaPiutang, 0));
+
+  const totalTagihan = normalizeMoney(customerList.reduce((sum, c) => sum + c.totalPiutang + c.totalTagihanManual, 0));
+  const totalBayar = normalizeMoney(customerList.reduce((sum, c) => sum + c.totalBayar, 0));
+
+  return {
+    totalPiutang,
+    totalTagihan,
+    totalBayar,
+    tempo3Bln,
+    tempo3BlnTagihan,
+    tempo3BlnBayar,
+    tempo3BlnCount: tempo3BlnCustomers.length,
+    tempo2Bln,
+    tempo2BlnTagihan,
+    tempo2BlnBayar,
+    tempo2BlnCount: tempo2BlnCustomers.length,
+    tempo1Bln,
+    tempo1BlnTagihan,
+    tempo1BlnBayar,
+    tempo1BlnCount: tempo1BlnCustomers.length,
+    tempoLainnya,
+  };
 };
 
 const formatDate = (dateStr: string): string => {
@@ -404,7 +515,7 @@ export const PiutangCustomerView: React.FC = () => {
 
       // Calculate totalBayar from pembayaran and track last payment date
       (pembayaranData || []).forEach(p => {
-        const key = `${p.customer?.trim().toUpperCase() || 'UNKNOWN'}_${p.tempo || '-'}`;
+        const key = `${p.customer?.trim().toUpperCase() || 'UNKNOWN'}_${p.tempo?.trim().toUpperCase() || '-'}`;
         const customer = customerMap.get(key);
         if (customer) {
           customer.totalBayar += p.jumlah || 0;
@@ -417,7 +528,7 @@ export const PiutangCustomerView: React.FC = () => {
 
       // Calculate sisa piutang (totalPiutang + totalTagihanManual - totalBayar)
       customerMap.forEach((customer) => {
-        customer.sisaPiutang = customer.totalPiutang + customer.totalTagihanManual - customer.totalBayar;
+        customer.sisaPiutang = normalizeMoney(customer.totalPiutang + customer.totalTagihanManual - customer.totalBayar);
       });
 
       // Convert to array - sort with lunas at bottom
@@ -433,8 +544,8 @@ export const PiutangCustomerView: React.FC = () => {
         .filter(c => c.sisaPiutang <= 0 && c.totalPiutang > 0)
         .sort((a, b) => new Date(b.lastTransaction).getTime() - new Date(a.lastTransaction).getTime());
 
-      // Combine: belum lunas first, then lunas at bottom
-      setCustomers([...belumLunas, ...sudahLunas]);
+      // Keep unpaid and paid lists separate so each tab shows the correct data.
+      setCustomers(belumLunas);
       setCustomersLunas(sudahLunas);
     } catch (err) {
       console.error('Failed to load piutang data:', err);
@@ -516,54 +627,21 @@ export const PiutangCustomerView: React.FC = () => {
   // Filtered customers (based on active tab)
   const filteredCustomers = useMemo(() => {
     const sourceList = activeTab === 'belum_lunas' ? customers : customersLunas;
-    return sourceList.filter(c => {
-      // Search filter
-      if (searchTerm && !c.customer.toLowerCase().includes(searchTerm.toLowerCase())) {
-        return false;
-      }
-      // Tempo filter
-      if (filterTempo !== 'all' && c.tempo !== filterTempo) {
-        return false;
-      }
-      return true;
-    });
+    return sourceList.filter(c => matchesCustomerFilters(c, searchTerm, filterTempo));
   }, [customers, customersLunas, activeTab, searchTerm, filterTempo]);
+
+  const filteredCustomersAllStatuses = useMemo(() => {
+    return [...customers, ...customersLunas].filter(c => matchesCustomerFilters(c, searchTerm, filterTempo));
+  }, [customers, customersLunas, searchTerm, filterTempo]);
 
   // Statistics
   const stats = useMemo(() => {
-    // Total sisa piutang (belum dibayar)
-    const totalPiutang = filteredCustomers.reduce((sum, c) => sum + c.sisaPiutang, 0);
-    
-    // Per tempo: sisa, total tagihan, total bayar
-    const tempo3BlnCustomers = filteredCustomers.filter(c => c.tempo.includes('3'));
-    const tempo3Bln = tempo3BlnCustomers.reduce((sum, c) => sum + c.sisaPiutang, 0);
-    const tempo3BlnTagihan = tempo3BlnCustomers.reduce((sum, c) => sum + c.totalPiutang + c.totalTagihanManual, 0);
-    const tempo3BlnBayar = tempo3BlnCustomers.reduce((sum, c) => sum + c.totalBayar, 0);
-    
-    const tempo2BlnCustomers = filteredCustomers.filter(c => c.tempo.includes('2'));
-    const tempo2Bln = tempo2BlnCustomers.reduce((sum, c) => sum + c.sisaPiutang, 0);
-    const tempo2BlnTagihan = tempo2BlnCustomers.reduce((sum, c) => sum + c.totalPiutang + c.totalTagihanManual, 0);
-    const tempo2BlnBayar = tempo2BlnCustomers.reduce((sum, c) => sum + c.totalBayar, 0);
-    
-    const tempo1BlnCustomers = filteredCustomers.filter(c => c.tempo.includes('1'));
-    const tempo1Bln = tempo1BlnCustomers.reduce((sum, c) => sum + c.sisaPiutang, 0);
-    const tempo1BlnTagihan = tempo1BlnCustomers.reduce((sum, c) => sum + c.totalPiutang + c.totalTagihanManual, 0);
-    const tempo1BlnBayar = tempo1BlnCustomers.reduce((sum, c) => sum + c.totalBayar, 0);
-    
-    const tempoLainnya = totalPiutang - tempo3Bln - tempo2Bln - tempo1Bln;
-    
-    // Total keseluruhan
-    const totalTagihan = filteredCustomers.reduce((sum, c) => sum + c.totalPiutang + c.totalTagihanManual, 0);
-    const totalBayar = filteredCustomers.reduce((sum, c) => sum + c.totalBayar, 0);
-    
-    return { 
-      totalPiutang, totalTagihan, totalBayar,
-      tempo3Bln, tempo3BlnTagihan, tempo3BlnBayar, tempo3BlnCount: tempo3BlnCustomers.length,
-      tempo2Bln, tempo2BlnTagihan, tempo2BlnBayar, tempo2BlnCount: tempo2BlnCustomers.length,
-      tempo1Bln, tempo1BlnTagihan, tempo1BlnBayar, tempo1BlnCount: tempo1BlnCustomers.length,
-      tempoLainnya 
-    };
+    return buildCustomerStats(filteredCustomers);
   }, [filteredCustomers]);
+
+  const exportStats = useMemo(() => {
+    return buildCustomerStats(filteredCustomersAllStatuses);
+  }, [filteredCustomersAllStatuses]);
 
   // Handle payment submission
   const handleSubmitPayment = async () => {
@@ -924,19 +1002,19 @@ export const PiutangCustomerView: React.FC = () => {
           
           <div class="stats">
             <div class="stat-card">
-              <div class="stat-value">${formatCurrency(stats.totalPiutang)}</div>
+              <div class="stat-value">${formatCurrency(exportStats.totalPiutang)}</div>
               <div class="stat-label">Total Piutang</div>
             </div>
             <div class="stat-card">
-              <div class="stat-value">${formatCurrency(stats.tempo3Bln)}</div>
+              <div class="stat-value">${formatCurrency(exportStats.tempo3Bln)}</div>
               <div class="stat-label">Tempo 3 Bulan</div>
             </div>
             <div class="stat-card">
-              <div class="stat-value">${formatCurrency(stats.tempo2Bln)}</div>
+              <div class="stat-value">${formatCurrency(exportStats.tempo2Bln)}</div>
               <div class="stat-label">Tempo 2 Bulan</div>
             </div>
             <div class="stat-card">
-              <div class="stat-value">${formatCurrency(stats.tempo1Bln)}</div>
+              <div class="stat-value">${formatCurrency(exportStats.tempo1Bln)}</div>
               <div class="stat-label">Tempo 1 Bulan</div>
             </div>
           </div>
@@ -954,7 +1032,7 @@ export const PiutangCustomerView: React.FC = () => {
               </tr>
             </thead>
             <tbody>
-              ${filteredCustomers.map((c, idx) => `
+              ${filteredCustomersAllStatuses.map((c, idx) => `
                 <tr>
                   <td>${idx + 1}</td>
                   <td>${c.customer}</td>
@@ -967,9 +1045,9 @@ export const PiutangCustomerView: React.FC = () => {
               `).join('')}
               <tr class="total-row">
                 <td colspan="3">TOTAL</td>
-                <td class="text-right">${formatCurrency(filteredCustomers.reduce((s, c) => s + c.totalPiutang + c.totalTagihanManual, 0))}</td>
-                <td class="text-right">${formatCurrency(filteredCustomers.reduce((s, c) => s + c.totalBayar, 0))}</td>
-                <td class="text-right">${formatCurrency(stats.totalPiutang)}</td>
+                <td class="text-right">${formatCurrency(filteredCustomersAllStatuses.reduce((s, c) => s + c.totalPiutang + c.totalTagihanManual, 0))}</td>
+                <td class="text-right">${formatCurrency(filteredCustomersAllStatuses.reduce((s, c) => s + c.totalBayar, 0))}</td>
+                <td class="text-right">${formatCurrency(exportStats.totalPiutang)}</td>
                 <td></td>
               </tr>
             </tbody>
@@ -1015,19 +1093,19 @@ export const PiutangCustomerView: React.FC = () => {
         
         <div style="display: flex; gap: 12px; margin-bottom: 30px; justify-content: flex-start;">
           <div style="flex: 1; max-width: 200px; padding: 15px 20px; border: 1px solid #fecaca; border-radius: 10px; background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%);">
-            <div style="font-size: 18px; font-weight: 700; color: #dc2626; margin-bottom: 4px;">${formatCurrency(stats.totalPiutang)}</div>
+            <div style="font-size: 18px; font-weight: 700; color: #dc2626; margin-bottom: 4px;">${formatCurrency(exportStats.totalPiutang)}</div>
             <div style="color: #6b7280; font-size: 12px; font-weight: 500;">Total Piutang</div>
           </div>
           <div style="flex: 1; max-width: 200px; padding: 15px 20px; border: 1px solid #ddd6fe; border-radius: 10px; background: linear-gradient(135deg, #f5f3ff 0%, #ede9fe 100%);">
-            <div style="font-size: 18px; font-weight: 700; color: #7c3aed; margin-bottom: 4px;">${formatCurrency(stats.tempo3Bln)}</div>
+            <div style="font-size: 18px; font-weight: 700; color: #7c3aed; margin-bottom: 4px;">${formatCurrency(exportStats.tempo3Bln)}</div>
             <div style="color: #6b7280; font-size: 12px; font-weight: 500;">Tempo 3 Bulan</div>
           </div>
           <div style="flex: 1; max-width: 200px; padding: 15px 20px; border: 1px solid #bfdbfe; border-radius: 10px; background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);">
-            <div style="font-size: 18px; font-weight: 700; color: #2563eb; margin-bottom: 4px;">${formatCurrency(stats.tempo2Bln)}</div>
+            <div style="font-size: 18px; font-weight: 700; color: #2563eb; margin-bottom: 4px;">${formatCurrency(exportStats.tempo2Bln)}</div>
             <div style="color: #6b7280; font-size: 12px; font-weight: 500;">Tempo 2 Bulan</div>
           </div>
           <div style="flex: 1; max-width: 200px; padding: 15px 20px; border: 1px solid #bbf7d0; border-radius: 10px; background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);">
-            <div style="font-size: 18px; font-weight: 700; color: #16a34a; margin-bottom: 4px;">${formatCurrency(stats.tempo1Bln)}</div>
+            <div style="font-size: 18px; font-weight: 700; color: #16a34a; margin-bottom: 4px;">${formatCurrency(exportStats.tempo1Bln)}</div>
             <div style="color: #6b7280; font-size: 12px; font-weight: 500;">Tempo 1 Bulan</div>
           </div>
         </div>
@@ -1045,12 +1123,12 @@ export const PiutangCustomerView: React.FC = () => {
             </tr>
           </thead>
           <tbody>
-            ${filteredCustomers.map((c, idx) => `
+            ${filteredCustomersAllStatuses.map((c, idx) => `
               <tr style="background-color: ${idx % 2 === 0 ? '#ffffff' : '#f9fafb'};">
                 <td style="border: 1px solid #d1d5db; padding: 10px 8px; text-align: center; color: #6b7280; font-size: 12px;">${idx + 1}</td>
                 <td style="border: 1px solid #d1d5db; padding: 10px; font-weight: 600; color: #1f2937; font-size: 13px;">${c.customer}</td>
                 <td style="border: 1px solid #d1d5db; padding: 10px; text-align: center;">
-                  <span style="display: inline-block; background: ${c.tempo.includes('3') ? '#f3e8ff' : c.tempo.includes('2') ? '#dbeafe' : '#dcfce7'}; color: ${c.tempo.includes('3') ? '#7c3aed' : c.tempo.includes('2') ? '#2563eb' : '#16a34a'}; padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 600;">${c.tempo}</span>
+                  <span style="display: inline-block; background: ${getTempoBadgeColors(c.tempo).background}; color: ${getTempoBadgeColors(c.tempo).color}; padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 600;">${c.tempo}</span>
                 </td>
                 <td style="border: 1px solid #d1d5db; padding: 10px; text-align: right; font-family: 'SF Mono', Consolas, monospace; color: #374151; font-size: 13px;">${formatCurrency(c.totalPiutang + c.totalTagihanManual)}</td>
                 <td style="border: 1px solid #d1d5db; padding: 10px; text-align: right; font-family: 'SF Mono', Consolas, monospace; color: #16a34a; font-weight: 600; font-size: 13px;">${formatCurrency(c.totalBayar)}</td>
@@ -1059,10 +1137,10 @@ export const PiutangCustomerView: React.FC = () => {
               </tr>
             `).join('')}
             <tr style="background: linear-gradient(135deg, #e5e7eb 0%, #d1d5db 100%);">
-              <td colspan="3" style="border: 1px solid #9ca3af; padding: 12px 10px; font-weight: 700; color: #1f2937; font-size: 13px;">TOTAL (${filteredCustomers.length} customer)</td>
-              <td style="border: 1px solid #9ca3af; padding: 12px 10px; text-align: right; font-family: 'SF Mono', Consolas, monospace; font-weight: 700; color: #1f2937; font-size: 13px;">${formatCurrency(filteredCustomers.reduce((s, c) => s + c.totalPiutang + c.totalTagihanManual, 0))}</td>
-              <td style="border: 1px solid #9ca3af; padding: 12px 10px; text-align: right; font-family: 'SF Mono', Consolas, monospace; font-weight: 700; color: #16a34a; font-size: 13px;">${formatCurrency(filteredCustomers.reduce((s, c) => s + c.totalBayar, 0))}</td>
-              <td style="border: 1px solid #9ca3af; padding: 12px 10px; text-align: right; font-family: 'SF Mono', Consolas, monospace; font-weight: 700; color: #dc2626; font-size: 13px;">${formatCurrency(stats.totalPiutang)}</td>
+              <td colspan="3" style="border: 1px solid #9ca3af; padding: 12px 10px; font-weight: 700; color: #1f2937; font-size: 13px;">TOTAL (${filteredCustomersAllStatuses.length} customer)</td>
+              <td style="border: 1px solid #9ca3af; padding: 12px 10px; text-align: right; font-family: 'SF Mono', Consolas, monospace; font-weight: 700; color: #1f2937; font-size: 13px;">${formatCurrency(filteredCustomersAllStatuses.reduce((s, c) => s + c.totalPiutang + c.totalTagihanManual, 0))}</td>
+              <td style="border: 1px solid #9ca3af; padding: 12px 10px; text-align: right; font-family: 'SF Mono', Consolas, monospace; font-weight: 700; color: #16a34a; font-size: 13px;">${formatCurrency(filteredCustomersAllStatuses.reduce((s, c) => s + c.totalBayar, 0))}</td>
+              <td style="border: 1px solid #9ca3af; padding: 12px 10px; text-align: right; font-family: 'SF Mono', Consolas, monospace; font-weight: 700; color: #dc2626; font-size: 13px;">${formatCurrency(exportStats.totalPiutang)}</td>
               <td style="border: 1px solid #9ca3af; padding: 12px 10px;"></td>
             </tr>
           </tbody>
@@ -1380,12 +1458,7 @@ export const PiutangCustomerView: React.FC = () => {
                       </div>
                     </td>
                     <td className="px-4 py-3">
-                      <span className={`px-2 py-1 rounded-lg text-xs font-medium ${
-                        customer.tempo.includes('3') ? 'bg-purple-900/40 text-purple-300' :
-                        customer.tempo.includes('2') ? 'bg-blue-900/40 text-blue-300' :
-                        customer.tempo.includes('1') ? 'bg-green-900/40 text-green-300' :
-                        'bg-yellow-900/40 text-yellow-300'
-                      }`}>
+                      <span className={`px-2 py-1 rounded-lg text-xs font-medium ${getTempoBadgeClassName(customer.tempo)}`}>
                         {customer.tempo}
                       </span>
                     </td>

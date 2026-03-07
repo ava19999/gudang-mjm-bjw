@@ -3262,6 +3262,149 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
     // Tidak auto-simpan; simpan manual lewat tombol
   };
 
+  const PROCESS_CONCURRENCY = 4;
+
+  const processRowsToBarangKeluar = async (
+    targetRows: Stage3Row[],
+    options?: { clearSelection?: boolean }
+  ) => {
+    if (targetRows.length === 0) return;
+
+    const initialItems: ProcessingItem[] = targetRows.map(r => ({
+      id: r.id,
+      resi: r.resi,
+      part_number: r.part_number,
+      nama_barang: r.nama_barang_csv || r.nama_barang_base || '-',
+      qty: r.qty_keluar,
+      customer: r.customer || '',
+      status: 'pending' as const
+    }));
+
+    const itemIndexMap = new Map(initialItems.map((item, idx) => [item.id, idx]));
+    const itemSnapshot = [...initialItems];
+    const updateItemStatus = (rowId: string, patch: Partial<ProcessingItem>) => {
+      const idx = itemIndexMap.get(rowId);
+      if (idx === undefined) return;
+      itemSnapshot[idx] = { ...itemSnapshot[idx], ...patch };
+      setProcessingItems([...itemSnapshot]);
+    };
+
+    setProcessingItems(initialItems);
+    setProcessingProgress(0);
+    setProcessingCurrentItem('');
+    setProcessingComplete(false);
+    setProcessingSuccessCount(0);
+    setProcessingErrorCount(0);
+    setShowProcessingModal(true);
+    setLoading(true);
+
+    let successCount = 0;
+    let errorCount = 0;
+    let completedCount = 0;
+    const successfulResis = new Set<string>();
+    const aliasInsertedSet = new Set<string>();
+
+    const rowsByPart = targetRows.reduce((acc, row) => {
+      const partKey = (row.part_number || '').trim().toUpperCase() || `__EMPTY__${row.id}`;
+      if (!acc[partKey]) acc[partKey] = [];
+      acc[partKey].push(row);
+      return acc;
+    }, {} as Record<string, Stage3Row[]>);
+
+    const groups = Object.values(rowsByPart);
+    let groupCursor = 0;
+    const workerCount = Math.max(1, Math.min(PROCESS_CONCURRENCY, groups.length));
+
+    const processOneRow = async (row: Stage3Row) => {
+      const itemLabel = `${row.part_number} - ${row.nama_barang_csv || row.nama_barang_base || '-'}`;
+      setProcessingCurrentItem(itemLabel);
+      updateItemStatus(row.id, { status: 'processing', errorMessage: undefined });
+
+      try {
+        const itemToProcess = [{
+          ...row,
+          nama_pesanan: row.nama_barang_base || row.nama_barang_csv
+        }];
+
+        const result = await processBarangKeluarBatch(itemToProcess, selectedStore);
+
+        if (result.success || result.processed > 0) {
+          const followUps: Promise<any>[] = [
+            deleteProcessedResiItems(selectedStore, [{ id: row.id, resi: row.resi, part_number: row.part_number }])
+          ];
+
+          if (row.part_number && row.nama_barang_csv) {
+            const aliasKey = `${row.part_number}::${row.nama_barang_csv}`.toUpperCase();
+            if (!aliasInsertedSet.has(aliasKey)) {
+              aliasInsertedSet.add(aliasKey);
+              followUps.push(insertProductAlias(row.part_number, row.nama_barang_csv));
+            }
+          }
+
+          await Promise.all(followUps);
+
+          updateItemStatus(row.id, { status: 'success', errorMessage: undefined });
+          successCount++;
+          setProcessingSuccessCount(successCount);
+          if (row.resi) successfulResis.add(row.resi);
+        } else {
+          const errorMessage = result.errors?.join(', ') || 'Gagal memproses item.';
+          updateItemStatus(row.id, { status: 'error', errorMessage });
+          errorCount++;
+          setProcessingErrorCount(errorCount);
+        }
+      } catch (err: any) {
+        updateItemStatus(row.id, {
+          status: 'error',
+          errorMessage: err?.message || 'Terjadi error saat memproses item.'
+        });
+        errorCount++;
+        setProcessingErrorCount(errorCount);
+      } finally {
+        completedCount++;
+        setProcessingProgress(Math.round((completedCount / targetRows.length) * 100));
+      }
+    };
+
+    const worker = async () => {
+      while (true) {
+        const currentIndex = groupCursor;
+        groupCursor += 1;
+        const currentGroup = groups[currentIndex];
+        if (!currentGroup) break;
+
+        for (const row of currentGroup) {
+          await processOneRow(row);
+        }
+      }
+    };
+
+    try {
+      await Promise.all(Array.from({ length: workerCount }, () => worker()));
+
+      if (successfulResis.size > 0) {
+        await deleteProcessedScanResi(selectedStore, Array.from(successfulResis));
+      }
+    } catch (err) {
+      console.error('Process barang keluar batch error:', err);
+    } finally {
+      setProcessingProgress(100);
+      setProcessingComplete(true);
+      setProcessingCurrentItem('');
+      setLoading(false);
+      if (options?.clearSelection) {
+        setSelectedResis(new Set());
+      }
+    }
+
+    try {
+      await loadSavedDataFromDB();
+      onRefresh?.();
+    } catch (refreshErr) {
+      console.error('Refresh Stage 3 setelah proses gagal:', refreshErr);
+    }
+  };
+
   const handleProcess = async () => {
     // FITUR 1: Item Double dengan force_override_double = true tetap bisa diproses
     const hargaKosongRows = rows.filter(r => isHargaKosong(r));
@@ -3297,104 +3440,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
       : '';
     if (!confirm(`Proses ${validRows.length} item dari ${readyResiEntries.length} resi ke Barang Keluar?${blockedInfo}`)) return;
     
-    // PROCESSING MODAL: Initialize
-    const initialItems: ProcessingItem[] = validRows.map(r => ({
-      id: r.id,
-      resi: r.resi,
-      part_number: r.part_number,
-      nama_barang: r.nama_barang_csv || r.nama_barang_base || '-',
-      qty: r.qty_keluar,
-      customer: r.customer || '',
-      status: 'pending' as const
-    }));
-    
-    setProcessingItems(initialItems);
-    setProcessingProgress(0);
-    setProcessingCurrentItem('');
-    setProcessingComplete(false);
-    setProcessingSuccessCount(0);
-    setProcessingErrorCount(0);
-    setShowProcessingModal(true);
-    setLoading(true);
-    
-    let successCount = 0;
-    let errorCount = 0;
-    const processedIds: string[] = [];
-    
-    // Process one by one untuk visual feedback
-    for (let i = 0; i < validRows.length; i++) {
-      const row = validRows[i];
-      const progress = Math.round(((i + 1) / validRows.length) * 100);
-      
-      // Update current item being processed
-      setProcessingCurrentItem(`${row.part_number} - ${row.nama_barang_csv || row.nama_barang_base}`);
-      setProcessingProgress(progress);
-      
-      // Update item status to processing
-      setProcessingItems(prev => prev.map(item => 
-        item.id === row.id ? { ...item, status: 'processing' } : item
-      ));
-      
-      try {
-        // Prepare single item untuk proses
-        const itemToProcess = [{
-          ...row,
-          nama_pesanan: row.nama_barang_base || row.nama_barang_csv
-        }];
-        
-        const result = await processBarangKeluarBatch(itemToProcess, selectedStore);
-        
-        if (result.success || result.processed > 0) {
-          // Insert alias
-          if (row.part_number && row.nama_barang_csv) {
-            await insertProductAlias(row.part_number, row.nama_barang_csv);
-          }
-          
-          // Delete from resi_items
-          await deleteProcessedResiItems(selectedStore, [{ id: row.id, resi: row.resi, part_number: row.part_number }]);
-          
-          // Update item status to success
-          setProcessingItems(prev => prev.map(item => 
-            item.id === row.id ? { ...item, status: 'success' } : item
-          ));
-          successCount++;
-          processedIds.push(row.id);
-          setProcessingSuccessCount(successCount);
-        } else {
-          // Update item status to error
-          setProcessingItems(prev => prev.map(item => 
-            item.id === row.id ? { ...item, status: 'error', errorMessage: result.errors.join(', ') } : item
-          ));
-          errorCount++;
-          setProcessingErrorCount(errorCount);
-        }
-      } catch (err: any) {
-        setProcessingItems(prev => prev.map(item => 
-          item.id === row.id ? { ...item, status: 'error', errorMessage: err.message } : item
-        ));
-        errorCount++;
-        setProcessingErrorCount(errorCount);
-      }
-      
-      // Small delay untuk visual effect
-      await new Promise(resolve => setTimeout(resolve, 100));
-    }
-    
-    // Delete dari scan_resi setelah semua item selesai
-    const successfulResis = [...new Set(validRows.filter(r => 
-      processedIds.includes(r.id)
-    ).map(r => r.resi).filter(Boolean))];
-    if (successfulResis.length > 0) {
-      await deleteProcessedScanResi(selectedStore, successfulResis);
-    }
-    
-    setProcessingComplete(true);
-    setProcessingCurrentItem('');
-    setLoading(false);
-    
-    // Refresh data
-    await loadSavedDataFromDB();
-    onRefresh?.();
+    await processRowsToBarangKeluar(validRows);
   };
 
   const isKilatRow = (row: Stage3Row) => row.ecommerce?.toUpperCase().includes('KILAT');
@@ -3572,97 +3618,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
     
     if (!confirm(`Proses ${selectedRows.length} item dari ${selectedResis.size} resi ke Barang Keluar?`)) return;
     
-    // PROCESSING MODAL: Initialize
-    const initialItems: ProcessingItem[] = selectedRows.map(r => ({
-      id: r.id,
-      resi: r.resi,
-      part_number: r.part_number,
-      nama_barang: r.nama_barang_csv || r.nama_barang_base || '-',
-      qty: r.qty_keluar,
-      customer: r.customer || '',
-      status: 'pending' as const
-    }));
-    
-    setProcessingItems(initialItems);
-    setProcessingProgress(0);
-    setProcessingCurrentItem('');
-    setProcessingComplete(false);
-    setProcessingSuccessCount(0);
-    setProcessingErrorCount(0);
-    setShowProcessingModal(true);
-    setLoading(true);
-    
-    let successCount = 0;
-    let errorCount = 0;
-    const processedIds: string[] = [];
-    
-    // Process one by one untuk visual feedback
-    for (let i = 0; i < selectedRows.length; i++) {
-      const row = selectedRows[i];
-      const progress = Math.round(((i + 1) / selectedRows.length) * 100);
-      
-      // Update current item being processed
-      setProcessingCurrentItem(`${row.part_number} - ${row.nama_barang_csv || row.nama_barang_base}`);
-      setProcessingProgress(progress);
-      
-      // Update item status to processing
-      setProcessingItems(prev => prev.map(item => 
-        item.id === row.id ? { ...item, status: 'processing' } : item
-      ));
-      
-      try {
-        // Prepare single item untuk proses
-        const itemToProcess = [{
-          ...row,
-          nama_pesanan: row.nama_barang_base || row.nama_barang_csv
-        }];
-        
-        const result = await processBarangKeluarBatch(itemToProcess, selectedStore);
-        
-        if (result.success || result.processed > 0) {
-          // Insert alias
-          if (row.part_number && row.nama_barang_csv) {
-            await insertProductAlias(row.part_number, row.nama_barang_csv);
-          }
-          
-          // Delete from resi_items
-          await deleteProcessedResiItems(selectedStore, [{ id: row.id, resi: row.resi, part_number: row.part_number }]);
-          
-          // Update item status to success
-          setProcessingItems(prev => prev.map(item => 
-            item.id === row.id ? { ...item, status: 'success' } : item
-          ));
-          successCount++;
-          processedIds.push(row.id);
-          setProcessingSuccessCount(successCount);
-        } else {
-          // Update item status to error
-          setProcessingItems(prev => prev.map(item => 
-            item.id === row.id ? { ...item, status: 'error', errorMessage: result.errors.join(', ') } : item
-          ));
-          errorCount++;
-          setProcessingErrorCount(errorCount);
-        }
-      } catch (err: any) {
-        setProcessingItems(prev => prev.map(item => 
-          item.id === row.id ? { ...item, status: 'error', errorMessage: err.message } : item
-        ));
-        errorCount++;
-        setProcessingErrorCount(errorCount);
-      }
-      
-      // Small delay untuk visual effect
-      await new Promise(resolve => setTimeout(resolve, 100));
-    }
-    
-    setProcessingComplete(true);
-    setProcessingCurrentItem('');
-    setLoading(false);
-    setSelectedResis(new Set()); // Clear selection
-    
-    // Refresh data
-    await loadSavedDataFromDB();
-    onRefresh?.();
+    await processRowsToBarangKeluar(selectedRows, { clearSelection: true });
   };
 
   // Handle delete all selected resis - Open modal
