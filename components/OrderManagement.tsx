@@ -124,6 +124,65 @@ const normalizeSoldKodeTokoInput = (value: string): string | null => {
   return null;
 };
 
+const normalizeRupiahValue = (value: unknown): number => {
+  if (value === null || value === undefined || value === '') return 0;
+
+  const parseFinite = (input: string): number => {
+    const parsed = Number(input);
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+
+  const parseFromString = (rawValue: string): number => {
+    const cleaned = rawValue.replace(/[^\d.,-]/g, '').trim();
+    if (!cleaned) return 0;
+
+    const isNegative = cleaned.startsWith('-');
+    const unsigned = cleaned.replace(/-/g, '');
+    let parsed = 0;
+
+    if (unsigned.includes('.') && unsigned.includes(',')) {
+      const lastDot = unsigned.lastIndexOf('.');
+      const lastComma = unsigned.lastIndexOf(',');
+      const normalized =
+        lastDot > lastComma
+          ? unsigned.replace(/,/g, '')
+          : unsigned.replace(/\./g, '').replace(',', '.');
+      parsed = parseFinite(normalized);
+    } else if (unsigned.includes('.')) {
+      parsed = /^\d{1,3}(\.\d{3})+$/.test(unsigned)
+        ? parseFinite(unsigned.replace(/\./g, ''))
+        : parseFinite(unsigned);
+    } else if (unsigned.includes(',')) {
+      parsed = /^\d{1,3}(,\d{3})+$/.test(unsigned)
+        ? parseFinite(unsigned.replace(/,/g, ''))
+        : parseFinite(unsigned.replace(',', '.'));
+    } else {
+      parsed = parseFinite(unsigned);
+    }
+
+    return isNegative ? -parsed : parsed;
+  };
+
+  if (typeof value === 'string') {
+    return parseFromString(value);
+  }
+
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) return 0;
+    if (Number.isInteger(value)) return value;
+
+    const decimalPart = value.toString().split('.')[1] || '';
+    if (decimalPart.length === 3) {
+      return Math.round(value * 1000);
+    }
+
+    return value;
+  }
+
+  const fallback = Number(value);
+  return Number.isFinite(fallback) ? fallback : 0;
+};
+
 // Autocomplete Dropdown with Keyboard Navigation
 interface AutocompleteDropdownProps {
   value: string;
@@ -564,6 +623,27 @@ export const OrderManagement: React.FC = () => {
     setTimeout(() => setToast(null), 3000);
   };
 
+  const normalizeOfflineOrderRow = (row: OfflineOrderRow): OfflineOrderRow => ({
+    ...row,
+    quantity: Number((row as any).quantity || 0),
+    harga_satuan: normalizeRupiahValue((row as any).harga_satuan),
+    harga_total: normalizeRupiahValue((row as any).harga_total)
+  });
+
+  const normalizeSoldItemRow = (row: SoldItemRow): SoldItemRow => {
+    const normalized: any = {
+      ...row,
+      qty_keluar: Number((row as any).qty_keluar || 0),
+      harga_total: normalizeRupiahValue((row as any).harga_total)
+    };
+
+    if ((row as any).harga_satuan !== undefined) {
+      normalized.harga_satuan = normalizeRupiahValue((row as any).harga_satuan);
+    }
+
+    return normalized as SoldItemRow;
+  };
+
   const loadData = async () => {
     const requestId = ++loadRequestRef.current;
     setLoading(true);
@@ -586,7 +666,7 @@ export const OrderManagement: React.FC = () => {
       if (activeTab === 'OFFLINE') {
         const rows = await fetchOfflineOrders(selectedStore);
         if (requestId !== loadRequestRef.current) return;
-        setOfflineData(rows);
+        setOfflineData((rows || []).map(normalizeOfflineOrderRow));
       }
       if (activeTab === 'SALES') {
         const [pendingSales, paidSales] = await Promise.all([
@@ -594,8 +674,8 @@ export const OrderManagement: React.FC = () => {
           fetchSalesPaidItems(selectedStore)
         ]);
         if (requestId !== loadRequestRef.current) return;
-        setSalesData(pendingSales);
-        setSalesPaidData(paidSales);
+        setSalesData((pendingSales || []).map(normalizeOfflineOrderRow));
+        setSalesPaidData((paidSales || []).map(normalizeSoldItemRow));
       }
       if (activeTab === 'TERJUAL') {
         setSoldData([]);
@@ -604,7 +684,8 @@ export const OrderManagement: React.FC = () => {
         await fetchSoldItemsProgressive(selectedStore, ({ chunk, loaded, total }) => {
           if (requestId !== loadRequestRef.current) return;
 
-          setSoldData(prev => [...prev, ...chunk]);
+          const normalizedChunk = (chunk || []).map(normalizeSoldItemRow);
+          setSoldData(prev => [...prev, ...normalizedChunk]);
 
           if (total > 0) {
             const percent = Math.floor((loaded / total) * 100);
@@ -1702,7 +1783,10 @@ export const OrderManagement: React.FC = () => {
     setSelectedSoldGroups(new Set());
   };
 
-  const formatRupiah = (val: number) => `Rp ${val.toLocaleString('id-ID')}`;
+  const formatRupiah = (val: number | string | null | undefined) => {
+    const normalized = normalizeRupiahValue(val);
+    return `Rp ${normalized.toLocaleString('id-ID', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+  };
 
   const filterList = (list: any[]) => {
     if (!searchTerm) return list;
