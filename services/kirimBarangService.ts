@@ -424,6 +424,39 @@ export const approveKirimBarang = async (
   }
 };
 
+// Revert an approved request back to pending
+export const revertApprovedKirimBarangToPending = async (
+  id: string
+): Promise<{ success: boolean; error?: string }> => {
+  try {
+    const { data, error } = await supabase
+      .from('kirim_barang')
+      .update({
+        status: 'pending',
+        approved_by: null,
+        approved_at: null
+      })
+      .eq('id', id)
+      .eq('status', 'approved')
+      .select('id')
+      .maybeSingle();
+
+    if (error) {
+      console.error('revertApprovedKirimBarangToPending Error:', error);
+      return { success: false, error: error.message };
+    }
+
+    if (!data) {
+      return { success: false, error: 'Request tidak ditemukan atau tidak berstatus disetujui' };
+    }
+
+    return { success: true };
+  } catch (error: any) {
+    console.error('revertApprovedKirimBarangToPending Exception:', error);
+    return { success: false, error: error.message };
+  }
+};
+
 // Mark as sent and update stock (decrease from source store)
 export const sendKirimBarang = async (
   id: string,

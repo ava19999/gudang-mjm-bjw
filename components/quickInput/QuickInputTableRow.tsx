@@ -2,7 +2,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { QuickInputRow } from './types';
 import { InventoryItem } from '../../types';
-import { checkIsRowComplete, getTodayDate } from './quickInputUtils';
+import { checkIsRowComplete } from './quickInputUtils';
 import { formatRupiah } from '../../utils';
 import { Loader2, AlertCircle, Check, Trash2, Info } from 'lucide-react';
 
@@ -31,7 +31,6 @@ export const QuickInputTableRow: React.FC<QuickInputTableRowProps> = ({
     onPartNumberChange, onSelectItem, onUpdateRow, onRemoveRow, highlightedIndex, onSearchKeyDown, onGridKeyDown, mode, selectedStore
 }) => {
     const isComplete = checkIsRowComplete(row);
-    const todayDate = getTodayDate();
     const activeItemRef = useRef<HTMLDivElement>(null);
     const activeCustomerRef = useRef<HTMLDivElement>(null);
     const [showItemDetails, setShowItemDetails] = useState(false);
@@ -136,8 +135,6 @@ export const QuickInputTableRow: React.FC<QuickInputTableRowProps> = ({
                         type="date"
                         className="w-full bg-transparent px-2 py-1 text-xs text-gray-200 focus:outline-none focus:text-blue-400 placeholder-gray-600"
                         value={row.tanggal}
-                        min={mode === 'out' ? todayDate : undefined}
-                        max={mode === 'out' ? todayDate : undefined}
                         onChange={(e) => onUpdateRow(row.id, 'tanggal', e.target.value)}
                         onKeyDown={(e) => onGridKeyDown(e, baseRefIndex + 0)}
                     />

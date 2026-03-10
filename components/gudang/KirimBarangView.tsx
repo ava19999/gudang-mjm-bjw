@@ -15,6 +15,7 @@ import {
   getBulkShelfComparison,
   createKirimBarangRequest,
   approveKirimBarang,
+  revertApprovedKirimBarangToPending,
   sendKirimBarang,
   receiveKirimBarang,
   rejectKirimBarang,
@@ -495,6 +496,45 @@ export const KirimBarangView: React.FC = () => {
     }
     if (failCount > 0) {
       showToast(`${failCount} request gagal dikirim`, 'error');
+    }
+
+    setSelectedSendRequestIds([]);
+    await loadRequests();
+    setLoading(false);
+  };
+
+  const handleBulkRevertToPending = async () => {
+    const selectedRows = statusTableRows.filter(req =>
+      selectedSendRequestIds.includes(req.id) && isBulkSendEligible(req)
+    );
+
+    if (selectedRows.length === 0) {
+      showToast('Pilih minimal 1 request disetujui untuk dikembalikan ke pending', 'error');
+      return;
+    }
+
+    if (!confirm(`Kembalikan ${selectedRows.length} request terpilih ke status Pending?`)) {
+      return;
+    }
+
+    setLoading(true);
+    let successCount = 0;
+    let failCount = 0;
+
+    for (const req of selectedRows) {
+      const result = await revertApprovedKirimBarangToPending(req.id);
+      if (result.success) {
+        successCount += 1;
+      } else {
+        failCount += 1;
+      }
+    }
+
+    if (successCount > 0) {
+      showToast(`${successCount} request dikembalikan ke Pending`);
+    }
+    if (failCount > 0) {
+      showToast(`${failCount} request gagal dikembalikan`, 'error');
     }
 
     setSelectedSendRequestIds([]);
@@ -1258,6 +1298,21 @@ export const KirimBarangView: React.FC = () => {
                     >
                       <Truck size={14} />
                       Kirim Terpilih ({selectedApprovedSendableRows.length})
+                    </button>
+                  )}
+                  {filter === 'approved' && approvedSendableRows.length > 0 && (
+                    <button
+                      onClick={handleBulkRevertToPending}
+                      disabled={selectedApprovedSendableRows.length === 0 || loading}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1 ${
+                        selectedApprovedSendableRows.length > 0 && !loading
+                          ? 'bg-amber-700 text-white hover:bg-amber-600'
+                          : 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                      }`}
+                      title="Kembalikan semua request yang dicentang ke pending"
+                    >
+                      <X size={14} />
+                      Kembali Pending ({selectedApprovedSendableRows.length})
                     </button>
                   )}
                   <button

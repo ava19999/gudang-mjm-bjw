@@ -3110,13 +3110,26 @@ export const saveOfflineOrder = async (
   cart: any[], 
   customerName: string, 
   tempo: string, 
-  store: string | null
+  store: string | null,
+  orderDate?: string
 ): Promise<boolean> => {
   const tableName = store === 'mjm' ? 'orders_mjm' : (store === 'bjw' ? 'orders_bjw' : null);
   if (!tableName) { alert("Error: Toko tidak teridentifikasi"); return false; }
   if (!cart || cart.length === 0) return false;
 
   const normalizedTempo = (tempo || 'CASH').trim().toUpperCase();
+  const resolvedOrderDate = (orderDate || '').trim();
+  const parsedOrderDate = resolvedOrderDate
+    ? new Date(
+        /^\d{4}-\d{2}-\d{2}$/.test(resolvedOrderDate)
+          ? `${resolvedOrderDate}T00:00:00+07:00`
+          : resolvedOrderDate
+      )
+    : null;
+  const orderTimestamp =
+    parsedOrderDate && !Number.isNaN(parsedOrderDate.getTime())
+      ? parsedOrderDate.toISOString()
+      : getWIBDate().toISOString();
 
   // KHUSUS BJW + SALES:
   // - Saat input, stok langsung dikurangi (barang dibawa sales)
@@ -3163,11 +3176,10 @@ export const saveOfflineOrder = async (
       });
     }
 
-    const nowIso = getWIBDate().toISOString();
     const salesRows = cart.map(item => {
       const finalPrice = item.customPrice ? Number(item.customPrice) : Number(item.price);
       return {
-        tanggal: nowIso,
+        tanggal: orderTimestamp,
         customer: customerName,
         part_number: item.partNumber,
         nama_barang: item.name,
@@ -3216,7 +3228,7 @@ export const saveOfflineOrder = async (
     const finalPrice = item.customPrice ? Number(item.customPrice) : Number(item.price);
 
     return {
-      tanggal: getWIBDate().toISOString(),
+      tanggal: orderTimestamp,
       customer: customerName,
       part_number: item.partNumber,
       nama_barang: item.name,
