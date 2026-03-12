@@ -6,7 +6,7 @@ import { useStore } from '../context/StoreContext';
 import { 
   fetchOfflineOrders, fetchReturItems, fetchSoldItemsProgressive,
   processOfflineOrderItem, updateOfflineOrder, fetchInventory, createReturFromSold, updateReturStatus,
-  fetchDistinctEcommerce, deleteBarangLog, updateSoldItemPrice, updateSoldItemDate, updateSoldItemQty, updateSoldItemKodeToko, updateSoldItemTempo,
+  deleteBarangLog, updateSoldItemPrice, updateSoldItemDate, updateSoldItemQty, updateSoldItemKodeToko, updateSoldItemTempo,
   fetchSalesOrders, processSalesOrderItem, fetchSalesPaidItems
 } from '../services/supabaseService';
 import { OfflineOrderRow, SoldItemRow, ReturRow, CartItem } from '../types';
@@ -438,7 +438,6 @@ export const OrderManagement: React.FC = () => {
   const [customerFilter, setCustomerFilter] = useState('');
   const [partNumberFilter, setPartNumberFilter] = useState('');
   const [ecommerceFilter, setEcommerceFilter] = useState('all');
-  const [ecommerceOptions, setEcommerceOptions] = useState<string[]>([]);
   const [toast, setToast] = useState<{msg: string, type: 'success'|'error'} | null>(null);
   
   // State Grouping
@@ -630,9 +629,16 @@ export const OrderManagement: React.FC = () => {
     harga_total: normalizeRupiahValue((row as any).harga_total)
   });
 
+  const normalizeEcommerceValue = (value: string | null | undefined): string => {
+    const normalized = (value || '').trim().toUpperCase();
+    if (!normalized) return 'OFFLINE';
+    return normalized === 'SHOPPE' ? 'SHOPEE' : normalized;
+  };
+
   const normalizeSoldItemRow = (row: SoldItemRow): SoldItemRow => {
     const normalized: any = {
       ...row,
+      ecommerce: normalizeEcommerceValue((row as any).ecommerce),
       qty_keluar: Number((row as any).qty_keluar || 0),
       harga_total: normalizeRupiahValue((row as any).harga_total)
     };
@@ -680,12 +686,27 @@ export const OrderManagement: React.FC = () => {
       if (activeTab === 'TERJUAL') {
         setSoldData([]);
         setLoadingProgress(1);
+        let bufferedRows: SoldItemRow[] = [];
+        let lastFlushAt = Date.now();
+
+        const flushBufferedRows = () => {
+          if (bufferedRows.length === 0) return;
+          const batch = bufferedRows;
+          bufferedRows = [];
+          setSoldData(prev => [...prev, ...batch]);
+        };
 
         await fetchSoldItemsProgressive(selectedStore, ({ chunk, loaded, total }) => {
           if (requestId !== loadRequestRef.current) return;
 
           const normalizedChunk = (chunk || []).map(normalizeSoldItemRow);
-          setSoldData(prev => [...prev, ...normalizedChunk]);
+          bufferedRows.push(...normalizedChunk);
+
+          const now = Date.now();
+          if (bufferedRows.length >= 1500 || now - lastFlushAt >= 220) {
+            flushBufferedRows();
+            lastFlushAt = now;
+          }
 
           if (total > 0) {
             const percent = Math.floor((loaded / total) * 100);
@@ -696,6 +717,7 @@ export const OrderManagement: React.FC = () => {
         });
 
         if (requestId !== loadRequestRef.current) return;
+        flushBufferedRows();
       }
       if (activeTab === 'RETUR') {
         const rows = await fetchReturItems(selectedStore);
@@ -737,15 +759,6 @@ export const OrderManagement: React.FC = () => {
       setActiveTab('OFFLINE');
     }
   }, [selectedStore, activeTab]);
-
-  // Load ecommerce options from database
-  useEffect(() => {
-    const loadEcommerceOptions = async () => {
-      const options = await fetchDistinctEcommerce(selectedStore);
-      setEcommerceOptions(options);
-    };
-    loadEcommerceOptions();
-  }, [selectedStore]);
 
   // --- LOGIC GROUPING ---
   const groupedOfflineOrders = useMemo(() => {
@@ -815,7 +828,8 @@ export const OrderManagement: React.FC = () => {
       if (partNumberFilter && !(item.part_number || '').toLowerCase().includes(partNumberFilter.toLowerCase())) return false;
       
       // Ecommerce filter
-      if (ecommerceFilter !== 'all' && (item.ecommerce || '').toUpperCase() !== ecommerceFilter.toUpperCase()) return false;
+      const normalizedFilter = normalizeEcommerceValue(ecommerceFilter);
+      if (ecommerceFilter !== 'all' && normalizeEcommerceValue(item.ecommerce) !== normalizedFilter) return false;
       
       return true;
     });
@@ -825,7 +839,7 @@ export const OrderManagement: React.FC = () => {
     filtered.forEach(item => {
       const safeCustomer = (item.customer || 'Tanpa Nama').trim();
       const safeResi = (item.resi || '-').trim();
-      const safeEcommerce = (item.ecommerce || 'OFFLINE').trim();
+      const safeEcommerce = normalizeEcommerceValue(item.ecommerce);
       const safeTempo = (item.tempo || 'CASH').trim();
       const safeToko = (item.kode_toko || '-').trim().toUpperCase();
       const safeCreatedAt = (item.created_at || '').trim();
@@ -886,6 +900,23 @@ export const OrderManagement: React.FC = () => {
       return dateSortOrder === 'desc' ? dateB - dateA : dateA - dateB;
     });
   }, [soldData, searchTerm, customerFilter, partNumberFilter, ecommerceFilter, stockSortOrder, dateSortOrder, selectedStore, inventoryMjmMap, inventoryBjwMap]);
+
+  const ecommerceOptions = useMemo(() => {
+    const baseOptions = ['OFFLINE', 'TIKTOK', 'SHOPEE', 'RESELLER'];
+    const sourceRows: any[] = activeTab === 'TERJUAL'
+      ? soldData
+      : activeTab === 'RETUR'
+        ? returData
+        : activeTab === 'SALES'
+          ? [...salesData, ...salesPaidData]
+          : offlineData;
+
+    const dynamicOptions = sourceRows
+      .map((row) => normalizeEcommerceValue((row as any)?.ecommerce))
+      .filter(Boolean);
+
+    return [...new Set([...baseOptions, ...dynamicOptions])].sort();
+  }, [activeTab, soldData, returData, salesData, salesPaidData, offlineData]);
 
   // Extract unique customers and part numbers for autocomplete - follow active tab data
   const filteredCustomerOptions = useMemo(() => {

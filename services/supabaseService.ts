@@ -619,19 +619,24 @@ export const fetchDistinctEcommerce = async (store: string | null): Promise<stri
   if (!table) return [];
 
   try {
-    const { data, error } = await supabase
-      .from(table)
-      .select('ecommerce')
-      .not('ecommerce', 'is', null)
-      .not('ecommerce', 'eq', '');
+    const rows = await fetchAllRowsForModalFiltered<{ ecommerce: string | null }>(
+      table,
+      'ecommerce',
+      'created_at',
+      (query) =>
+        query
+          .not('ecommerce', 'is', null)
+          .not('ecommerce', 'eq', ''),
+      false
+    );
 
-    if (error) {
-      console.error('Fetch Distinct Ecommerce Error:', error);
-      return [];
-    }
+    const baseOptions = ['OFFLINE', 'TIKTOK', 'SHOPEE', 'RESELLER'];
+    const normalizedOptions = rows
+      .map((row) => (row.ecommerce || '').trim().toUpperCase())
+      .filter((value) => value !== '')
+      .map((value) => (value === 'SHOPPE' ? 'SHOPEE' : value));
 
-    // Get unique values
-    const uniqueValues = [...new Set((data || []).map(d => d.ecommerce?.toUpperCase()).filter(Boolean))];
+    const uniqueValues = [...new Set([...baseOptions, ...normalizedOptions])];
     return uniqueValues.sort();
   } catch (err) {
     console.error('Fetch Distinct Ecommerce Exception:', err);
@@ -2322,19 +2327,11 @@ export const fetchSoldItemsProgressive = async (
   const table = store === 'mjm' ? 'barang_keluar_mjm' : (store === 'bjw' ? 'barang_keluar_bjw' : null);
   if (!table) return [];
 
-  const pageSize = 400;
+  // Bigger page size + no upfront exact count to improve first render latency
+  // and reduce total round-trips on large datasets.
+  const pageSize = 1000;
   let from = 0;
   const rows: SoldItemRow[] = [];
-  let totalCount = 0;
-
-  try {
-    const { count } = await supabase
-      .from(table)
-      .select('id', { count: 'exact', head: true });
-    totalCount = Number(count || 0);
-  } catch (error) {
-    console.warn('fetchSoldItemsProgressive: gagal ambil total count, lanjut progressive tanpa count.');
-  }
 
   while (true) {
     const { data, error } = await supabase
@@ -2353,11 +2350,11 @@ export const fetchSoldItemsProgressive = async (
 
     rows.push(...page);
 
-    const safeTotal = totalCount > 0 ? Math.max(totalCount, rows.length) : 0;
     onChunk?.({
       chunk: page,
       loaded: rows.length,
-      total: safeTotal
+      // 0 means "unknown total"; caller can show indeterminate progress.
+      total: 0
     });
 
     if (page.length < pageSize) break;
