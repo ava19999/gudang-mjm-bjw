@@ -918,6 +918,11 @@ export const OrderManagement: React.FC = () => {
     return [...new Set([...baseOptions, ...dynamicOptions])].sort();
   }, [activeTab, soldData, returData, salesData, salesPaidData, offlineData]);
 
+  const ecommerceDropdownOptions = useMemo(
+    () => [...new Set(['OFFLINE', 'TIKTOK', 'SHOPEE', 'RESELLER', ...ecommerceOptions])],
+    [ecommerceOptions]
+  );
+
   // Extract unique customers and part numbers for autocomplete - follow active tab data
   const filteredCustomerOptions = useMemo(() => {
     if (!customerFilter || customerFilter.length < 1) return [];
@@ -2050,7 +2055,7 @@ export const OrderManagement: React.FC = () => {
                 onChange={(e) => setEcommerceFilter(e.target.value)}
               >
                 <option value="all">Semua Sumber</option>
-                {ecommerceOptions.map(ecom => (
+                {ecommerceDropdownOptions.map(ecom => (
                   <option key={ecom} value={ecom}>{ecom}</option>
                 ))}
               </select>

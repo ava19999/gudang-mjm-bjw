@@ -2332,13 +2332,46 @@ export const fetchSoldItemsProgressive = async (
   const pageSize = 1000;
   let from = 0;
   const rows: SoldItemRow[] = [];
+  let snapshotMaxCreatedAt: string | null = null;
+
+  try {
+    const { data: latestRow, error: latestError } = await supabase
+      .from(table)
+      .select('created_at')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (!latestError) {
+      snapshotMaxCreatedAt = (latestRow?.created_at as string | undefined) || null;
+    }
+  } catch (error) {
+    console.warn('fetchSoldItemsProgressive: gagal ambil snapshot created_at, lanjut tanpa snapshot.');
+  }
 
   while (true) {
-    const { data, error } = await supabase
-      .from(table)
-      .select(SOLD_ITEM_SELECT_COLUMNS)
-      .order('created_at', { ascending: false })
-      .range(from, from + pageSize - 1);
+    let data: SoldItemRow[] | null = null;
+    let error: any = null;
+
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      let query = supabase
+        .from(table)
+        .select(SOLD_ITEM_SELECT_COLUMNS)
+        .order('created_at', { ascending: false });
+
+      if (snapshotMaxCreatedAt) {
+        query = query.lte('created_at', snapshotMaxCreatedAt);
+      }
+
+      const response = await query.range(from, from + pageSize - 1);
+      data = (response.data || []) as SoldItemRow[];
+      error = response.error;
+
+      if (!error) break;
+      if (attempt < 3) {
+        await new Promise((resolve) => setTimeout(resolve, 180 * attempt));
+      }
+    }
 
     if (error) {
       console.error('Fetch Sold Progressive Error:', error);
