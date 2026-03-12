@@ -113,6 +113,7 @@ const escapeHtml = (value: string): string =>
 
 const SOLD_KODE_TOKO_OPTIONS = ['MJM', 'BJW', 'LARIS', 'PRAKTIS PART'] as const;
 const SOLD_TEMPO_OPTIONS = ['CASH', '3 BLN', '2 BLN', '1 BLN', 'NADIR'] as const;
+const ECOMMERCE_FILTER_OPTIONS = ['OFFLINE', 'TIKTOK', 'SHOPEE', 'RESELLER'] as const;
 
 const normalizeSoldKodeTokoInput = (value: string): string | null => {
   const normalized = (value || '').trim().toUpperCase().replace(/\s+/g, ' ');
@@ -900,28 +901,6 @@ export const OrderManagement: React.FC = () => {
       return dateSortOrder === 'desc' ? dateB - dateA : dateA - dateB;
     });
   }, [soldData, searchTerm, customerFilter, partNumberFilter, ecommerceFilter, stockSortOrder, dateSortOrder, selectedStore, inventoryMjmMap, inventoryBjwMap]);
-
-  const ecommerceOptions = useMemo(() => {
-    const baseOptions = ['OFFLINE', 'TIKTOK', 'SHOPEE', 'RESELLER'];
-    const sourceRows: any[] = activeTab === 'TERJUAL'
-      ? soldData
-      : activeTab === 'RETUR'
-        ? returData
-        : activeTab === 'SALES'
-          ? [...salesData, ...salesPaidData]
-          : offlineData;
-
-    const dynamicOptions = sourceRows
-      .map((row) => normalizeEcommerceValue((row as any)?.ecommerce))
-      .filter(Boolean);
-
-    return [...new Set([...baseOptions, ...dynamicOptions])].sort();
-  }, [activeTab, soldData, returData, salesData, salesPaidData, offlineData]);
-
-  const ecommerceDropdownOptions = useMemo(
-    () => [...new Set(['OFFLINE', 'TIKTOK', 'SHOPEE', 'RESELLER', ...ecommerceOptions])],
-    [ecommerceOptions]
-  );
 
   // Extract unique customers and part numbers for autocomplete - follow active tab data
   const filteredCustomerOptions = useMemo(() => {
@@ -2055,7 +2034,7 @@ export const OrderManagement: React.FC = () => {
                 onChange={(e) => setEcommerceFilter(e.target.value)}
               >
                 <option value="all">Semua Sumber</option>
-                {ecommerceDropdownOptions.map(ecom => (
+                {ECOMMERCE_FILTER_OPTIONS.map(ecom => (
                   <option key={ecom} value={ecom}>{ecom}</option>
                 ))}
               </select>
