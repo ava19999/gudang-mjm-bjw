@@ -113,7 +113,17 @@ const escapeHtml = (value: string): string =>
 
 const SOLD_KODE_TOKO_OPTIONS = ['MJM', 'BJW', 'LARIS', 'PRAKTIS PART'] as const;
 const SOLD_TEMPO_OPTIONS = ['CASH', '3 BLN', '2 BLN', '1 BLN', 'NADIR'] as const;
-const ECOMMERCE_FILTER_OPTIONS = ['OFFLINE', 'TIKTOK', 'SHOPEE', 'RESELLER'] as const;
+const ECOMMERCE_FILTER_OPTIONS = [
+  'OFFLINE',
+  'TIKTOK',
+  'SHOPEE',
+  'RESELLER',
+  'EKSPOR',
+  'EKSPOR - PH',
+  'EKSPOR - MY',
+  'EKSPOR - SG',
+  'EKSPOR - HK',
+] as const;
 
 const normalizeSoldKodeTokoInput = (value: string): string | null => {
   const normalized = (value || '').trim().toUpperCase().replace(/\s+/g, ' ');
